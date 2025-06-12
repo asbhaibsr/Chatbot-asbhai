@@ -1,8 +1,3 @@
-python-telegram-bot==20.3
-flask
-g4f
-requests
 pyrogram
 tgcrypto
 aiohttp
-pytube
