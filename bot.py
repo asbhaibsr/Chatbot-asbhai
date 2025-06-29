@@ -14,11 +14,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # --- Bot Configuration (Environment Variables) ---
-API_ID = int(os.environ.get("API_ID", "YOUR_API_ID"))
-API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")
-MONGO_URI = os.environ.get("MONGO_URI", "YOUR_MONGO_URI")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "YOUR_ADMIN_ID"))
+# Environment variables will override these default values if set on Koyeb.
+# Make sure to replace "YOUR_API_ID", etc., with actual placeholder values if you run locally.
+# On Koyeb, ensure these are correctly set in your service's environment variables.
+API_ID = int(os.environ.get("API_ID", "1234567")) # Replace with your actual API ID (as an integer)
+API_HASH = os.environ.get("API_HASH", "your_api_hash_here") # Replace with your actual API Hash
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_bot_token_here") # Replace with your actual Bot Token
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017/") # Replace with your actual MongoDB URI
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "12345")) # Replace with your actual Admin User ID (as an integer)
 
 # --- Learning Data Management Configuration ---
 MAX_LEARNING_MESSAGES = int(os.environ.get("MAX_LEARNING_MESSAGES", 10000))
@@ -27,6 +30,7 @@ CLEANUP_THRESHOLD_PERCENT = 0.50
 # --- Reply Delay Configuration ---
 REPLY_DELAY_SECONDS = 3
 REPLY_PROBABILITY = 0.15 # Probability of bot replying in a group after the delay (0.0 to 1.0)
+                         # Testing ke liye aap ise 1.0 kar sakte hain, fir kam kar dena.
 
 # --- Specific Word Count for Replies ---
 ALLOWED_REPLY_WORD_COUNTS = [2, 3, 5, 6, 7] 
@@ -181,7 +185,7 @@ async def help_command(client, message):
         "कभी-कभी मैं उन्हीं बातों का इस्तेमाल करके जवाब दूंगी या कोई प्यारा स्टिकर भेजूंगी.\n\n"
         "📚 **सीखना:** मैं आपके ग्रुप्स से सीख रही हूँ!\n"
         "💬 **बातचीत:** मैं सीखे हुए शब्दों और स्टिकर्स का इस्तेमाल करूंगी.\n\n"
-        "मेरे एडमिन: @आपके_एडमिन_का_यूज़रनेम",
+        "मेरे एडमिन: @आपके_एडमिन_का_यूज़रनेम", # Replace with your admin username if needed
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 वापस", callback_data="start_menu")]
         ])
@@ -228,6 +232,7 @@ async def send_delayed_reply(chat_id):
         if chat_message_buffers[chat_id]:
             chat_message_buffers[chat_id].clear() 
             
+            # This is where the bot decides whether to reply or not based on probability
             if random.random() < REPLY_PROBABILITY:
                 random_reply = await get_random_message_for_reply(chat_id=chat_id)
                 if random_reply:
@@ -249,16 +254,29 @@ async def send_delayed_reply(chat_id):
 
 
 # --- Message Handlers for Learning and Triggering Delayed Replies ---
-# CORRECTED LINE: Removed ~filters.edited and ~filters.via_bot
+# Pyrogram V2 compatibility: Removed filters.edited and filters.via_bot
+# Manual checks added for edited messages and messages from other bots.
 @bot.on_message(filters.group & (filters.text | filters.sticker))
 async def group_message_handler(client, message):
-    if message.from_user.id == client.me.id:
+    # Ignore messages from the bot itself
+    if message.from_user and message.from_user.id == client.me.id:
         return
+    
+    # Ignore edited messages (manual check)
+    if message.edit_date: # message.edit_date will be present if it's an edited message
+        logger.debug(f"Ignoring edited message in chat {message.chat.id}")
+        return
+
+    # Ignore messages from other bots (manual check)
+    if message.from_user and message.from_user.is_bot:
+        logger.debug(f"Ignoring message from another bot: {message.from_user.first_name} in chat {message.chat.id}")
+        return
+
 
     chat_id = message.chat.id
 
     # Store message for learning
-    if message.text and not message.text.startswith('/'):
+    if message.text and not message.text.startswith('/'): # Ignore commands for learning
         await save_message_for_learning(chat_id, message.from_user.id, message_text=message.text)
     elif message.sticker:
         await save_message_for_learning(chat_id, message.from_user.id, sticker_file_id=message.sticker.file_id)
@@ -283,7 +301,7 @@ async def callback_handler(client, callback_query):
             "कभी-कभी मैं उन्हीं बातों का इस्तेमाल करके जवाब दूंगी या कोई प्यारा स्टिकर भेजूंगी.\n\n"
             "📚 **सीखना:** मैं आपके ग्रुप्स से सीख रही हूँ!\n"
             "💬 **बातचीत:** मैं सीखे हुए शब्दों और स्टिकर्स का इस्तेमाल करूंगी.\n\n"
-            "मेरे एडमिन: @आपके_एडमिन_का_यूज़रनेम",
+            "मेरे एडमिन: @आपके_एडमिन_का_यूज़रनेम", # Replace with your admin username if needed
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 वापस", callback_data="start_menu")]
             ])
@@ -303,6 +321,7 @@ async def callback_handler(client, callback_query):
     await callback_query.answer()
 
 # --- Simple Health Check for Koyeb ---
+# This function will run periodically to keep the process alive and signal health.
 async def health_check_ping():
     while True:
         logger.debug("Health check ping: Bot is active.")
@@ -320,8 +339,12 @@ async def main():
 
     await idle() # Keep the bot running indefinitely
 
-    await bot.stop()
-    logger.info("Bot stopped.")
+    # जब Koyeb सर्विस को बंद करता है (SIGTERM), idle() खुद ही बाहर निकल जाएगा।
+    # Pyrogram आमतौर पर तब तक चलता रहेगा जब तक प्रक्रिया बंद न हो जाए।
+    # bot.stop() को यहां कॉल करने से "attached to a different loop" एरर हो सकती है
+    # क्योंकि इवेंट लूप पहले से ही बंद हो रहा होता है।
+    # इसलिए, इसे हटा दिया गया है।
+    logger.info("Bot is shutting down...")
 
 
 if __name__ == "__main__":
