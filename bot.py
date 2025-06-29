@@ -10,6 +10,8 @@ import datetime
 from collections import defaultdict
 
 # Configure logging
+# आप चाहें तो इसे DEBUG पर सेट कर सकते हैं ताकि ज्यादा विस्तृत लॉग मिलें।
+# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
