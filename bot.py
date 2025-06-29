@@ -249,7 +249,8 @@ async def send_delayed_reply(chat_id):
 
 
 # --- Message Handlers for Learning and Triggering Delayed Replies ---
-@bot.on_message(filters.group & (filters.text | filters.sticker) & ~filters.edited & ~filters.via_bot)
+# CORRECTED LINE: Removed ~filters.edited and ~filters.via_bot
+@bot.on_message(filters.group & (filters.text | filters.sticker))
 async def group_message_handler(client, message):
     if message.from_user.id == client.me.id:
         return
@@ -302,10 +303,8 @@ async def callback_handler(client, callback_query):
     await callback_query.answer()
 
 # --- Simple Health Check for Koyeb ---
-# This function will run periodically to keep the process alive and signal health.
 async def health_check_ping():
     while True:
-        # This is a dummy health check. In a real scenario, you might check DB connection etc.
         logger.debug("Health check ping: Bot is active.")
         await asyncio.sleep(30) # Ping every 30 seconds to keep Koyeb happy.
 
