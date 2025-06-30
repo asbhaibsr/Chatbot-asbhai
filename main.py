@@ -4,10 +4,10 @@ from pymongo import MongoClient
 import random
 import os
 
-API_ID = 12345678  # Replace with your API ID
-API_HASH = "your_api_hash"  # Replace with your API HASH
-BOT_TOKEN = "your_bot_token"  # Replace with your bot token
-MONGO_URI = "your_mongo_uri"  # Replace with your Mongo URI
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+MONGO_URI = os.environ.get("MONGO_URI")  # Agar MongoDB bhi use kar rahe ho
 
 app = Client("self_learning_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 mongo = MongoClient(MONGO_URI)
