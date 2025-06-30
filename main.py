@@ -1,97 +1,112 @@
-import asyncio
-from pyrogram import Client, filters, types
+from pyrogram import Client, filters
+from pyrogram.types import *
 from pymongo import MongoClient
-from random import choice
-from bson.objectid import ObjectId
+import requests
+import random
 import os
 
-# ---------------- CONFIG ----------------
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+STRING = os.environ.get("STRING")
 MONGO_URL = os.environ.get("MONGO_URL")
-OWNER_ID = int(os.environ.get("OWNER_ID", 123456789))  # your telegram id
 
-bot = Client("selflearn-bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-mongo = MongoClient(MONGO_URL)
-db = mongo["chatdb"]
-chats = db["messages"]
+bot = Client(STRING, API_ID, API_HASH)
 
-MAX_LIMIT = 5000  # Max messages before cleaning
+async def is_admins(chat_id: int):
+    return [member.user.id async for member in bot.iter_chat_members(chat_id, filter="administrators")]
 
-# --------------- CLEANER ----------------
-async def auto_clean():
-    while True:
-        total = chats.count_documents({})
-        if total >= MAX_LIMIT:
-            to_delete = int(total * 0.2)
-            old_docs = chats.find().sort("_id", 1).limit(to_delete)
-            for doc in old_docs:
-                chats.delete_one({"_id": ObjectId(doc["_id"])})
-        await asyncio.sleep(3600)
-
-# --------------- /START ----------------
 @bot.on_message(filters.command("start"))
-async def start_handler(c, m):
-    await m.reply(
-        f"👋 Hello {m.from_user.first_name}!\n\n"
-        "I'm a self-learning chat bot. Talk to me and I’ll learn from you!",
-        reply_markup=types.InlineKeyboardMarkup(
-            [
-                [types.InlineKeyboardButton("➕ Add Me To Group", url=f"https://t.me/{c.me.username}?startgroup=true")],
-                [
-                    types.InlineKeyboardButton("📢 Update Channel", url="https://t.me/asbhai_bsr"),
-                    types.InlineKeyboardButton("💬 Chat Group", url="https://t.me/aschat_group"),
-                ],
-                [types.InlineKeyboardButton("🎬 Movie Group", url="https://t.me/istreamX")],
-            ]
-        )
-    )
+async def start(client, message):
+    await bot.join_chat("@aschat_group")
 
-# ------------- /BROADCAST ---------------
-@bot.on_message(filters.command("broadcast") & filters.user(OWNER_ID))
-async def broadcast(c, m):
-    if not m.reply_to_message:
-        return await m.reply("Reply to a message to broadcast.")
-    success = fail = 0
-    async for user in db["users"].find({}, {"_id": 0, "chat_id": 1}):
-        try:
-            await m.reply_to_message.copy(chat_id=user["chat_id"])
-            success += 1
-        except:
-            fail += 1
-    await m.reply(f"✅ Sent: {success}\n❌ Failed: {fail}")
+@bot.on_message(filters.command("chatbot off", prefixes=["/", ".", "?", "-"]) & ~filters.private)
+async def chatbotofd(client, message):
+    vickdb = MongoClient(MONGO_URL)
+    vick = vickdb["VickDb"]["Vick"]
+    if message.from_user:
+        user = message.from_user.id
+        chat_id = message.chat.id
+        if user not in await is_admins(chat_id):
+            return await message.reply_text("You are not admin")
+    is_vick = vick.find_one({"chat_id": message.chat.id})
+    if not is_vick:
+        vick.insert_one({"chat_id": message.chat.id})
+        await message.reply_text("Chatbot Disabled!")
+    else:
+        await message.reply_text("ChatBot Is Already Disabled")
 
-# ----------- LEARN & REPLY --------------
-@bot.on_message(filters.text | filters.sticker)
-async def learn_and_reply(c, m):
-    if m.from_user.is_bot: return
+@bot.on_message(filters.command("chatbot on", prefixes=["/", ".", "?", "-"]) & ~filters.private)
+async def chatboton(client, message):
+    vickdb = MongoClient(MONGO_URL)
+    vick = vickdb["VickDb"]["Vick"]
+    if message.from_user:
+        user = message.from_user.id
+        chat_id = message.chat.id
+        if user not in await is_admins(chat_id):
+            return await message.reply_text("You are not admin")
+    is_vick = vick.find_one({"chat_id": message.chat.id})
+    if not is_vick:
+        await message.reply_text("Chatbot Is Already Enabled")
+    else:
+        vick.delete_one({"chat_id": message.chat.id})
+        await message.reply_text("ChatBot Is Enable!")
 
-    # Store chat for learning
-    chats.insert_one({
-        "chat_id": m.chat.id,
-        "user_id": m.from_user.id,
-        "type": m.media if m.sticker else "text",
-        "text": m.text or "",
-        "sticker": m.sticker.file_id if m.sticker else None,
-    })
+@bot.on_message(filters.command("chatbot", prefixes=["/", ".", "?", "-"]) & ~filters.private)
+async def chatbot(client, message):
+    await message.reply_text("**Usage:**\n/chatbot [on|off] only group")
 
-    # Save user chat ID for broadcast
-    db["users"].update_one({"chat_id": m.chat.id}, {"$set": {"chat_id": m.chat.id}}, upsert=True)
+@bot.on_message((filters.text | filters.sticker) & ~filters.private & ~filters.bot)
+async def vickai(client: Client, message: Message):
+    chatdb = MongoClient(MONGO_URL)
+    chatai = chatdb["Word"]["WordDb"]
+    vickdb = MongoClient(MONGO_URL)
+    vick = vickdb["VickDb"]["Vick"]
+    is_vick = vick.find_one({"chat_id": message.chat.id})
 
-    # Random reply from database
-    random_doc = chats.aggregate([{"$sample": {"size": 1}}])
-    for doc in random_doc:
-        if doc.get("text"):
-            await m.reply(doc["text"])
-        elif doc.get("sticker"):
-            await m.reply_sticker(doc["sticker"])
+    if not message.reply_to_message:
+        if not is_vick:
+            await bot.send_chat_action(message.chat.id, "typing")
+            K = [x['text'] for x in chatai.find({"word": message.text})]
+            if K:
+                hey = random.choice(K)
+                is_text = chatai.find_one({"text": hey})
+                await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
+    else:
+        getme = await bot.get_me()
+        if message.reply_to_message.from_user.id == getme.id:
+            if not is_vick:
+                await bot.send_chat_action(message.chat.id, "typing")
+                K = [x['text'] for x in chatai.find({"word": message.text})]
+                if K:
+                    hey = random.choice(K)
+                    is_text = chatai.find_one({"text": hey})
+                    await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
+        else:
+            if message.sticker:
+                chatai.update_one({"word": message.reply_to_message.text, "id": message.sticker.file_unique_id}, {"$setOnInsert": {"text": message.sticker.file_id, "check": "sticker", "id": message.sticker.file_unique_id}}, upsert=True)
+            elif message.text:
+                chatai.update_one({"word": message.reply_to_message.text, "text": message.text}, {"$setOnInsert": {"check": "none"}}, upsert=True)
 
-# ---------- RUN BOT + CLEAN TASK --------
-async def main():
-    await bot.start()
-    print("🤖 Bot is running...")
-    await auto_clean()
+@bot.on_message((filters.text | filters.sticker) & filters.private & ~filters.bot)
+async def vickprivate(client: Client, message: Message):
+    chatdb = MongoClient(MONGO_URL)
+    chatai = chatdb["Word"]["WordDb"]
+    await bot.send_chat_action(message.chat.id, "typing")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    if not message.reply_to_message:
+        K = [x['text'] for x in chatai.find({"word": message.text})]
+        if K:
+            hey = random.choice(K)
+            is_text = chatai.find_one({"text": hey})
+            await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
+    else:
+        getme = await bot.get_me()
+        if message.reply_to_message.from_user.id == getme.id:
+            K = [x['text'] for x in chatai.find({"word": message.text})]
+            if K:
+                hey = random.choice(K)
+                is_text = chatai.find_one({"text": hey})
+                await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
+
+print("Your Chatbot Is Ready Now! Join @aschat_group")
+bot.run()
