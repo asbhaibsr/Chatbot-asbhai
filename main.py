@@ -1,76 +1,97 @@
-from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+import asyncio
+from pyrogram import Client, filters, types
 from pymongo import MongoClient
-import random
+from random import choice
+from bson.objectid import ObjectId
 import os
 
+# ---------------- CONFIG ----------------
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-MONGO_URI = os.environ.get("MONGO_URI")  # Agar MongoDB bhi use kar rahe ho
+MONGO_URL = os.environ.get("MONGO_URL")
+OWNER_ID = int(os.environ.get("OWNER_ID", 123456789))  # your telegram id
 
-app = Client("self_learning_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-mongo = MongoClient(MONGO_URI)
-db = mongo["chatbot"]
-collection = db["memory"]
+bot = Client("selflearn-bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+mongo = MongoClient(MONGO_URL)
+db = mongo["chatdb"]
+chats = db["messages"]
 
-@app.on_message(filters.command("start"))
-async def start(client, message: Message):
-    keyboard = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("➕ Add to Group", url=f"https://t.me/{client.me.username}?startgroup=true")],
-            [InlineKeyboardButton("📢 Update Channel", url="https://t.me/asbhai_bsr")],
-            [InlineKeyboardButton("💬 Chat Group", url="https://t.me/aschat_group")],
-            [InlineKeyboardButton("🎬 Movie Group", url="https://t.me/istreamX")]
-        ]
+MAX_LIMIT = 5000  # Max messages before cleaning
+
+# --------------- CLEANER ----------------
+async def auto_clean():
+    while True:
+        total = chats.count_documents({})
+        if total >= MAX_LIMIT:
+            to_delete = int(total * 0.2)
+            old_docs = chats.find().sort("_id", 1).limit(to_delete)
+            for doc in old_docs:
+                chats.delete_one({"_id": ObjectId(doc["_id"])})
+        await asyncio.sleep(3600)
+
+# --------------- /START ----------------
+@bot.on_message(filters.command("start"))
+async def start_handler(c, m):
+    await m.reply(
+        f"👋 Hello {m.from_user.first_name}!\n\n"
+        "I'm a self-learning chat bot. Talk to me and I’ll learn from you!",
+        reply_markup=types.InlineKeyboardMarkup(
+            [
+                [types.InlineKeyboardButton("➕ Add Me To Group", url=f"https://t.me/{c.me.username}?startgroup=true")],
+                [
+                    types.InlineKeyboardButton("📢 Update Channel", url="https://t.me/asbhai_bsr"),
+                    types.InlineKeyboardButton("💬 Chat Group", url="https://t.me/aschat_group"),
+                ],
+                [types.InlineKeyboardButton("🎬 Movie Group", url="https://t.me/istreamX")],
+            ]
+        )
     )
-    await message.reply(
-        f"👋 Hello {message.from_user.first_name}!\n\nI'm a self-learning bot 🤖. Just talk to me or reply to me, and I'll learn from you.",
-        reply_markup=keyboard
-    )
 
-@app.on_message(filters.text | filters.sticker)
-async def handle_chat(client, message: Message):
-    try:
-        chat_id = str(message.chat.id)
-        user_msg = message.text if message.text else f"sticker:{message.sticker.file_unique_id}"
-
-        # Check for saved replies
-        all_docs = list(collection.find({"q": user_msg, "a": {"$ne": None}}))
-        if all_docs:
-            response = random.choice(all_docs)["a"]
-            if response.startswith("sticker:"):
-                await message.reply_sticker(response.replace("sticker:", ""))
-            else:
-                await message.reply(response)
-
-        # Save new learning
-        entry = {"chat_id": chat_id, "q": user_msg, "a": None}
-        if message.reply_to_message:
-            if message.reply_to_message.text:
-                entry["a"] = message.reply_to_message.text
-            elif message.reply_to_message.sticker:
-                entry["a"] = f"sticker:{message.reply_to_message.sticker.file_unique_id}"
-        collection.insert_one(entry)
-    except Exception as e:
-        print("❌ Chat error:", e)
-
-@app.on_message(filters.command("broadcast") & filters.private)
-async def broadcast(client, message: Message):
-    if str(message.from_user.id) != "your_telegram_id":
-        return
-    msg = message.text.split(" ", 1)
-    if len(msg) < 2:
-        await message.reply("❌ Use: /broadcast YourMessage")
-        return
-    text = msg[1]
-    users = collection.distinct("chat_id")
-    for uid in users:
+# ------------- /BROADCAST ---------------
+@bot.on_message(filters.command("broadcast") & filters.user(OWNER_ID))
+async def broadcast(c, m):
+    if not m.reply_to_message:
+        return await m.reply("Reply to a message to broadcast.")
+    success = fail = 0
+    async for user in db["users"].find({}, {"_id": 0, "chat_id": 1}):
         try:
-            await client.send_message(int(uid), text)
+            await m.reply_to_message.copy(chat_id=user["chat_id"])
+            success += 1
         except:
-            pass
-    await message.reply("✅ Broadcast done!")
+            fail += 1
+    await m.reply(f"✅ Sent: {success}\n❌ Failed: {fail}")
 
-print("🤖 Bot is running...")
-app.run()
+# ----------- LEARN & REPLY --------------
+@bot.on_message(filters.text | filters.sticker)
+async def learn_and_reply(c, m):
+    if m.from_user.is_bot: return
+
+    # Store chat for learning
+    chats.insert_one({
+        "chat_id": m.chat.id,
+        "user_id": m.from_user.id,
+        "type": m.media if m.sticker else "text",
+        "text": m.text or "",
+        "sticker": m.sticker.file_id if m.sticker else None,
+    })
+
+    # Save user chat ID for broadcast
+    db["users"].update_one({"chat_id": m.chat.id}, {"$set": {"chat_id": m.chat.id}}, upsert=True)
+
+    # Random reply from database
+    random_doc = chats.aggregate([{"$sample": {"size": 1}}])
+    for doc in random_doc:
+        if doc.get("text"):
+            await m.reply(doc["text"])
+        elif doc.get("sticker"):
+            await m.reply_sticker(doc["sticker"])
+
+# ---------- RUN BOT + CLEAN TASK --------
+async def main():
+    await bot.start()
+    print("🤖 Bot is running...")
+    await auto_clean()
+
+if __name__ == "__main__":
+    asyncio.run(main())
