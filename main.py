@@ -10,7 +10,13 @@ API_HASH = os.environ.get("API_HASH")
 STRING = os.environ.get("STRING")
 MONGO_URL = os.environ.get("MONGO_URL")
 
-bot = Client(STRING, API_ID, API_HASH)
+# --- यहां बदलाव किया गया है ---
+# Pyrogram को सेशन स्ट्रिंग को सीधे फाइल नाम के रूप में उपयोग करने से रोकने के लिए
+# 'name' पैरामीटर में एक छोटा, स्थिर नाम दिया गया है, और 'session_string'
+# पैरामीटर में आपकी लंबी सेशन स्ट्रिंग (जो ENVIRONMENT VARIABLE से आ रही है) पास की गई है।
+bot = Client("my_koyeb_bot", API_ID, API_HASH, session_string=STRING)
+# आप "my_koyeb_bot" की जगह कोई भी छोटा, वैध नाम जैसे "mybot" या "chatbot_session" दे सकते हैं।
+# --- बदलाव समाप्त ---
 
 async def is_admins(chat_id: int):
     return [member.user.id async for member in bot.iter_chat_members(chat_id, filter="administrators")]
