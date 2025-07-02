@@ -1,10 +1,10 @@
 from pyrogram import Client, filters
-from pyrogram.types import *
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, Chat
 from pymongo import MongoClient
 import requests
 import random
 import os
-from pyrogram.enums import ChatAction
+from pyrogram.enums import ChatAction, ChatType
 
 import asyncio
 import logging
@@ -21,15 +21,29 @@ def handle_exception(loop, context):
     if "exception" in context:
         logger.error("Traceback:", exc_info=context["exception"])
 
+# पर्यावरण चर (Environment Variables)
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
-STRING = os.environ.get("STRING")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # BOT_TOKEN का उपयोग करें
 MONGO_URL = os.environ.get("MONGO_URL")
+OWNER_ID = int(os.environ.get("OWNER_ID")) # मालिक का ID
 
-bot = Client("my_koyeb_bot", API_ID, API_HASH, session_string=STRING)
+# Pyrogram क्लाइंट को बॉट टोकन के साथ इनिशियलाइज़ करें
+bot = Client("my_koyeb_bot", API_ID, API_HASH, bot_token=BOT_TOKEN)
 
-# **ध्यान दें: is_admins फंक्शन अभी भी है, लेकिन अब chatbot on/off कमांड्स में उपयोग नहीं होगा।**
-# यदि आप पूरी तरह से एडमिन-संबंधित कोई भी फ़ंक्शन नहीं चाहते हैं, तो आप इसे हटा सकते हैं।
+# MongoDB क्लाइंट
+mongo_client = MongoClient(MONGO_URL)
+chat_db = mongo_client["Word"]["WordDb"] # AI सीखने के लिए
+vick_db = mongo_client["VickDb"]["Vick"] # chatbot on/off स्थिति के लिए
+user_chats_db = mongo_client["ChatbotDB"]["UserChats"] # ब्रॉडकास्ट के लिए
+
+# मालिक के लिए फिल्टर
+def is_owner_filter(_, __, message: Message):
+    return message.from_user and message.from_user.id == OWNER_ID
+
+owner_filter = filters.create(is_owner_filter)
+
+# is_admins फंक्शन (अभी भी रखा गया है लेकिन कमांड में उपयोग नहीं किया गया)
 async def is_admins(chat_id: int):
     try:
         return [member.user.id async for member in bot.get_chat_members(chat_id, filter="administrators")]
@@ -39,89 +53,208 @@ async def is_admins(chat_id: int):
 
 @bot.on_message(filters.command("start"))
 async def start(client, message):
-    # bot.join_chat("@aschat_group") को हटा दें यदि आप चाहते हैं कि यह मैन्युअल हो
-    await message.reply_text("Hello! I am your chatbot. Please add me to a group to use my features.")
+    # बॉट शुरू होने पर ग्रुप या यूजर ID को डेटाबेस में स्टोर करें (ब्रॉडकास्ट के लिए)
+    chat_id = message.chat.id
+    chat_type = message.chat.type
+
+    # सुनिश्चित करें कि डुप्लिकेट्स स्टोर न हों
+    existing_chat = user_chats_db.find_one({"chat_id": chat_id})
+    if not existing_chat:
+        user_chats_db.insert_one({"chat_id": chat_id, "chat_type": chat_type.value}) # .value का उपयोग करें
+        logger.info(f"New chat added for broadcast: {chat_id} ({chat_type.value})")
     
-@bot.on_message(filters.command("chatbot off", prefixes=["/", ".", "?", "-"]) & ~filters.private)
-async def chatbotofd(client, message):
-    vickdb = MongoClient(MONGO_URL)
-    vick = vickdb["VickDb"]["Vick"]
-    # **यहां से एडमिन चेक हटा दिया गया है**
-    is_vick = vick.find_one({"chat_id": message.chat.id})
-    if not is_vick:
-        vick.insert_one({"chat_id": message.chat.id})
-        await message.reply_text("Chatbot Disabled!")
-    else:
-        await message.reply_text("ChatBot Is Already Disabled")
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("📚 बॉट जानकारी", callback_data="bot_info"),
+                InlineKeyboardButton("💡 AI सेटिंग्स", callback_data="ai_settings")
+            ],
+            [
+                InlineKeyboardButton("🔗 हमारा ग्रुप", url="https://t.me/aschat_group")
+            ]
+        ]
+    )
+    await message.reply_text(
+        "नमस्ते! मैं आपका उन्नत चैटबॉट हूँ। मैं यहाँ आपके प्रश्नों का उत्तर देने और आपके साथ बातचीत करने के लिए हूँ।\n\nनीचे दिए गए बटनों का उपयोग करें:",
+        reply_markup=keyboard
+    )
 
-@bot.on_message(filters.command("chatbot on", prefixes=["/", ".", "?", "-"]) & ~filters.private)
-async def chatboton(client, message):
-    vickdb = MongoClient(MONGO_URL)
-    vick = vickdb["VickDb"]["Vick"]
-    # **यहां से एडमिन चेक हटा दिया गया है**
-    is_vick = vick.find_one({"chat_id": message.chat.id})
-    if not is_vick:
-        await message.reply_text("Chatbot Is Already Enabled")
-    else:
-        vick.delete_one({"chat_id": message.chat.id})
-        await message.reply_text("ChatBot Is Enable!")
+@bot.on_callback_query()
+async def callback_handler(client, callback_query):
+    data = callback_query.data
+    user_id = callback_query.from_user.id
+    chat_id = callback_query.message.chat.id
 
-@bot.on_message(filters.command("chatbot", prefixes=["/", ".", "?", "-"]) & ~filters.private)
-async def chatbot(client, message):
-    await message.reply_text("**Usage:**\n/chatbot [on|off] only group")
+    # सुनिश्चित करें कि सिर्फ मालिक ही कुछ विशेष सेटिंग्स बदल सके (उदाहरण के लिए AI सेटिंग्स)
+    # आप इसे अपनी आवश्यकतानुसार बदल सकते हैं
+    if data == "ai_settings" and user_id != OWNER_ID:
+        await callback_query.answer("क्षमा करें, केवल मालिक ही AI सेटिंग्स बदल सकते हैं।", show_alert=True)
+        return
+
+    await callback_query.answer() # कॉल बैक को तुरंत जवाब दें
+
+    if data == "bot_info":
+        await callback_query.message.edit_text(
+            "मैं एक Pyrogram बॉट हूँ जिसे Google Gemini द्वारा बनाया गया है। मैं आपके साथ ग्रुप और निजी चैट दोनों में बातचीत कर सकता हूँ।",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔙 वापस", callback_data="back_to_start")]]
+            )
+        )
+    elif data == "ai_settings":
+        # AI सेटिंग्स के लिए सब-मेनू
+        ai_settings_keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("चैटबॉट चालू करें", callback_data="ai_on"),
+                    InlineKeyboardButton("चैटबॉट बंद करें", callback_data="ai_off")
+                ],
+                [
+                    InlineKeyboardButton("🔙 वापस", callback_data="back_to_start")
+                ]
+            ]
+        )
+        await callback_query.message.edit_text(
+            "AI सेटिंग्स मेनू:",
+            reply_markup=ai_settings_keyboard
+        )
+    elif data == "ai_on":
+        is_vick = vick_db.find_one({"chat_id": chat_id})
+        if is_vick:
+            vick_db.delete_one({"chat_id": chat_id})
+            await callback_query.message.edit_text("चैटबॉट अब इस चैट में चालू है! 🎉")
+        else:
+            await callback_query.message.edit_text("चैटबॉट पहले से ही चालू है।")
+    elif data == "ai_off":
+        is_vick = vick_db.find_one({"chat_id": chat_id})
+        if not is_vick:
+            vick_db.insert_one({"chat_id": chat_id})
+            await callback_query.message.edit_text("चैटबॉट अब इस चैट में बंद है। 🔇")
+        else:
+            await callback_query.message.edit_text("चैटबॉट पहले से ही बंद है।")
+    elif data == "back_to_start":
+        # /start कमांड से कीबोर्ड को फिर से दिखाएं
+        await start(client, callback_query.message) # callback_query.message को पास करें
+        
+# ब्रॉडकास्ट कमांड (केवल मालिक के लिए)
+@bot.on_message(filters.command("broadcast") & owner_filter)
+async def broadcast_message(client, message):
+    if not message.reply_to_message:
+        await message.reply_text("कृपया उस मैसेज का रिप्लाई करें जिसे आप ब्रॉडकास्ट करना चाहते हैं।")
+        return
+
+    broadcast_msg = message.reply_to_message
+    
+    total_chats = user_chats_db.count_documents({})
+    success_count = 0
+    fail_count = 0
+
+    await message.reply_text(f"ब्रॉडकास्टिंग शुरू हो रही है... कुल {total_chats} चैट।")
+
+    for chat_data in user_chats_db.find({}):
+        chat_id = chat_data["chat_id"]
+        try:
+            # मैसेज के प्रकार के आधार पर भेजें (टेक्स्ट, फोटो, स्टिकर, आदि)
+            if broadcast_msg.text:
+                await client.send_message(chat_id, broadcast_msg.text)
+            elif broadcast_msg.photo:
+                await client.send_photo(chat_id, broadcast_msg.photo.file_id, caption=broadcast_msg.caption)
+            elif broadcast_msg.sticker:
+                await client.send_sticker(chat_id, broadcast_msg.sticker.file_id)
+            elif broadcast_msg.animation: # GIF के लिए
+                await client.send_animation(chat_id, broadcast_msg.animation.file_id, caption=broadcast_msg.caption)
+            elif broadcast_msg.video:
+                await client.send_video(chat_id, broadcast_msg.video.file_id, caption=broadcast_msg.caption)
+            elif broadcast_msg.document:
+                await client.send_document(chat_id, broadcast_msg.document.file_id, caption=broadcast_msg.caption)
+            else:
+                logger.warning(f"Unsupported message type for broadcast from chat {message.chat.id}: {broadcast_msg.media}")
+                fail_count += 1
+                continue
+            success_count += 1
+            await asyncio.sleep(0.1) # Flood wait से बचने के लिए छोटा सा डिले
+        except Exception as e:
+            logger.error(f"Failed to send broadcast to chat {chat_id}: {e}", exc_info=True)
+            fail_count += 1
+            await asyncio.sleep(0.5) # एरर पर थोड़ा ज़्यादा डिले
+
+    await message.reply_text(f"ब्रॉडकास्ट पूरा हुआ!\nसफलतापूर्वक भेजा: {success_count}\nभेजने में विफल: {fail_count}")
+
 
 @bot.on_message((filters.text | filters.sticker) & ~filters.private & ~filters.bot)
 async def vickai(client: Client, message: Message):
-    chatdb = MongoClient(MONGO_URL)
-    chatai = chatdb["Word"]["WordDb"]
-    vickdb = MongoClient(MONGO_URL)
-    vick = vickdb["VickDb"]["Vick"]
-    is_vick = vick.find_one({"chat_id": message.chat.id})
+    # बॉट शुरू होने पर ग्रुप या यूजर ID को डेटाबेस में स्टोर करें (ब्रॉडकास्ट के लिए)
+    chat_id = message.chat.id
+    chat_type = message.chat.type
+
+    # सुनिश्चित करें कि डुप्लिकेट्स स्टोर न हों
+    existing_chat = user_chats_db.find_one({"chat_id": chat_id})
+    if not existing_chat:
+        user_chats_db.insert_one({"chat_id": chat_id, "chat_type": chat_type.value})
+        logger.info(f"New chat added for broadcast: {chat_id} ({chat_type.value})")
+
+    is_vick = vick_db.find_one({"chat_id": message.chat.id})
 
     if not message.reply_to_message:
         if not is_vick:
             await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
-            K = [x['text'] for x in chatai.find({"word": message.text})]
+            K = [x['text'] for x in chat_db.find({"word": message.text})]
             if K:
                 hey = random.choice(K)
-                is_text = chatai.find_one({"text": hey})
-                await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
+                is_text = chat_db.find_one({"text": hey})
+                await (message.reply_sticker(hey) if is_text and is_text['check'] == "sticker" else message.reply_text(hey))
+            # यदि कोई उत्तर नहीं मिला और यह मालिक नहीं है, तो कुछ भी न भेजें
+            # आप यहां एक डिफ़ॉल्ट संदेश जोड़ सकते हैं यदि बॉट को कोई जवाब नहीं मिलता है
+            # else:
+            #     await message.reply_text("मुझे समझ नहीं आया। क्या आप मुझे कुछ सिखाना चाहेंगे?")
     else:
         getme = await bot.get_me()
         if message.reply_to_message.from_user.id == getme.id:
             if not is_vick:
                 await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
-                K = [x['text'] for x in chatai.find({"word": message.text})]
+                K = [x['text'] for x in chat_db.find({"word": message.text})]
                 if K:
                     hey = random.choice(K)
-                    is_text = chatai.find_one({"text": hey})
-                    await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
+                    is_text = chat_db.find_one({"text": hey})
+                    await (message.reply_sticker(hey) if is_text and is_text['check'] == "sticker" else message.reply_text(hey))
         else:
             if message.sticker:
-                chatai.update_one({"word": message.reply_to_message.text, "id": message.sticker.file_unique_id}, {"$setOnInsert": {"text": message.sticker.file_id, "check": "sticker", "id": message.sticker.file_unique_id}}, upsert=True)
+                chat_db.update_one({"word": message.reply_to_message.text}, {"$setOnInsert": {"text": message.sticker.file_id, "check": "sticker", "id": message.sticker.file_unique_id}}, upsert=True)
             elif message.text:
-                chatai.update_one({"word": message.reply_to_message.text, "text": message.text}, {"$setOnInsert": {"check": "none"}}, upsert=True)
+                chat_db.update_one({"word": message.reply_to_message.text}, {"$setOnInsert": {"text": message.text, "check": "none"}}, upsert=True)
+
 
 @bot.on_message((filters.text | filters.sticker) & filters.private & ~filters.bot)
 async def vickprivate(client: Client, message: Message):
-    chatdb = MongoClient(MONGO_URL)
-    chatai = chatdb["Word"]["WordDb"]
+    # बॉट शुरू होने पर ग्रुप या यूजर ID को डेटाबेस में स्टोर करें (ब्रॉडकास्ट के लिए)
+    chat_id = message.chat.id
+    chat_type = message.chat.type
+
+    # सुनिश्चित करें कि डुप्लिकेट्स स्टोर न हों
+    existing_chat = user_chats_db.find_one({"chat_id": chat_id})
+    if not existing_chat:
+        user_chats_db.insert_one({"chat_id": chat_id, "chat_type": chat_type.value})
+        logger.info(f"New chat added for broadcast: {chat_id} ({chat_type.value})")
+
     await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
 
     if not message.reply_to_message:
-        K = [x['text'] for x in chatai.find({"word": message.text})]
+        K = [x['text'] for x in chat_db.find({"word": message.text})]
         if K:
             hey = random.choice(K)
-            is_text = chatai.find_one({"text": hey})
-            await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
+            is_text = chat_db.find_one({"text": hey})
+            await (message.reply_sticker(hey) if is_text and is_text['check'] == "sticker" else message.reply_text(hey))
+        # यदि कोई उत्तर नहीं मिला और यह मालिक नहीं है, तो कुछ भी न भेजें
+        # आप यहां एक डिफ़ॉल्ट संदेश जोड़ सकते हैं यदि बॉट को कोई जवाब नहीं मिलता है
+        # else:
+        #     await message.reply_text("मुझे समझ नहीं आया। क्या आप मुझे कुछ सिखाना चाहेंगे?")
     else:
         getme = await bot.get_me()
         if message.reply_to_message.from_user.id == getme.id:
-            K = [x['text'] for x in chatai.find({"word": message.text})]
+            K = [x['text'] for x in chat_db.find({"word": message.text})]
             if K:
                 hey = random.choice(K)
-                is_text = chatai.find_one({"text": hey})
-                await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
+                is_text = chat_db.find_one({"text": hey})
+                await (message.reply_sticker(hey) if is_text and is_text['check'] == "sticker" else message.reply_text(hey))
 
 # हेल्थ चेक के लिए वेब सर्वर
 async def health_check_route(request):
