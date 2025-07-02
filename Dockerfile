@@ -4,6 +4,10 @@ FROM python:3.10-slim-buster
 # Set the working directory inside the container
 WORKDIR /app
 
+# Install dumb-init first
+# dumb-init is useful for proper signal handling in containers
+RUN apt-get update && apt-get install -y dumb-init && rm -rf /var/lib/apt/lists/*
+
 # Copy your requirements.txt first to leverage Docker's layer caching
 COPY requirements.txt .
 
@@ -20,9 +24,8 @@ COPY . /app
 EXPOSE 8000
 
 # Set the entrypoint for the container.
-# dumb-init handles signals correctly, ensuring graceful shutdowns.
-# gunicorn runs the Flask health check server on port 8000.
-# The '&' runs it in the background.
-# python3 main.py then runs your Pyrogram bot.
+# dumb-init is used as the primary process.
+# gunicorn runs the Flask health check server on port 8000 in the background.
+# python main.py then runs your Pyrogram bot.
 # Both run concurrently within the same container.
-CMD ["/usr/bin/dumb-init", "--", "gunicorn", "--bind", "0.0.0.0:8000", "health_check_server:app", "&", "python3", "main.py"]
+CMD ["dumb-init", "--", "gunicorn", "--bind", "0.0.0.0:8000", "health_check_server:app", "&", "python", "main.py"]
