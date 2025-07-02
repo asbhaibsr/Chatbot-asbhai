@@ -4,10 +4,13 @@ from pymongo import MongoClient
 import requests
 import random
 import os
-from pyrogram.enums import ChatAction
 
+# Logging and Asyncio for debugging
 import asyncio
 import logging # <-- यह नई लाइन जोड़ी गई है
+from pyrogram.enums import ChatAction
+
+from aiohttp import web # <-- यह नई लाइन जोड़ी गई है (वेब सर्वर के लिए)
 
 # Logging setup for debugging (यह अस्थायी है, समस्या हल होने पर हटा दें)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -17,7 +20,7 @@ logger = logging.getLogger(__name__)
 def handle_exception(loop, context):
     msg = context.get("exception", context["message"])
     logger.error(f"Caught unhandled exception: {msg}")
-    # आप यहां traceback को और अधिक विस्तृत रूप से लॉग कर सकते हैं यदि आवश्यक हो
+    # यहां आप traceback को और अधिक विस्तृत रूप से लॉग कर सकते हैं यदि आवश्यक हो
     if "exception" in context:
         logger.error("Traceback:", exc_info=context["exception"])
 
@@ -132,9 +135,41 @@ async def vickprivate(client: Client, message: Message):
                 is_text = chatai.find_one({"text": hey})
                 await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
 
+# हेल्थ चेक के लिए एक छोटा वेब सर्वर फंक्शन
+async def health_check_route(request):
+    return web.Response(text="Bot is alive!")
+
+# Pyrogram बॉट और वेब सर्वर को एक साथ चलाने के लिए मुख्य फंक्शन
+async def run_both():
+    # aiohttp वेब सर्वर सेट करें
+    app = web.Application()
+    app.router.add_get('/', health_check_route)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080) # Koyeb के 8080 पोर्ट पर लिसन करें
+    await site.start()
+    logger.info("Web server started for health checks on port 8080")
+
+    # Pyrogram बॉट को चलाएं (यह ब्लॉक होने वाला कॉल है, इसलिए इसे await करें)
+    # Pyrogram का run() मेथड खुद ही asyncio इवेंट लूप को मैनेज करता है,
+    # इसलिए इसे gather के साथ नहीं चलाया जा सकता अगर वह blocking हो।
+    # Pyrogram 2.x के साथ, bot.run() blocking है।
+    # हमें Pyrogram को अपना इवेंट लूप चलाने देना होगा, और वेब सर्वर को Pyrogram के लूप में जोड़ना होगा।
+    # लेकिन bot.run() एक अलग थ्रेड में चलता है, इसलिए हमें सुनिश्चित करना होगा कि दोनों एक ही लूप में हों।
+
+    # सरल समाधान के लिए, हम Pyrogram को अपने लूप को चलाने देंगे, और वेब सर्वर को उसके साथ इंटीग्रेट करेंगे।
+    # Pyrogram 2.x के साथ bot.run() Blocking है, इसलिए हम इसे सीधे asyncio.gather() में नहीं डाल सकते।
+    # इसके बजाय, हम bot.start() और bot.idle() का उपयोग करेंगे।
+
+    logger.info("Starting Pyrogram Client...")
+    await bot.start()
+    logger.info("Pyrogram Client Started! Bot is ready.")
+    await bot.idle() # यह बॉट को तब तक चलाता रहेगा जब तक उसे रोका न जाए
+
+# बॉट और वेब सर्वर को शुरू करें
 print("Your Chatbot Is Ready Now! Join @aschat_group")
 try:
-    bot.run()
+    asyncio.run(run_both()) # <-- यह main() की जगह run_both() को कॉल करेगा
 except Exception as e:
-    logger.error(f"Bot exited directly from bot.run() with an error: {e}")
+    logger.error(f"An error occurred in main execution loop: {e}", exc_info=True)
 
