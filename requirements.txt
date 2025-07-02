@@ -1,6 +1,5 @@
-pyrogram==2.0.106
+pyrogram==2.0.106 # Or the latest stable version you prefer
 pymongo
-requests
-aiohttp
-dnspython
-tgcrypto==1.2.2
+Flask
+gunicorn
+dumb-init # Essential for robust process management in Docker containers
