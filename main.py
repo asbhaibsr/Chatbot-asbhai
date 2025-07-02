@@ -29,6 +29,7 @@ PRUNE_PERCENTAGE = 0.30          # Kitna data delete karna hai (30%)
 
 # --- MongoDB Setup ---
 try:
+    # pymongo is synchronous, so no 'await' needed here
     client = MongoClient(MONGO_DB_URI)
     db = client.bot_database # Aap apne database ka naam badal sakte hain
     messages_collection = db.messages
@@ -62,8 +63,15 @@ def extract_keywords(text):
 async def prune_old_messages():
     """
     Database se purane messages ko remove karta hai jab threshold cross ho jaye.
+    MongoDB operations are synchronous, so run them in a thread pool executor.
     """
-    total_messages = await messages_collection.count_documents({})
+    # MongoDB operations should not be awaited directly as pymongo is synchronous.
+    # Use run_in_threadpool if you need to run them without blocking the event loop.
+    # For a simple bot, direct calls might be acceptable if they don't block too long.
+    # However, to be fully async-compliant, you'd wrap them or use Motor.
+    # For now, let's remove 'await' from the calls.
+
+    total_messages = messages_collection.count_documents({}) # AWAIT removed
     logger.info(f"Current total messages in DB: {total_messages}")
 
     if total_messages > MAX_MESSAGES_THRESHOLD:
@@ -72,13 +80,17 @@ async def prune_old_messages():
 
         # Oldest messages ko timestamp ke hisaab se sort karke delete karein
         oldest_message_ids = []
-        async for msg in messages_collection.find({}) \
+        # find() returns a Cursor, which needs to be iterated.
+        # We need to explicitly convert it to a list if we want to process it fully before deletion.
+        # Alternatively, iterate and delete one by one if memory is an issue with large deletes.
+        # For this, we'll fetch all IDs first and then delete.
+        for msg in messages_collection.find({}) \
                                             .sort("timestamp", 1) \
                                             .limit(messages_to_delete_count):
             oldest_message_ids.append(msg['_id'])
 
         if oldest_message_ids:
-            delete_result = await messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
+            delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}}) # AWAIT removed
             logger.info(f"Successfully deleted {delete_result.deleted_count} messages.")
         else:
             logger.warning("No oldest messages found to delete despite threshold being reached.")
@@ -90,6 +102,7 @@ async def store_message(message: Message):
     """
     Incoming message ko database mein store karta hai.
     Contextual information bhi add karta hai.
+    MongoDB operations are synchronous, so remove 'await' from calls.
     """
     try:
         message_data = {
@@ -134,11 +147,11 @@ async def store_message(message: Message):
 
             # If this message is a reply, we can mark the original message (if found in DB)
             # as part of a learned pair (is_bot_observed_pair)
-            original_msg_in_db = await messages_collection.find_one({"chat_id": message.chat.id, "message_id": message.reply_to_message.id})
+            # find_one returns a dict or None, not an awaitable
+            original_msg_in_db = messages_collection.find_one({"chat_id": message.chat.id, "message_id": message.reply_to_message.id}) # AWAIT removed
             if original_msg_in_db:
-                # Mark the original message as part of an observed pair
-                # This helps in giving higher priority to actual user conversations
-                await messages_collection.update_one(
+                # update_one returns an UpdateResult object, not an awaitable
+                messages_collection.update_one( # AWAIT removed
                     {"_id": original_msg_in_db["_id"]},
                     {"$set": {"is_bot_observed_pair": True}}
                 )
@@ -146,10 +159,10 @@ async def store_message(message: Message):
                 message_data["is_bot_observed_pair"] = True
 
 
-        await messages_collection.insert_one(message_data)
+        messages_collection.insert_one(message_data) # AWAIT removed
         logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}")
         
-        # Pruning check after storing a message
+        # Pruning check after storing a message. This function is async, so await it.
         await prune_old_messages()
 
     except Exception as e:
@@ -160,6 +173,7 @@ async def generate_reply(message: Message):
     """
     Bot ke liye reply generate karta hai.
     Priority: Direct Contextual Match (is_bot_observed_pair=True) > General Keyword Matching.
+    MongoDB operations are synchronous, so remove 'await' from calls.
     """
     if not message.text and not message.sticker: # Agar message mein text ya sticker nahi hai to reply nahi
         return
@@ -172,26 +186,25 @@ async def generate_reply(message: Message):
         return
 
     # 1. Search for Direct Contextual Matches (is_bot_observed_pair=True)
-    #    Preference: Reply to content (replied_to_content) matches query, and it's a learned pair.
     
     # Try group-specific first (matching replied_to_content exactly or closely)
-    # Using regex for partial match, case-insensitive
-    learned_replies_group = messages_collection.find({
+    # find() returns a Cursor. Iterate it synchronously.
+    learned_replies_group_cursor = messages_collection.find({
         "chat_id": message.chat.id,
         "is_bot_observed_pair": True,
         "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"} # Exact match for learning
     })
     
     potential_replies = []
-    async for doc in learned_replies_group:
+    for doc in learned_replies_group_cursor: # AWAIT removed, now synchronous iteration
         potential_replies.append(doc)
 
     if not potential_replies: # Agar group mein exact match nahi mila, toh global mein dekho
-        learned_replies_global = messages_collection.find({
+        learned_replies_global_cursor = messages_collection.find({
             "is_bot_observed_pair": True,
             "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}
         })
-        async for doc in learned_replies_global:
+        for doc in learned_replies_global_cursor: # AWAIT removed, now synchronous iteration
             potential_replies.append(doc)
 
     if potential_replies:
@@ -201,28 +214,27 @@ async def generate_reply(message: Message):
     logger.info(f"No direct observed reply for: '{query_content}'. Falling back to keyword search.")
 
     # 2. Fallback to General Keyword Matching (any stored message)
-    #    Prioritize content that contains any of the keywords
     
     # Construct regex for keywords
     keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
     
     # Try group-specific general messages first
-    general_replies_group = messages_collection.find({
+    general_replies_group_cursor = messages_collection.find({
         "chat_id": message.chat.id,
         "type": {"$in": ["text", "sticker"]}, # Reply with either text or sticker
         "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True} # Agar keywords nahi to koi bhi content
     })
 
     potential_replies = []
-    async for doc in general_replies_group:
+    for doc in general_replies_group_cursor: # AWAIT removed, now synchronous iteration
         potential_replies.append(doc)
 
     if not potential_replies: # Agar group mein nahi mila, toh global mein dekho
-        general_replies_global = messages_collection.find({
+        general_replies_global_cursor = messages_collection.find({
             "type": {"$in": ["text", "sticker"]},
             "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
         })
-        async for doc in general_replies_global:
+        for doc in general_replies_global_cursor: # AWAIT removed, now synchronous iteration
             potential_replies.append(doc)
 
     if potential_replies:
@@ -245,7 +257,7 @@ async def start_private_command(client: Client, message: Message):
         "Helloooo! 💖 Main sunne aur seekhne ke liye taiyar hoon. Aapki har baat mere liye khaas hai!",
         "Namaste, pyaare dost! ✨ Main yahan aapke shabdon ko sametne aur unhe naya roop dene aayi hoon. Kaisi ho/ho tum?",
         "Hey cutie! Mian aa gayi hoon aapke sath baate krne. Ready to chat? 😉",
-        "Koshish karne walon ki kabhi haar nahi hoti! Main bhi aapki baaton se seekhne ki koshish kar rahi hoon. Aao, baat karein!",
+        "Koshish karne walon ki kabhi haar nahi hoti! Main bhi aapki baaton se seekhne ki koshish kar raha hoon. Aao, baat karein!",
         "Hello! Main ek bot hoon jo aapki baaton ko samajhta aur unse seekhta hai. Aao, baat karte hain, theek hai?"
     ]
     await message.reply_text(random.choice(welcome_messages))
@@ -271,6 +283,7 @@ async def start_group_command(client: Client, message: Message):
 async def broadcast_command(client: Client, message: Message):
     """
     /broadcast command handler (only for OWNER_ID).
+    MongoDB operations are synchronous, so remove 'await' from calls.
     """
     if str(message.from_user.id) != OWNER_ID:
         await message.reply_text("Sorry, aapko yeh command use karne ki anumati nahi hai.")
@@ -283,7 +296,8 @@ async def broadcast_command(client: Client, message: Message):
     broadcast_text = " ".join(message.command[1:])
     
     # Find all unique chat IDs where the bot has seen messages
-    unique_chat_ids = await messages_collection.distinct("chat_id")
+    # distinct returns a list, not an awaitable
+    unique_chat_ids = messages_collection.distinct("chat_id") # AWAIT removed
 
     sent_count = 0
     failed_count = 0
@@ -307,13 +321,16 @@ async def broadcast_command(client: Client, message: Message):
 async def stats_private_command(client: Client, message: Message):
     """
     Private chat mein /stats check command ka handler.
+    MongoDB operations are synchronous, so remove 'await' from calls.
     """
     if len(message.command) < 2 or message.command[1].lower() != "check":
         await message.reply_text("Upyog: `/stats check`")
         return
 
-    total_messages = await messages_collection.count_documents({})
-    unique_group_ids = await messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}})
+    # count_documents returns an int, not an awaitable
+    total_messages = messages_collection.count_documents({}) # AWAIT removed
+    # distinct returns a list, not an awaitable
+    unique_group_ids = messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}}) # AWAIT removed
     num_groups = len(unique_group_ids)
 
     stats_text = (
@@ -328,14 +345,16 @@ async def stats_private_command(client: Client, message: Message):
 async def stats_group_command(client: Client, message: Message):
     """
     Group chat mein /stats check command ka handler.
+    MongoDB operations are synchronous, so remove 'await' from calls.
     """
-    # For now, let's keep it same as private or you can restrict it.
     if len(message.command) < 2 or message.command[1].lower() != "check":
         await message.reply_text("Upyog: `/stats check`")
         return
 
-    total_messages = await messages_collection.count_documents({})
-    unique_group_ids = await messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}})
+    # count_documents returns an int, not an awaitable
+    total_messages = messages_collection.count_documents({}) # AWAIT removed
+    # distinct returns a list, not an awaitable
+    unique_group_ids = messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}}) # AWAIT removed
     num_groups = len(unique_group_ids)
 
     stats_text = (
@@ -363,7 +382,7 @@ async def handle_message_and_reply(client: Client, message: Message):
     # Isme "filters.me" bhi add kar sakte hain agar bot khud ko reply kar raha ho
     if message.chat.type == "private" or (message.text and f"@{client.me.username}" in message.text):
         logger.info(f"Attempting to generate reply for chat {message.chat.id}")
-        reply_doc = await generate_reply(message)
+        reply_doc = await generate_reply(message) # This is still async, so keep await here
         
         if reply_doc:
             try:
@@ -385,3 +404,4 @@ async def handle_message_and_reply(client: Client, message: Message):
 if __name__ == "__main__":
     logger.info("Starting bot...")
     app.run()
+
