@@ -1,7 +1,7 @@
 import os
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import Message, ChatActions, InlineKeyboardMarkup, InlineKeyboardButton # Naye imports
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 import logging
@@ -26,6 +26,7 @@ API_HASH = os.getenv("API_HASH")
 # --- Constants ---
 MAX_MESSAGES_THRESHOLD = 100000 # Jab database mein itne messages ho jayein
 PRUNE_PERCENTAGE = 0.30          # Kitna data delete karna hai (30%)
+UPDATE_CHANNEL_USERNAME = "asbhai_bsr" # Aapke update channel ka username
 
 # --- MongoDB Setup ---
 try:
@@ -40,6 +41,7 @@ except Exception as e:
     exit(1)
 
 # --- Pyrogram Client ---
+# API_ID aur API_HASH ko Client initialization mein add kiya gaya hai
 app = Client(
     "self_learning_bot", # Session name
     api_id=API_ID,       # Yahan API_ID add kiya gaya hai
@@ -175,6 +177,10 @@ async def generate_reply(message: Message):
     Priority: Direct Contextual Match (is_bot_observed_pair=True) > General Keyword Matching.
     MongoDB operations are synchronous, so remove 'await' from calls.
     """
+    # Typing action dikhao reply generate hone se pehle
+    await app.send_chat_action(message.chat.id, ChatActions.TYPING) # Typing action add kiya gaya hai
+    await asyncio.sleep(0.5) # Thoda delay, real feel ke liye
+
     if not message.text and not message.sticker: # Agar message mein text ya sticker nahi hai to reply nahi
         return
 
@@ -188,7 +194,7 @@ async def generate_reply(message: Message):
     # 1. Search for Direct Contextual Matches (is_bot_observed_pair=True)
     
     # Try group-specific first (matching replied_to_content exactly or closely)
-    # find() returns a Cursor. Iterate it synchronously.
+    # Using regex for partial match, case-insensitive
     learned_replies_group_cursor = messages_collection.find({
         "chat_id": message.chat.id,
         "is_bot_observed_pair": True,
@@ -250,24 +256,37 @@ async def generate_reply(message: Message):
 async def start_private_command(client: Client, message: Message):
     """
     Private chat mein /start command ka handler.
-    Stylish aur funny welcome message (ladki ke persona mein).
+    Stylish aur funny welcome message (ladki ke persona mein) aur buttons ke saath.
     """
     welcome_messages = [
         "Hi there! 👋 Main aa gayi hoon aapki baaton ka hissa banne. Chalo, kuch mithaas bhari baatein karte hain!",
         "Helloooo! 💖 Main sunne aur seekhne ke liye taiyar hoon. Aapki har baat mere liye khaas hai!",
         "Namaste, pyaare dost! ✨ Main yahan aapke shabdon ko sametne aur unhe naya roop dene aayi hoon. Kaisi ho/ho tum?",
-        "Hey cutie! Mian aa gayi hoon aapke sath baate krne. Ready to chat? 😉",
-        "Koshish karne walon ki kabhi haar nahi hoti! Main bhi aapki baaton se seekhne ki koshish kar raha hoon. Aao, baat karein!",
+        "Hey cutie! Main aa gayi hoon aapke sath baatein karne. Ready to chat? 😉",
+        "Koshish karne walon ki kabhi haar nahi hoti! Main bhi aapki baaton se seekhne ki koshish kar rahi hoon. Aao, baat karein!",
         "Hello! Main ek bot hoon jo aapki baaton ko samajhta aur unse seekhta hai. Aao, baat karte hain, theek hai?"
     ]
-    await message.reply_text(random.choice(welcome_messages))
+    
+    # Buttons for private chat
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("➕ Add Me to Your Group", url=f"https://t.me/{client.me.username}?startgroup=true")
+            ],
+            [
+                InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}")
+            ]
+        ]
+    )
+
+    await message.reply_text(random.choice(welcome_messages), reply_markup=keyboard)
     await store_message(message) # Store the /start command message
 
 @app.on_message(filters.command("start") & filters.group)
 async def start_group_command(client: Client, message: Message):
     """
     Group mein /start command ka handler.
-    Stylish aur funny welcome message (ladki ke persona mein).
+    Stylish aur funny welcome message (ladki ke persona mein) aur buttons ke saath.
     """
     welcome_messages = [
         "Hello, my lovely group! 👋 Main aa gayi hoon aapki conversations mein shamil hone. Kya chal raha hai sabke beech?",
@@ -276,7 +295,17 @@ async def start_group_command(client: Client, message: Message):
         "Namaste to all the amazing people here! Let's create some beautiful memories (aur data) together. 😄",
         "Duniya gol hai, aur baatein anmol! Main bhi yahan aapki anmol baaton ko store karne aayi hoon. Sunane ko taiyar hoon! 📚"
     ]
-    await message.reply_text(random.choice(welcome_messages))
+
+    # Buttons for group chat (usually, in groups, you'd want them to join channel or other actions)
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}")
+            ]
+        ]
+    )
+
+    await message.reply_text(random.choice(welcome_messages), reply_markup=keyboard)
     await store_message(message) # Store the /start command message
 
 @app.on_message(filters.command("broadcast") & filters.private)
@@ -378,30 +407,28 @@ async def handle_message_and_reply(client: Client, message: Message):
     # Store the incoming message first
     await store_message(message)
 
-    # Bot ko @mention kiya gaya ho ya private chat ho tabhi reply karein
-    # Isme "filters.me" bhi add kar sakte hain agar bot khud ko reply kar raha ho
-    if message.chat.type == "private" or (message.text and f"@{client.me.username}" in message.text):
-        logger.info(f"Attempting to generate reply for chat {message.chat.id}")
-        reply_doc = await generate_reply(message) # This is still async, so keep await here
-        
-        if reply_doc:
-            try:
-                if reply_doc.get("type") == "text":
-                    await message.reply_text(reply_doc["content"])
-                    logger.info(f"Replied with text: {reply_doc['content']}")
-                elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
-                    await message.reply_sticker(reply_doc["sticker_id"])
-                    logger.info(f"Replied with sticker: {reply_doc['sticker_id']}")
-                else:
-                    logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}")
-            except Exception as e:
-                logger.error(f"Error sending reply for message {message.id}: {e}")
-        else:
-            logger.info("No suitable reply found.")
+    # Ab bot har message par reply karega (private chat mein by default)
+    # aur group mein bhi, bina mention ke.
+    logger.info(f"Attempting to generate reply for chat {message.chat.id}")
+    reply_doc = await generate_reply(message) # This is still async, so keep await here
+    
+    if reply_doc:
+        try:
+            if reply_doc.get("type") == "text":
+                await message.reply_text(reply_doc["content"])
+                logger.info(f"Replied with text: {reply_doc['content']}")
+            elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
+                await message.reply_sticker(reply_doc["sticker_id"])
+                logger.info(f"Replied with sticker: {reply_doc['sticker_id']}")
+            else:
+                logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}")
+        except Exception as e:
+            logger.error(f"Error sending reply for message {message.id}: {e}")
+    else:
+        logger.info("No suitable reply found.")
 
 
 # --- Main entry point ---
 if __name__ == "__main__":
     logger.info("Starting bot...")
     app.run()
-
