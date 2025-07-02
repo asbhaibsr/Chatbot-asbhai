@@ -7,10 +7,10 @@ import os
 
 import asyncio
 import logging
-import threading
+import threading # यह रखना है
 from pyrogram.enums import ChatAction
 
-from aiohttp import web
+from aiohttp import web # यह रखना है
 
 # Logging setup for debugging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -131,9 +131,16 @@ async def vickprivate(client: Client, message: Message):
 # Pyrogram बॉट को एक अलग थ्रेड में चलाने के लिए फंक्शन
 def run_pyrogram_bot():
     try:
-        logger.info("Starting Pyrogram Client in a separate thread...")
-        # नए थ्रेड में asyncio इवेंट लूप सेट करें और बॉट को चलाएं
-        asyncio.run(bot.run()) # <-- यहां बदलाव किया गया है: bot.run() को asyncio.run() के अंदर
+        # नए थ्रेड के लिए एक नया इवेंट लूप बनाएं और सेट करें
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        
+        logger.info("Starting Pyrogram Client in a separate thread with new event loop...")
+        
+        # बॉट को नए इवेंट लूप पर चलाएं
+        new_loop.run_until_complete(bot.run())
+        
+        logger.info("Pyrogram bot thread finished.")
     except Exception as e:
         logger.error(f"Pyrogram bot thread exited with an error: {e}", exc_info=True)
 
