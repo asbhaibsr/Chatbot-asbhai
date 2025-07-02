@@ -4,7 +4,25 @@ from pymongo import MongoClient
 import requests
 import random
 import os
-from pyrogram.enums import ChatAction # <-- यह लाइन पहले ही जोड़ी जा चुकी है
+from pyrogram.enums import ChatAction
+
+import asyncio
+import logging # <-- यह नई लाइन जोड़ी गई है
+
+# Logging setup for debugging (यह अस्थायी है, समस्या हल होने पर हटा दें)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# एक्सेप्शन हैंडलर जोड़ें
+def handle_exception(loop, context):
+    msg = context.get("exception", context["message"])
+    logger.error(f"Caught unhandled exception: {msg}")
+    # आप यहां traceback को और अधिक विस्तृत रूप से लॉग कर सकते हैं यदि आवश्यक हो
+    if "exception" in context:
+        logger.error("Traceback:", exc_info=context["exception"])
+
+loop = asyncio.get_event_loop()
+loop.set_exception_handler(handle_exception)
 
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
@@ -18,7 +36,7 @@ bot = Client("my_koyeb_bot", API_ID, API_HASH, session_string=STRING)
 # आप "my_koyeb_bot" की जगह कोई भी छोटा, वैध नाम जैसे "mybot" या "chatbot_session" दे सकते हैं।
 
 async def is_admins(chat_id: int):
-    # <-- यहां बदलाव किया गया है: iter_chat_members को get_chat_members से बदला गया है
+    # iter_chat_members को get_chat_members से बदला गया है
     return [member.user.id async for member in bot.get_chat_members(chat_id, filter="administrators")]
 
 @bot.on_message(filters.command("start"))
@@ -115,4 +133,8 @@ async def vickprivate(client: Client, message: Message):
                 await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
 
 print("Your Chatbot Is Ready Now! Join @aschat_group")
-bot.run()
+try:
+    bot.run()
+except Exception as e:
+    logger.error(f"Bot exited directly from bot.run() with an error: {e}")
+
