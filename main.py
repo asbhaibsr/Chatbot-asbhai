@@ -2,9 +2,8 @@ import os
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-# from pyrogram.enums import ChatActions # THIS LINE IS REMOVED
-from pyrogram.raw.functions.messages import SetTyping # New import for typing action
-from pyrogram.raw.types import SendMessageTypingAction # New import for typing action type
+from pyrogram.raw.functions.messages import SetTyping
+from pyrogram.raw.types import SendMessageTypingAction
 
 from pymongo import MongoClient
 from datetime import datetime, timedelta
@@ -17,126 +16,98 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # --- Environment Variables ---
-# Inhe Koyeb par environment variables ke roop mein set karein.
-# .env.example file mein references ke liye hain.
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_DB_URI = os.getenv("MONGO_DB_URI")
-OWNER_ID = os.getenv("OWNER_ID") # Owner ki user ID (string format mein)
-
-# API_ID aur API_HASH
+OWNER_ID = os.getenv("OWNER_ID")
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 
 # --- Constants ---
-MAX_MESSAGES_THRESHOLD = 100000 # Jab database mein itne messages ho jayein
-PRUNE_PERCENTAGE = 0.30          # Kitna data delete karna hai (30%)
-UPDATE_CHANNEL_USERNAME = "asbhai_bsr" # Aapke update channel ka username
+MAX_MESSAGES_THRESHOLD = 50000 # Adjusted for better memory management
+PRUNE_PERCENTAGE = 0.30
+UPDATE_CHANNEL_USERNAME = "asbhai_bsr"
 
 # --- MongoDB Setup ---
 try:
-    # pymongo is synchronous, so no 'await' needed here
     client = MongoClient(MONGO_DB_URI)
-    db = client.bot_database # Aap apne database ka naam badal sakte hain
+    db = client.bot_database
     messages_collection = db.messages
     logger.info("MongoDB connection successful.")
 except Exception as e:
     logger.error(f"Failed to connect to MongoDB: {e}")
-    # Bot exit kar jayega agar DB connect nahi hua
+    # Bot will exit if DB connection fails, which is desirable
     exit(1)
 
 # --- Pyrogram Client ---
-# API_ID aur API_HASH ko Client initialization mein add kiya gaya hai
 app = Client(
-    "self_learning_bot", # Session name
-    api_id=API_ID,       # Yahan API_ID add kiya gaya hai
-    api_hash=API_HASH,   # Yahan API_HASH add kiya gaya hai
+    "self_learning_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
 
 # --- Utility Functions ---
 def extract_keywords(text):
-    """
-    Message se basic keywords extract karta hai.
-    Advanced NLP ke liye yahan improvements ki ja sakti hain.
-    """
+    """Extracts basic keywords from a message."""
     if not text:
         return []
-    # Sirf alphanumeric words ko keywords maanein
     words = re.findall(r'\b\w+\b', text.lower())
-    # Common stopwords hata sakte hain, lekin abhi simple rakhte hain
-    return list(set(words)) # Duplicate keywords hatane ke liye
+    return list(set(words))
 
 async def prune_old_messages():
-    """
-    Database se purane messages ko remove karta hai jab threshold cross ho jaye.
-    MongoDB operations are synchronous, so run them in a thread pool executor.
-    """
-    # MongoDB operations should not be awaited directly as pymongo is synchronous.
-    # Use run_in_threadpool if you need to run them without blocking the event loop.
-    # For a simple bot, direct calls might be acceptable if they don't block too long.
-    # However, to be fully async-compliant, you'd wrap them or use Motor.
-    # For now, let's remove 'await' from the calls.
-
-    total_messages = messages_collection.count_documents({}) # AWAIT removed
+    """Removes old messages from the database when the threshold is crossed."""
+    total_messages = messages_collection.count_documents({})
     logger.info(f"Current total messages in DB: {total_messages}")
 
     if total_messages > MAX_MESSAGES_THRESHOLD:
         messages_to_delete_count = int(total_messages * PRUNE_PERCENTAGE)
         logger.info(f"Threshold reached. Deleting {messages_to_delete_count} oldest messages.")
-
-        # Oldest messages ko timestamp ke hisaab se sort karke delete karein
+        
         oldest_message_ids = []
-        # find() returns a Cursor, which needs to be iterated.
-        # We need to explicitly convert it to a list if we want to process it fully before deletion.
-        # Alternatively, iterate and delete one by one if memory is an issue with large deletes.
-        # For this, we'll fetch all IDs first and then delete.
-        for msg in messages_collection.find({}) \
-                                            .sort("timestamp", 1) \
-                                            .limit(messages_to_delete_count):
+        for msg in messages_collection.find({}).sort("timestamp", 1).limit(messages_to_delete_count):
             oldest_message_ids.append(msg['_id'])
 
         if oldest_message_ids:
-            delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}}) # AWAIT removed
+            delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
             logger.info(f"Successfully deleted {delete_result.deleted_count} messages.")
         else:
             logger.warning("No oldest messages found to delete despite threshold being reached.")
     else:
         logger.info("Message threshold not reached. No pruning needed.")
 
-# --- Message Storage Logic ---
 async def store_message(message: Message):
-    """
-    Incoming message ko database mein store karta hai.
-    Contextual information bhi add karta hai.
-    MongoDB operations are synchronous, so remove 'await' from calls.
-    """
+    """Stores incoming messages in the database."""
     try:
+        # Don't store bot's own messages to avoid infinite loops and unnecessary data
+        if message.from_user and message.from_user.is_bot:
+            return
+
         message_data = {
             "message_id": message.id,
             "user_id": message.from_user.id if message.from_user else None,
             "username": message.from_user.username if message.from_user else None,
             "first_name": message.from_user.first_name if message.from_user else None,
             "chat_id": message.chat.id,
-            "chat_type": message.chat.type.name, # private, group, supergroup, channel
+            "chat_type": message.chat.type.name,
             "chat_title": message.chat.title if message.chat.type != "private" else None,
             "timestamp": datetime.now(),
             "is_bot_observed_pair": False, # Default to False, will be set true if it's a learned pair
         }
 
-        # Text message handling
+        # Handle text messages
         if message.text:
             message_data["type"] = "text"
             message_data["content"] = message.text
             message_data["keywords"] = extract_keywords(message.text)
             message_data["sticker_id"] = None
-        # Sticker message handling
+        # Handle sticker messages
         elif message.sticker:
             message_data["type"] = "sticker"
             message_data["content"] = message.sticker.emoji if message.sticker.emoji else "" # Store emoji as content
             message_data["sticker_id"] = message.sticker.file_id
             message_data["keywords"] = extract_keywords(message.sticker.emoji) # Stickers se bhi keywords (emoji)
 
-        # Reply to message context (very important for learning)
+        # Reply to message context (important for learning)
         if message.reply_to_message:
             message_data["is_reply"] = True
             message_data["replied_to_message_id"] = message.reply_to_message.id
@@ -153,104 +124,91 @@ async def store_message(message: Message):
 
             # If this message is a reply, we can mark the original message (if found in DB)
             # as part of a learned pair (is_bot_observed_pair)
-            # find_one returns a dict or None, not an awaitable
-            original_msg_in_db = messages_collection.find_one({"chat_id": message.chat.id, "message_id": message.reply_to_message.id}) # AWAIT removed
+            original_msg_in_db = messages_collection.find_one({"chat_id": message.chat.id, "message_id": message.reply_to_message.id})
             if original_msg_in_db:
-                # update_one returns an UpdateResult object, not an awaitable
-                messages_collection.update_one( # AWAIT removed
+                messages_collection.update_one(
                     {"_id": original_msg_in_db["_id"]},
                     {"$set": {"is_bot_observed_pair": True}}
                 )
                 # Also mark the current message (the reply) as part of an observed pair
                 message_data["is_bot_observed_pair"] = True
 
-
-        messages_collection.insert_one(message_data) # AWAIT removed
+        messages_collection.insert_one(message_data)
         logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}")
         
-        # Pruning check after storing a message. This function is async, so await it.
+        # Check for pruning after storing a message
         await prune_old_messages()
 
     except Exception as e:
         logger.error(f"Error storing message {message.id}: {e}")
 
-# --- Reply Generation Logic ---
 async def generate_reply(message: Message):
-    """
-    Bot ke liye reply generate karta hai.
-    Priority: Direct Contextual Match (is_bot_observed_pair=True) > General Keyword Matching.
-    MongoDB operations are synchronous, so remove 'await' from calls.
-    """
-    # Typing action dikhao reply generate hone se pehle
-    # Using app.invoke() for a low-level Telegram API call for typing
+    """Generates a reply for the bot."""
+    # Show typing action before generating a reply
     await app.invoke(
         SetTyping(
             peer=await app.resolve_peer(message.chat.id),
             action=SendMessageTypingAction()
         )
     )
-    await asyncio.sleep(0.5) # Thoda delay, real feel ke liye
+    await asyncio.sleep(0.5) # Small delay for a more natural feel
 
-    if not message.text and not message.sticker: # Agar message mein text ya sticker nahi hai to reply nahi
+    if not message.text and not message.sticker:
         return
 
     query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
     query_keywords = extract_keywords(query_content)
 
-    if not query_keywords and not query_content: # Agar koi content hi nahi hai to reply nahi
+    if not query_keywords and not query_content:
         logger.debug("No content or keywords extracted for reply generation.")
         return
 
     # 1. Search for Direct Contextual Matches (is_bot_observed_pair=True)
-    
-    # Try group-specific first (matching replied_to_content exactly or closely)
-    # Using regex for partial match, case-insensitive
+    # Try group-specific first
     learned_replies_group_cursor = messages_collection.find({
         "chat_id": message.chat.id,
         "is_bot_observed_pair": True,
-        "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"} # Exact match for learning
+        "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}
     })
     
     potential_replies = []
-    for doc in learned_replies_group_cursor: # AWAIT removed, now synchronous iteration
+    for doc in learned_replies_group_cursor:
         potential_replies.append(doc)
 
-    if not potential_replies: # Agar group mein exact match nahi mila, toh global mein dekho
+    if not potential_replies: # If no exact match in group, look globally
         learned_replies_global_cursor = messages_collection.find({
             "is_bot_observed_pair": True,
             "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}
         })
-        for doc in learned_replies_global_cursor: # AWAIT removed, now synchronous iteration
+        for doc in learned_replies_global_cursor:
             potential_replies.append(doc)
 
     if potential_replies:
         chosen_reply = random.choice(potential_replies)
-        return chosen_reply # Return the chosen document, handler will send it
+        return chosen_reply
 
     logger.info(f"No direct observed reply for: '{query_content}'. Falling back to keyword search.")
 
     # 2. Fallback to General Keyword Matching (any stored message)
-    
-    # Construct regex for keywords
     keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
     
     # Try group-specific general messages first
     general_replies_group_cursor = messages_collection.find({
         "chat_id": message.chat.id,
-        "type": {"$in": ["text", "sticker"]}, # Reply with either text or sticker
-        "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True} # Agar keywords nahi to koi bhi content
+        "type": {"$in": ["text", "sticker"]},
+        "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
     })
 
     potential_replies = []
-    for doc in general_replies_group_cursor: # AWAIT removed, now synchronous iteration
+    for doc in general_replies_group_cursor:
         potential_replies.append(doc)
 
-    if not potential_replies: # Agar group mein nahi mila, toh global mein dekho
+    if not potential_replies: # If no match in group, look globally
         general_replies_global_cursor = messages_collection.find({
             "type": {"$in": ["text", "sticker"]},
             "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
         })
-        for doc in general_replies_global_cursor: # AWAIT removed, now synchronous iteration
+        for doc in general_replies_global_cursor:
             potential_replies.append(doc)
 
     if potential_replies:
@@ -258,16 +216,13 @@ async def generate_reply(message: Message):
         return chosen_reply
     
     logger.info(f"No general keyword reply found for: '{query_content}'.")
-    return None # Koi suitable reply nahi mila
+    return None
 
 # --- Pyrogram Event Handlers ---
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_private_command(client: Client, message: Message):
-    """
-    Private chat mein /start command ka handler.
-    Stylish aur funny welcome message (ladki ke persona mein) aur buttons ke saath.
-    """
+    """Handles /start command in private chat."""
     welcome_messages = [
         "Hi there! 👋 Main aa gayi hoon aapki baaton ka hissa banne. Chalo, kuch mithaas bhari baatein karte hain!",
         "Helloooo! 💖 Main sunne aur seekhne ke liye taiyar hoon. Aapki har baat mere liye khaas hai!",
@@ -277,7 +232,6 @@ async def start_private_command(client: Client, message: Message):
         "Hello! Main ek bot hoon jo aapki baaton ko samajhta aur unse seekhta hai. Aao, baat karte hain, theek hai?"
     ]
     
-    # Buttons for private chat
     keyboard = InlineKeyboardMarkup(
         [
             [
@@ -290,14 +244,11 @@ async def start_private_command(client: Client, message: Message):
     )
 
     await message.reply_text(random.choice(welcome_messages), reply_markup=keyboard)
-    await store_message(message) # Store the /start command message
+    await store_message(message)
 
 @app.on_message(filters.command("start") & filters.group)
 async def start_group_command(client: Client, message: Message):
-    """
-    Group mein /start command ka handler.
-    Stylish aur funny welcome message (ladki ke persona mein) aur buttons ke saath.
-    """
+    """Handles /start command in groups."""
     welcome_messages = [
         "Hello, my lovely group! 👋 Main aa gayi hoon aapki conversations mein shamil hone. Kya chal raha hai sabke beech?",
         "Hey everyone! 💖 Main sun rahi hoon aap sab ki baatein. Chalo, kuch interesting discussions karte hain!",
@@ -306,7 +257,6 @@ async def start_group_command(client: Client, message: Message):
         "Duniya gol hai, aur baatein anmol! Main bhi yahan aapki anmol baaton ko store karne aayi hoon. Sunane ko taiyar hoon! 📚"
     ]
 
-    # Buttons for group chat (usually, in groups, you'd want them to join channel or other actions)
     keyboard = InlineKeyboardMarkup(
         [
             [
@@ -316,14 +266,11 @@ async def start_group_command(client: Client, message: Message):
     )
 
     await message.reply_text(random.choice(welcome_messages), reply_markup=keyboard)
-    await store_message(message) # Store the /start command message
+    await store_message(message)
 
 @app.on_message(filters.command("broadcast") & filters.private)
 async def broadcast_command(client: Client, message: Message):
-    """
-    /broadcast command handler (only for OWNER_ID).
-    MongoDB operations are synchronous, so remove 'await' from calls.
-    """
+    """Handles /broadcast command (owner only)."""
     if str(message.from_user.id) != OWNER_ID:
         await message.reply_text("Sorry, aapko yeh command use karne ki anumati nahi hai.")
         return
@@ -334,42 +281,34 @@ async def broadcast_command(client: Client, message: Message):
 
     broadcast_text = " ".join(message.command[1:])
     
-    # Find all unique chat IDs where the bot has seen messages
-    # distinct returns a list, not an awaitable
-    unique_chat_ids = messages_collection.distinct("chat_id") # AWAIT removed
+    unique_chat_ids = messages_collection.distinct("chat_id")
 
     sent_count = 0
     failed_count = 0
     for chat_id in unique_chat_ids:
         try:
-            # Avoid sending broadcast to the owner's private chat again if they initiated it there
             if chat_id == message.chat.id and message.chat.type == "private":
                 continue 
             
             await client.send_message(chat_id, broadcast_text)
             sent_count += 1
-            await asyncio.sleep(0.1) # Small delay to avoid flood waits
+            await asyncio.sleep(0.1)
         except Exception as e:
             logger.error(f"Failed to send broadcast to chat {chat_id}: {e}")
             failed_count += 1
     
     await message.reply_text(f"Broadcast poora hua! {sent_count} chats ko bheja, {failed_count} chats ke liye asafal raha.")
-    await store_message(message) # Store the broadcast command message
+    await store_message(message)
 
 @app.on_message(filters.command("stats") & filters.private)
 async def stats_private_command(client: Client, message: Message):
-    """
-    Private chat mein /stats check command ka handler.
-    MongoDB operations are synchronous, so remove 'await' from calls.
-    """
+    """Handles /stats command in private chat."""
     if len(message.command) < 2 or message.command[1].lower() != "check":
         await message.reply_text("Upyog: `/stats check`")
         return
 
-    # count_documents returns an int, not an awaitable
-    total_messages = messages_collection.count_documents({}) # AWAIT removed
-    # distinct returns a list, not an awaitable
-    unique_group_ids = messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}}) # AWAIT removed
+    total_messages = messages_collection.count_documents({})
+    unique_group_ids = messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}})
     num_groups = len(unique_group_ids)
 
     stats_text = (
@@ -378,22 +317,17 @@ async def stats_private_command(client: Client, message: Message):
         f"• Total messages jo maine store kiye: **{total_messages}**"
     )
     await message.reply_text(stats_text)
-    await store_message(message) # Store the stats command message
+    await store_message(message)
 
 @app.on_message(filters.command("stats") & filters.group)
 async def stats_group_command(client: Client, message: Message):
-    """
-    Group chat mein /stats check command ka handler.
-    MongoDB operations are synchronous, so remove 'await' from calls.
-    """
+    """Handles /stats command in group chat."""
     if len(message.command) < 2 or message.command[1].lower() != "check":
         await message.reply_text("Upyog: `/stats check`")
         return
 
-    # count_documents returns an int, not an awaitable
-    total_messages = messages_collection.count_documents({}) # AWAIT removed
-    # distinct returns a list, not an awaitable
-    unique_group_ids = messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}}) # AWAIT removed
+    total_messages = messages_collection.count_documents({})
+    unique_group_ids = messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}})
     num_groups = len(unique_group_ids)
 
     stats_text = (
@@ -402,25 +336,21 @@ async def stats_group_command(client: Client, message: Message):
         f"• Total messages jo maine store kiye: **{total_messages}**"
     )
     await message.reply_text(stats_text)
-    await store_message(message) # Store the stats command message
+    await store_message(message)
 
 @app.on_message(filters.text | filters.sticker)
 async def handle_message_and_reply(client: Client, message: Message):
-    """
-    Sabhi incoming text aur sticker messages ko handle karta hai.
-    Store karta hai aur relevant reply generate karta hai.
-    """
-    # Bot ke khud ke messages ko store ya process na karein
+    """Handles all incoming text and sticker messages."""
+    # Don't process messages from other bots
     if message.from_user and message.from_user.is_bot:
         return
 
     # Store the incoming message first
     await store_message(message)
 
-    # Ab bot har message par reply karega (private chat mein by default)
-    # aur group mein bhi, bina mention ke.
+    # Attempt to generate and send a reply
     logger.info(f"Attempting to generate reply for chat {message.chat.id}")
-    reply_doc = await generate_reply(message) # This is still async, so keep await here
+    reply_doc = await generate_reply(message)
     
     if reply_doc:
         try:
@@ -441,4 +371,6 @@ async def handle_message_and_reply(client: Client, message: Message):
 # --- Main entry point ---
 if __name__ == "__main__":
     logger.info("Starting bot...")
+    # This will run the Pyrogram client in a blocking manner.
+    # The Docker CMD will ensure the Flask server runs in parallel.
     app.run()
