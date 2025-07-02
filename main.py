@@ -6,16 +6,16 @@ import random
 import os
 
 import asyncio
-import logging
-import threading # यह रखना है
+import logging # Logging को वापस सक्रिय रखें, यह debugging के लिए महत्वपूर्ण है
 from pyrogram.enums import ChatAction
 
-from aiohttp import web # यह रखना है
+from aiohttp import web # यह वेब सर्वर के लिए रखना है
 
 # Logging setup for debugging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# एक्सेप्शन हैंडलर (इसे रखें)
 def handle_exception(loop, context):
     msg = context.get("exception", context["message"])
     logger.error(f"Caught unhandled exception: {msg}")
@@ -128,28 +128,12 @@ async def vickprivate(client: Client, message: Message):
                 is_text = chatai.find_one({"text": hey})
                 await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
 
-# Pyrogram बॉट को एक अलग थ्रेड में चलाने के लिए फंक्शन
-def run_pyrogram_bot():
-    try:
-        # नए थ्रेड के लिए एक नया इवेंट लूप बनाएं और सेट करें
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        
-        logger.info("Starting Pyrogram Client in a separate thread with new event loop...")
-        
-        # बॉट को नए इवेंट लूप पर चलाएं
-        new_loop.run_until_complete(bot.run())
-        
-        logger.info("Pyrogram bot thread finished.")
-    except Exception as e:
-        logger.error(f"Pyrogram bot thread exited with an error: {e}", exc_info=True)
-
 # हेल्थ चेक के लिए वेब सर्वर
 async def health_check_route(request):
     return web.Response(text="Bot is alive!")
 
-# मुख्य रनर जो वेब सर्वर शुरू करता है
-async def main_runner():
+# मुख्य रनर जो वेब सर्वर और बॉट दोनों को शुरू करता है
+async def main_startup():
     # aiohttp वेब सर्वर सेट करें
     app = web.Application()
     app.router.add_get('/', health_check_route)
@@ -159,27 +143,34 @@ async def main_runner():
     await site.start()
     logger.info("Web server started for health checks on port 8080")
 
-    # वेब सर्वर को तब तक चलाता रहेगा जब तक प्रक्रिया समाप्त न हो जाए
+    # Pyrogram क्लाइंट शुरू करें
+    logger.info("Starting Pyrogram Client...")
+    await bot.start()
+    logger.info("Pyrogram Client Started! Bot is ready.")
+
+    # दोनों को एक साथ चलने दें
     try:
-        while True:
-            await asyncio.sleep(3600) # हर घंटे एक बार चेक करने के लिए, या कोई और उचित अंतराल
+        # Pyrogram को अनिश्चित काल तक चलाने के लिए एक Future बनाएं
+        # और aiohttp वेब सर्वर को पृष्ठभूमि में चलते रहने दें
+        # bot.idle() Pyrogram 2.x में काम नहीं करता है, इसलिए हम asyncio.Future() का उपयोग करते हैं
+        await asyncio.Future() # यह इस टास्क को तब तक चालू रखेगा जब तक इसे Cancelled न किया जाए
     except asyncio.CancelledError:
-        logger.info("Main web server loop cancelled.")
+        logger.info("Main loop cancelled (expected during shutdown).")
     finally:
+        # एप्लिकेशन बंद होने पर दोनों को ठीक से बंद करें
+        logger.info("Shutting down Pyrogram client...")
+        await bot.stop()
+        logger.info("Pyrogram client stopped.")
+        
+        logger.info("Shutting down web server...")
         await runner.cleanup()
         logger.info("Web server shut down.")
 
 # बॉट और वेब सर्वर को शुरू करें
 if __name__ == "__main__":
     print("Your Chatbot Is Ready Now! Join @aschat_group")
-    
-    # Pyrogram बॉट को एक अलग थ्रेड में शुरू करें
-    pyrogram_thread = threading.Thread(target=run_pyrogram_bot)
-    pyrogram_thread.start()
-
-    # मुख्य थ्रेड में वेब सर्वर और asyncio इवेंट लूप चलाएं
     try:
-        asyncio.run(main_runner())
+        asyncio.run(main_startup()) # main_startup को asyncio.run() के अंदर चलाएं
     except Exception as e:
         logger.error(f"An error occurred in main execution loop: {e}", exc_info=True)
 
