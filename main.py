@@ -1,7 +1,8 @@
 import os
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.types import Message, ChatActions, InlineKeyboardMarkup, InlineKeyboardButton # Naye imports
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton # ChatActions removed from here
+from pyrogram.enums import ChatActions # Naya import path for ChatActions
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 import logging
