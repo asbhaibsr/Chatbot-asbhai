@@ -1,24 +1,40 @@
 {
-  "name": "Vick-Ai", 
+  "name": "Your Pyrogram Bot",
   "logo": "https://te.legra.ph/file/1fe7ba504e18d33aeb761.png",
-  "description": "An Advanced Telegram UserId Chatbot.",
+  "description": "An Advanced Telegram AI Chatbot with Inline Buttons and Owner-only Broadcast Feature.",
+  "repository": "https://github.com/yourusername/your-bot-repo",
+  "keywords": ["telegram", "bot", "pyrogram", "chatbot", "ai", "broadcast", "mongodb"],
   "env": {
-    "STRING": {
-      "description": "Pyrogram String session of your account",
-      "required": true
-    },        
-    "MONGO_URL": {
-      "description": "mongo db url here",
-      "required": true
-    },
     "API_ID": {
-      "description": "telegram api id here",
+      "description": "Your Telegram API ID (get it from my.telegram.org)",
       "required": true
     },
     "API_HASH": {
-      "description": "telegram api hash here",
+      "description": "Your Telegram API Hash (get it from my.telegram.org)",
+      "required": true
+    },
+    "BOT_TOKEN": {
+      "description": "Your Bot Token (get it from @BotFather)",
+      "required": true
+    },
+    "MONGO_URL": {
+      "description": "Your MongoDB connection URL (e.g., from MongoDB Atlas)",
+      "required": true
+    },
+    "OWNER_ID": {
+      "description": "Your Telegram User ID (numeric, for owner-only commands like broadcast). Get it from @userinfobot.",
       "required": true
     }
   },
-  "addons": []
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "eco"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
 }
