@@ -7,10 +7,10 @@ import os
 
 # Logging and Asyncio for debugging
 import asyncio
-import logging # <-- यह नई लाइन जोड़ी गई है
+import logging
 from pyrogram.enums import ChatAction
 
-from aiohttp import web # <-- यह नई लाइन जोड़ी गई है (वेब सर्वर के लिए)
+from aiohttp import web # <-- वेब सर्वर के लिए
 
 # Logging setup for debugging (यह अस्थायी है, समस्या हल होने पर हटा दें)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 def handle_exception(loop, context):
     msg = context.get("exception", context["message"])
     logger.error(f"Caught unhandled exception: {msg}")
-    # यहां आप traceback को और अधिक विस्तृत रूप से लॉग कर सकते हैं यदि आवश्यक हो
     if "exception" in context:
         logger.error("Traceback:", exc_info=context["exception"])
 
@@ -32,14 +31,9 @@ API_HASH = os.environ.get("API_HASH")
 STRING = os.environ.get("STRING")
 MONGO_URL = os.environ.get("MONGO_URL")
 
-# Pyrogram को सेशन स्ट्रिंग को सीधे फाइल नाम के रूप में उपयोग करने से रोकने के लिए
-# 'name' पैरामीटर में एक छोटा, स्थिर नाम दिया गया है, और 'session_string'
-# पैरामीटर में आपकी लंबी सेशन स्ट्रिंग (जो ENVIRONMENT VARIABLE से आ रही है) पास की गई है।
 bot = Client("my_koyeb_bot", API_ID, API_HASH, session_string=STRING)
-# आप "my_koyeb_bot" की जगह कोई भी छोटा, वैध नाम जैसे "mybot" या "chatbot_session" दे सकते हैं।
 
 async def is_admins(chat_id: int):
-    # iter_chat_members को get_chat_members से बदला गया है
     return [member.user.id async for member in bot.get_chat_members(chat_id, filter="administrators")]
 
 @bot.on_message(filters.command("start"))
@@ -150,26 +144,24 @@ async def run_both():
     await site.start()
     logger.info("Web server started for health checks on port 8080")
 
-    # Pyrogram बॉट को चलाएं (यह ब्लॉक होने वाला कॉल है, इसलिए इसे await करें)
-    # Pyrogram का run() मेथड खुद ही asyncio इवेंट लूप को मैनेज करता है,
-    # इसलिए इसे gather के साथ नहीं चलाया जा सकता अगर वह blocking हो।
-    # Pyrogram 2.x के साथ, bot.run() blocking है।
-    # हमें Pyrogram को अपना इवेंट लूप चलाने देना होगा, और वेब सर्वर को Pyrogram के लूप में जोड़ना होगा।
-    # लेकिन bot.run() एक अलग थ्रेड में चलता है, इसलिए हमें सुनिश्चित करना होगा कि दोनों एक ही लूप में हों।
-
-    # सरल समाधान के लिए, हम Pyrogram को अपने लूप को चलाने देंगे, और वेब सर्वर को उसके साथ इंटीग्रेट करेंगे।
-    # Pyrogram 2.x के साथ bot.run() Blocking है, इसलिए हम इसे सीधे asyncio.gather() में नहीं डाल सकते।
-    # इसके बजाय, हम bot.start() और bot.idle() का उपयोग करेंगे।
-
+    # Pyrogram क्लाइंट शुरू करें
     logger.info("Starting Pyrogram Client...")
     await bot.start()
     logger.info("Pyrogram Client Started! Bot is ready.")
-    await bot.idle() # यह बॉट को तब तक चलाता रहेगा जब तक उसे रोका न जाए
+
+    # बॉट को तब तक चलाता रहेगा जब तक उसे रोका न जाए
+    try:
+        while True:
+            await asyncio.Future() # यह एक अनंत लूप बनाता है जो बैकग्राउंड में चलता रहता है
+    except asyncio.CancelledError:
+        logger.info("Bot stopped by CancelledError (expected during shutdown)")
+    finally:
+        await bot.stop() # सुनिश्चित करें कि बॉट ठीक से बंद हो जाए
 
 # बॉट और वेब सर्वर को शुरू करें
 print("Your Chatbot Is Ready Now! Join @aschat_group")
 try:
-    asyncio.run(run_both()) # <-- यह main() की जगह run_both() को कॉल करेगा
+    asyncio.run(run_both())
 except Exception as e:
     logger.error(f"An error occurred in main execution loop: {e}", exc_info=True)
 
