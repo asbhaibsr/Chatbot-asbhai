@@ -28,6 +28,8 @@ MONGO_URL = os.environ.get("MONGO_URL")
 
 bot = Client("my_koyeb_bot", API_ID, API_HASH, session_string=STRING)
 
+# **ध्यान दें: is_admins फंक्शन अभी भी है, लेकिन अब chatbot on/off कमांड्स में उपयोग नहीं होगा।**
+# यदि आप पूरी तरह से एडमिन-संबंधित कोई भी फ़ंक्शन नहीं चाहते हैं, तो आप इसे हटा सकते हैं।
 async def is_admins(chat_id: int):
     try:
         return [member.user.id async for member in bot.get_chat_members(chat_id, filter="administrators")]
@@ -44,11 +46,7 @@ async def start(client, message):
 async def chatbotofd(client, message):
     vickdb = MongoClient(MONGO_URL)
     vick = vickdb["VickDb"]["Vick"]
-    if message.from_user:
-        user = message.from_user.id
-        chat_id = message.chat.id
-        if user not in await is_admins(chat_id):
-            return await message.reply_text("You are not admin")
+    # **यहां से एडमिन चेक हटा दिया गया है**
     is_vick = vick.find_one({"chat_id": message.chat.id})
     if not is_vick:
         vick.insert_one({"chat_id": message.chat.id})
@@ -60,11 +58,7 @@ async def chatbotofd(client, message):
 async def chatboton(client, message):
     vickdb = MongoClient(MONGO_URL)
     vick = vickdb["VickDb"]["Vick"]
-    if message.from_user:
-        user = message.from_user.id
-        chat_id = message.chat.id
-        if user not in await is_admins(chat_id):
-            return await message.reply_text("You are not admin")
+    # **यहां से एडमिन चेक हटा दिया गया है**
     is_vick = vick.find_one({"chat_id": message.chat.id})
     if not is_vick:
         await message.reply_text("Chatbot Is Already Enabled")
