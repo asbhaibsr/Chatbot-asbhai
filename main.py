@@ -6,16 +6,15 @@ import random
 import os
 
 import asyncio
-import logging # Logging को वापस सक्रिय रखें, यह debugging के लिए महत्वपूर्ण है
+import logging
 from pyrogram.enums import ChatAction
 
-from aiohttp import web # यह वेब सर्वर के लिए रखना है
+from aiohttp import web
 
 # Logging setup for debugging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# एक्सेप्शन हैंडलर (इसे रखें)
 def handle_exception(loop, context):
     msg = context.get("exception", context["message"])
     logger.error(f"Caught unhandled exception: {msg}")
@@ -33,11 +32,17 @@ MONGO_URL = os.environ.get("MONGO_URL")
 bot = Client("my_koyeb_bot", API_ID, API_HASH, session_string=STRING)
 
 async def is_admins(chat_id: int):
-    return [member.user.id async for member in bot.get_chat_members(chat_id, filter="administrators")]
+    # यह सुनिश्चित करने के लिए कि resolve_peer समस्या न हो, हम इसे try-except में डाल सकते हैं
+    try:
+        return [member.user.id async for member in bot.get_chat_members(chat_id, filter="administrators")]
+    except Exception as e:
+        logger.error(f"Error getting chat members for {chat_id}: {e}", exc_info=True)
+        return [] # खाली सूची लौटाएं यदि कोई त्रुटि हो
 
 @bot.on_message(filters.command("start"))
 async def start(client, message):
-    await bot.join_chat("@aschat_group")
+    # await bot.join_chat("@aschat_group") # <-- यह लाइन हटाई गई है!
+    await message.reply_text("Hello! I am your chatbot. Please add me to a group to use my features.")
 
 @bot.on_message(filters.command("chatbot off", prefixes=["/", ".", "?", "-"]) & ~filters.private)
 async def chatbotofd(client, message):
@@ -148,16 +153,20 @@ async def main_startup():
     await bot.start()
     logger.info("Pyrogram Client Started! Bot is ready.")
 
+    # बॉट को शुरू होने पर @aschat_group में शामिल होने का प्रयास करें (केवल एक बार)
+    # यदि समूह निजी है, तो बॉट को मैन्युअल रूप से जोड़ना होगा
+    try:
+        # await bot.join_chat("@aschat_group") # <-- इसे यहां या मैन्युअल रूप से करें
+        logger.info("Attempted to join @aschat_group (if public and not already joined).")
+    except Exception as e:
+        logger.warning(f"Failed to join @aschat_group on startup: {e}")
+
     # दोनों को एक साथ चलने दें
     try:
-        # Pyrogram को अनिश्चित काल तक चलाने के लिए एक Future बनाएं
-        # और aiohttp वेब सर्वर को पृष्ठभूमि में चलते रहने दें
-        # bot.idle() Pyrogram 2.x में काम नहीं करता है, इसलिए हम asyncio.Future() का उपयोग करते हैं
-        await asyncio.Future() # यह इस टास्क को तब तक चालू रखेगा जब तक इसे Cancelled न किया जाए
+        await asyncio.Future()
     except asyncio.CancelledError:
         logger.info("Main loop cancelled (expected during shutdown).")
     finally:
-        # एप्लिकेशन बंद होने पर दोनों को ठीक से बंद करें
         logger.info("Shutting down Pyrogram client...")
         await bot.stop()
         logger.info("Pyrogram client stopped.")
@@ -170,7 +179,7 @@ async def main_startup():
 if __name__ == "__main__":
     print("Your Chatbot Is Ready Now! Join @aschat_group")
     try:
-        asyncio.run(main_startup()) # main_startup को asyncio.run() के अंदर चलाएं
+        asyncio.run(main_startup())
     except Exception as e:
         logger.error(f"An error occurred in main execution loop: {e}", exc_info=True)
 
