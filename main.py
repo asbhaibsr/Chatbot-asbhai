@@ -5,28 +5,27 @@ import requests
 import random
 import os
 
-# Logging and Asyncio for debugging - इन्हें आप हटा सकते हैं
-# import asyncio # <-- यह रखना होगा क्योंकि asyncio.Future() और asyncio.run() का उपयोग हो रहा है
-# import logging # <-- इस लाइन को हटा दें
+import asyncio
+import logging
+import threading # <-- यह नई लाइन जोड़ी गई है
 from pyrogram.enums import ChatAction
 
-from aiohttp import web # <-- यह वेब सर्वर के लिए रखना होगा
+from aiohttp import web # <-- यह रखना होगा (वेब सर्वर के लिए)
 
-# Logging setup for debugging (यह अस्थायी है, समस्या हल होने पर हटा दें)
-# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s') # <-- इस लाइन को हटा दें
-# logger = logging.getLogger(__name__) # <-- इस लाइन को हटा दें
+# Logging setup for debugging (अस्थायी रूप से फिर से सक्रिय)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# एक्सेप्शन हैंडलर जोड़ें - इस ब्लॉक को हटा दें
-# def handle_exception(loop, context):
-#     msg = context.get("exception", context["message"])
-#     logger.error(f"Caught unhandled exception: {msg}")
-#     if "exception" in context:
-#         logger.error("Traceback:", exc_info=context["exception"])
+# एक्सेप्शन हैंडलर जोड़ें (यह भी सक्रिय)
+def handle_exception(loop, context):
+    msg = context.get("exception", context["message"])
+    logger.error(f"Caught unhandled exception: {msg}")
+    if "exception" in context:
+        logger.error("Traceback:", exc_info=context["exception"])
 
-# loop = asyncio.get_event_loop() # <-- इस लाइन को हटा दें
-# loop.set_exception_handler(handle_exception) # <-- इस लाइन को हटा दें
+loop = asyncio.get_event_loop()
+loop.set_exception_handler(handle_exception)
 
-# API keys and Mongo URL - ये रखने होंगे
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 STRING = os.environ.get("STRING")
@@ -130,12 +129,20 @@ async def vickprivate(client: Client, message: Message):
                 is_text = chatai.find_one({"text": hey})
                 await (message.reply_sticker(hey) if is_text['check'] == "sticker" else message.reply_text(hey))
 
-# हेल्थ चेक के लिए एक छोटा वेब सर्वर फंक्शन
+# Pyrogram बॉट को एक अलग थ्रेड में चलाने के लिए फंक्शन
+def run_pyrogram_bot():
+    try:
+        logger.info("Starting Pyrogram Client in a separate thread...")
+        bot.run() # यह Pyrogram को ब्लॉक करते हुए चलाता है
+    except Exception as e:
+        logger.error(f"Pyrogram bot thread exited with an error: {e}", exc_info=True)
+
+# हेल्थ चेक के लिए वेब सर्वर
 async def health_check_route(request):
     return web.Response(text="Bot is alive!")
 
-# Pyrogram बॉट और वेब सर्वर को एक साथ चलाने के लिए मुख्य फंक्शन
-async def run_both():
+# मुख्य रनर जो वेब सर्वर शुरू करता है
+async def main_runner():
     # aiohttp वेब सर्वर सेट करें
     app = web.Application()
     app.router.add_get('/', health_check_route)
@@ -143,27 +150,29 @@ async def run_both():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080) # Koyeb के 8080 पोर्ट पर लिसन करें
     await site.start()
-    # logger.info("Web server started for health checks on port 8080") # <-- इस लाइन को हटा दें
+    logger.info("Web server started for health checks on port 8080")
 
-    # Pyrogram क्लाइंट शुरू करें
-    # logger.info("Starting Pyrogram Client...") # <-- इस लाइन को हटा दें
-    await bot.start()
-    # logger.info("Pyrogram Client Started! Bot is ready.") # <-- इस लाइन को हटा दें
-
-    # बॉट को तब तक चलाता रहेगा जब तक उसे रोका न जाए
+    # वेब सर्वर को तब तक चलाता रहेगा जब तक प्रक्रिया समाप्त न हो जाए
     try:
         while True:
-            await asyncio.Future() # यह एक अनंत लूप बनाता है जो बैकग्राउंड में चलता रहता है
+            await asyncio.sleep(3600) # हर घंटे एक बार चेक करने के लिए, या कोई और उचित अंतराल
     except asyncio.CancelledError:
-        # logger.info("Bot stopped by CancelledError (expected during shutdown)") # <-- इस लाइन को हटा दें
-        pass # इसे pass कर दें, या logger.info ही रखें अगर आप shutdown लॉग देखना चाहते हैं
+        logger.info("Main web server loop cancelled.")
     finally:
-        await bot.stop() # सुनिश्चित करें कि बॉट ठीक से बंद हो जाए
+        await runner.cleanup()
+        logger.info("Web server shut down.")
 
 # बॉट और वेब सर्वर को शुरू करें
-print("Your Chatbot Is Ready Now! Join @aschat_group")
-try:
-    asyncio.run(run_both())
-except Exception as e:
-    # logger.error(f"An error occurred in main execution loop: {e}", exc_info=True) # <-- इस लाइन को हटा दें
-    pass # इसे pass कर दें
+if __name__ == "__main__":
+    print("Your Chatbot Is Ready Now! Join @aschat_group")
+    
+    # Pyrogram बॉट को एक अलग थ्रेड में शुरू करें
+    pyrogram_thread = threading.Thread(target=run_pyrogram_bot)
+    pyrogram_thread.start()
+
+    # मुख्य थ्रेड में वेब सर्वर और asyncio इवेंट लूप चलाएं
+    try:
+        asyncio.run(main_runner())
+    except Exception as e:
+        logger.error(f"An error occurred in main execution loop: {e}", exc_info=True)
+
