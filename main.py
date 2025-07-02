@@ -8,7 +8,7 @@ from pyrogram.enums import ChatAction
 
 import asyncio
 import logging
-from aiohttp import web # aiohttp को इंपोर्ट करें
+from aiohttp import web
 
 # Logging setup for debugging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -21,10 +21,6 @@ def handle_exception(loop, context):
     if "exception" in context:
         logger.error("Traceback:", exc_info=context["exception"])
 
-# Koyeb पर मेन लूप को संभालना थोड़ा अलग है, इसलिए इसे 'if __name__ == "__main__":' ब्लॉक में ले जाएंगे
-# loop = asyncio.get_event_loop()
-# loop.set_exception_handler(handle_exception)
-
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 STRING = os.environ.get("STRING")
@@ -33,7 +29,6 @@ MONGO_URL = os.environ.get("MONGO_URL")
 bot = Client("my_koyeb_bot", API_ID, API_HASH, session_string=STRING)
 
 async def is_admins(chat_id: int):
-    # try-except ब्लॉक को वापस लाएं क्योंकि Peer ID एरर अभी भी हो सकता है
     try:
         return [member.user.id async for member in bot.get_chat_members(chat_id, filter="administrators")]
     except Exception as e:
@@ -43,18 +38,8 @@ async def is_admins(chat_id: int):
 @bot.on_message(filters.command("start"))
 async def start(client, message):
     # bot.join_chat("@aschat_group") को हटा दें यदि आप चाहते हैं कि यह मैन्युअल हो
-    # यदि आप इसे स्वचालित रूप से जोड़ना चाहते हैं, तो इसे `main_startup` में एक बार करें
-    # और सुनिश्चित करें कि समूह सार्वजनिक है या बॉट को पहले से जोड़ा गया है।
     await message.reply_text("Hello! I am your chatbot. Please add me to a group to use my features.")
     
-    # आप यहां एक बार बॉट को समूह में शामिल करने का प्रयास कर सकते हैं यदि यह सार्वजनिक है
-    # try:
-    #     await bot.join_chat("@aschat_group")
-    #     logger.info(f"Bot successfully joined @aschat_group via /start command.")
-    # except Exception as e:
-    #     logger.warning(f"Bot failed to join @aschat_group via /start command: {e}")
-
-
 @bot.on_message(filters.command("chatbot off", prefixes=["/", ".", "?", "-"]) & ~filters.private)
 async def chatbotofd(client, message):
     vickdb = MongoClient(MONGO_URL)
@@ -150,7 +135,6 @@ async def health_check_route(request):
 
 # मुख्य रनर जो वेब सर्वर और बॉट दोनों को शुरू करता है
 async def main_startup():
-    # मौजूदा इवेंट लूप सेट करें
     current_loop = asyncio.get_event_loop()
     current_loop.set_exception_handler(handle_exception)
 
@@ -165,18 +149,10 @@ async def main_startup():
 
     # Pyrogram क्लाइंट शुरू करें
     logger.info("Starting Pyrogram Client...")
-    
-    # bot.run() कॉल pyrogram.idle() को इंटरनली, जो Telegram API से अपडेट प्राप्त करने के लिए है।
-    # Pyrogram 2.x के bot.run() मेथड को अब सीधे asyncio.run() के अंदर call किया जा सकता है
-    # क्योंकि यह खुद एक async फंक्शन बन गया है (या एक Coroutine को handle करता है).
-    # लेकिन हमें यह सुनिश्चित करना होगा कि यह दूसरे रनिंग टास्क (aiohttp) के साथ सह-अस्तित्व में हो।
-    
-    # bot.start() और bot.idle() के साथ कोशिश करें, जैसा कि Pyrogram docs में सुझाया गया है
     await bot.start()
     logger.info("Pyrogram Client Started! Bot is ready.")
 
     # बॉट को शुरू होने पर @aschat_group में शामिल होने का प्रयास करें (केवल एक बार)
-    # यदि समूह निजी है, तो बॉट को मैन्युअल रूप से जोड़ना होगा
     try:
         # await bot.join_chat("@aschat_group") # इसे यहां uncomment करें यदि यह सार्वजनिक समूह है
         # यदि समूह निजी है या बॉट पहले से ही इसमें है, तो इसे मैन्युअल रूप से जोड़ें।
@@ -186,13 +162,14 @@ async def main_startup():
 
     # दोनों को एक साथ चलने दें: वेब सर्वर और बॉट
     try:
-        # bot.idle() एक Future लौटाता है जिसे await किया जा सकता है
-        await bot.idle() 
+        # bot.idle() के बजाय asyncio.Future() का उपयोग करें
+        # यह इवेंट लूप को तब तक चालू रखेगा जब तक कोई बाहरी सिग्नल न हो (जैसे Koyeb द्वारा ऐप को बंद करना)
+        await asyncio.Future() 
     except asyncio.CancelledError:
         logger.info("Main loop cancelled (expected during shutdown).")
     finally:
         logger.info("Shutting down Pyrogram client...")
-        await bot.stop() # bot.stop() को idle() के बाद कॉल करें
+        await bot.stop() 
         logger.info("Pyrogram client stopped.")
         
         logger.info("Shutting down web server...")
