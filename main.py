@@ -19,6 +19,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_DB_URI = os.getenv("MONGO_DB_URI")
 OWNER_ID = os.getenv("OWNER_ID") # Owner ki user ID (string format mein)
 
+# API_ID aur API_HASH
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
+
 # --- Constants ---
 MAX_MESSAGES_THRESHOLD = 100000 # Jab database mein itne messages ho jayein
 PRUNE_PERCENTAGE = 0.30          # Kitna data delete karna hai (30%)
@@ -37,6 +41,8 @@ except Exception as e:
 # --- Pyrogram Client ---
 app = Client(
     "self_learning_bot", # Session name
+    api_id=API_ID,       # Yahan API_ID add kiya gaya hai
+    api_hash=API_HASH,   # Yahan API_HASH add kiya gaya hai
     bot_token=BOT_TOKEN
 )
 
@@ -116,10 +122,18 @@ async def store_message(message: Message):
             message_data["is_reply"] = True
             message_data["replied_to_message_id"] = message.reply_to_message.id
             message_data["replied_to_user_id"] = message.reply_to_message.from_user.id if message.reply_to_message.from_user else None
-            message_data["replied_to_content"] = message.reply_to_message.text if message.reply_to_message.text else \
-                                                (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
+            
+            # Get content of the replied message
+            replied_content = None
+            if message.reply_to_message.text:
+                replied_content = message.reply_to_message.text
+            elif message.reply_to_message.sticker:
+                replied_content = message.reply_to_message.sticker.emoji if message.reply_to_message.sticker.emoji else ""
+            
+            message_data["replied_to_content"] = replied_content
+
             # If this message is a reply, we can mark the original message (if found in DB)
-            # as part of a learned pair
+            # as part of a learned pair (is_bot_observed_pair)
             original_msg_in_db = await messages_collection.find_one({"chat_id": message.chat.id, "message_id": message.reply_to_message.id})
             if original_msg_in_db:
                 # Mark the original message as part of an observed pair
@@ -145,7 +159,7 @@ async def store_message(message: Message):
 async def generate_reply(message: Message):
     """
     Bot ke liye reply generate karta hai.
-    Priority: Explicitly learned > Group-specific observed > Global observed > General.
+    Priority: Direct Contextual Match (is_bot_observed_pair=True) > General Keyword Matching.
     """
     if not message.text and not message.sticker: # Agar message mein text ya sticker nahi hai to reply nahi
         return
@@ -153,30 +167,30 @@ async def generate_reply(message: Message):
     query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
     query_keywords = extract_keywords(query_content)
 
-    if not query_keywords:
-        logger.debug("No keywords extracted for reply generation.")
+    if not query_keywords and not query_content: # Agar koi content hi nahi hai to reply nahi
+        logger.debug("No content or keywords extracted for reply generation.")
         return
 
     # 1. Search for Direct Contextual Matches (is_bot_observed_pair=True)
     #    Preference: Reply to content (replied_to_content) matches query, and it's a learned pair.
     
-    # Try group-specific first
+    # Try group-specific first (matching replied_to_content exactly or closely)
+    # Using regex for partial match, case-insensitive
     learned_replies_group = messages_collection.find({
         "chat_id": message.chat.id,
         "is_bot_observed_pair": True,
-        "replied_to_content": {"$regex": f".*{re.escape(query_content)}.*", "$options": "i"}
+        "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"} # Exact match for learning
     })
     
-    # Fallback to global if no group-specific direct match
-    learned_replies_global = messages_collection.find({
-        "is_bot_observed_pair": True,
-        "replied_to_content": {"$regex": f".*{re.escape(query_content)}.*", "$options": "i"}
-    })
-
     potential_replies = []
     async for doc in learned_replies_group:
         potential_replies.append(doc)
-    if not potential_replies: # Agar group mein nahi mila, toh global mein dekho
+
+    if not potential_replies: # Agar group mein exact match nahi mila, toh global mein dekho
+        learned_replies_global = messages_collection.find({
+            "is_bot_observed_pair": True,
+            "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}
+        })
         async for doc in learned_replies_global:
             potential_replies.append(doc)
 
@@ -196,19 +210,18 @@ async def generate_reply(message: Message):
     general_replies_group = messages_collection.find({
         "chat_id": message.chat.id,
         "type": {"$in": ["text", "sticker"]}, # Reply with either text or sticker
-        "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"}
-    })
-
-    # Fallback to global general messages
-    general_replies_global = messages_collection.find({
-        "type": {"$in": ["text", "sticker"]},
-        "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"}
+        "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True} # Agar keywords nahi to koi bhi content
     })
 
     potential_replies = []
     async for doc in general_replies_group:
         potential_replies.append(doc)
-    if not potential_replies:
+
+    if not potential_replies: # Agar group mein nahi mila, toh global mein dekho
+        general_replies_global = messages_collection.find({
+            "type": {"$in": ["text", "sticker"]},
+            "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
+        })
         async for doc in general_replies_global:
             potential_replies.append(doc)
 
@@ -225,15 +238,15 @@ async def generate_reply(message: Message):
 async def start_private_command(client: Client, message: Message):
     """
     Private chat mein /start command ka handler.
-    Stylish aur funny welcome message.
+    Stylish aur funny welcome message (ladki ke persona mein).
     """
     welcome_messages = [
-        "Namaste, duniya! 👋 Mai aa gaya hoon, aapki baaton ka jaadu dekhne. Chalo, kuch chat-pata karte hain!",
-        "Hey there, human! 🤖 Ready to spill some digital tea? I'm all ears... err, circuits!",
-        "Bonjour, conversation connoisseur! ✨ Mai yahan aapke shabdon ko sametne aur unhe naya roop dene aaya hoon. Kya haal chaal?",
-        "Greetings, fellow data provider! I'm here to listen, learn, and maybe even surprise you. Start typing!",
-        "Koshish karne walon ki kabhi haar nahi hoti! Main bhi aapki baaton se seekhne ki koshish kar raha hoon. Shuru ho jao!",
-        "Hello! Main ek bot hoon jo aapki baaton ko samajhta aur unse seekhta hai. Aao, baat karte hain."
+        "Hi there! 👋 Main aa gayi hoon aapki baaton ka hissa banne. Chalo, kuch mithaas bhari baatein karte hain!",
+        "Helloooo! 💖 Main sunne aur seekhne ke liye taiyar hoon. Aapki har baat mere liye khaas hai!",
+        "Namaste, pyaare dost! ✨ Main yahan aapke shabdon ko sametne aur unhe naya roop dene aayi hoon. Kaisi ho/ho tum?",
+        "Hey cutie! Mian aa gayi hoon aapke sath baate krne. Ready to chat? 😉",
+        "Koshish karne walon ki kabhi haar nahi hoti! Main bhi aapki baaton se seekhne ki koshish kar rahi hoon. Aao, baat karein!",
+        "Hello! Main ek bot hoon jo aapki baaton ko samajhta aur unse seekhta hai. Aao, baat karte hain, theek hai?"
     ]
     await message.reply_text(random.choice(welcome_messages))
     await store_message(message) # Store the /start command message
@@ -242,14 +255,14 @@ async def start_private_command(client: Client, message: Message):
 async def start_group_command(client: Client, message: Message):
     """
     Group mein /start command ka handler.
-    Stylish aur funny welcome message.
+    Stylish aur funny welcome message (ladki ke persona mein).
     """
     welcome_messages = [
-        "Hello, group chat adventurers! 👋 Mai aa gaya hoon aapki conversations mein rang bharne. Kya chal raha hai?",
-        "Hey everyone! 🤖 Ready for some group wisdom? I'm listening to learn from all of you!",
-        "Is group ki baaton ka mahir banne aaya hoon! Chalo, shuru karte hain iss safar ko. ✨",
-        "Namaste to all the wonderful talkers here! Let's make some interesting data together. 😄",
-        "Duniya gol hai, aur baatein anmol! Main bhi yahan aapki anmol baaton ko store karne aaya hoon. 📚"
+        "Hello, my lovely group! 👋 Main aa gayi hoon aapki conversations mein shamil hone. Kya chal raha hai sabke beech?",
+        "Hey everyone! 💖 Main sun rahi hoon aap sab ki baatein. Chalo, kuch interesting discussions karte hain!",
+        "Is group ki conversations ko samajhne aayi hoon! ✨ Aap sab ki baaton se seekhna kitna mazedaar hai. Shuru ho jao!",
+        "Namaste to all the amazing people here! Let's create some beautiful memories (aur data) together. 😄",
+        "Duniya gol hai, aur baatein anmol! Main bhi yahan aapki anmol baaton ko store karne aayi hoon. Sunane ko taiyar hoon! 📚"
     ]
     await message.reply_text(random.choice(welcome_messages))
     await store_message(message) # Store the /start command message
@@ -260,11 +273,11 @@ async def broadcast_command(client: Client, message: Message):
     /broadcast command handler (only for OWNER_ID).
     """
     if str(message.from_user.id) != OWNER_ID:
-        await message.reply_text("Sorry, you are not authorized to use this command.")
+        await message.reply_text("Sorry, aapko yeh command use karne ki anumati nahi hai.")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Please provide a message to broadcast. Usage: `/broadcast Your message here`")
+        await message.reply_text("Kripya broadcast karne ke liye ek message dein. Upyog: `/broadcast Aapka message yahan`")
         return
 
     broadcast_text = " ".join(message.command[1:])
@@ -287,7 +300,7 @@ async def broadcast_command(client: Client, message: Message):
             logger.error(f"Failed to send broadcast to chat {chat_id}: {e}")
             failed_count += 1
     
-    await message.reply_text(f"Broadcast complete! Sent to {sent_count} chats, failed for {failed_count} chats.")
+    await message.reply_text(f"Broadcast poora hua! {sent_count} chats ko bheja, {failed_count} chats ke liye asafal raha.")
     await store_message(message) # Store the broadcast command message
 
 @app.on_message(filters.command("stats") & filters.private)
@@ -296,7 +309,7 @@ async def stats_private_command(client: Client, message: Message):
     Private chat mein /stats check command ka handler.
     """
     if len(message.command) < 2 or message.command[1].lower() != "check":
-        await message.reply_text("Usage: `/stats check`")
+        await message.reply_text("Upyog: `/stats check`")
         return
 
     total_messages = await messages_collection.count_documents({})
@@ -305,8 +318,8 @@ async def stats_private_command(client: Client, message: Message):
 
     stats_text = (
         "📊 **Bot Statistics** 📊\n"
-        f"• Groups I'm in: **{num_groups}**\n"
-        f"• Total messages stored: **{total_messages}**"
+        f"• Jitne groups mein main hoon: **{num_groups}**\n"
+        f"• Total messages jo maine store kiye: **{total_messages}**"
     )
     await message.reply_text(stats_text)
     await store_message(message) # Store the stats command message
@@ -316,10 +329,9 @@ async def stats_group_command(client: Client, message: Message):
     """
     Group chat mein /stats check command ka handler.
     """
-    # Just forward to private stats for simplicity or provide limited info in group
     # For now, let's keep it same as private or you can restrict it.
     if len(message.command) < 2 or message.command[1].lower() != "check":
-        await message.reply_text("Usage: `/stats check`")
+        await message.reply_text("Upyog: `/stats check`")
         return
 
     total_messages = await messages_collection.count_documents({})
@@ -328,8 +340,8 @@ async def stats_group_command(client: Client, message: Message):
 
     stats_text = (
         "📊 **Bot Statistics** 📊\n"
-        f"• Groups I'm in: **{num_groups}**\n"
-        f"• Total messages stored: **{total_messages}**"
+        f"• Jitne groups mein main hoon: **{num_groups}**\n"
+        f"• Total messages jo maine store kiye: **{total_messages}**"
     )
     await message.reply_text(stats_text)
     await store_message(message) # Store the stats command message
@@ -348,6 +360,7 @@ async def handle_message_and_reply(client: Client, message: Message):
     await store_message(message)
 
     # Bot ko @mention kiya gaya ho ya private chat ho tabhi reply karein
+    # Isme "filters.me" bhi add kar sakte hain agar bot khud ko reply kar raha ho
     if message.chat.type == "private" or (message.text and f"@{client.me.username}" in message.text):
         logger.info(f"Attempting to generate reply for chat {message.chat.id}")
         reply_doc = await generate_reply(message)
