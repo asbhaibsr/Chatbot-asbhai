@@ -7,16 +7,15 @@ import os
 
 import asyncio
 import logging
-import threading # <-- यह नई लाइन जोड़ी गई है
+import threading
 from pyrogram.enums import ChatAction
 
-from aiohttp import web # <-- यह रखना होगा (वेब सर्वर के लिए)
+from aiohttp import web
 
-# Logging setup for debugging (अस्थायी रूप से फिर से सक्रिय)
+# Logging setup for debugging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# एक्सेप्शन हैंडलर जोड़ें (यह भी सक्रिय)
 def handle_exception(loop, context):
     msg = context.get("exception", context["message"])
     logger.error(f"Caught unhandled exception: {msg}")
@@ -133,7 +132,8 @@ async def vickprivate(client: Client, message: Message):
 def run_pyrogram_bot():
     try:
         logger.info("Starting Pyrogram Client in a separate thread...")
-        bot.run() # यह Pyrogram को ब्लॉक करते हुए चलाता है
+        # नए थ्रेड में asyncio इवेंट लूप सेट करें और बॉट को चलाएं
+        asyncio.run(bot.run()) # <-- यहां बदलाव किया गया है: bot.run() को asyncio.run() के अंदर
     except Exception as e:
         logger.error(f"Pyrogram bot thread exited with an error: {e}", exc_info=True)
 
