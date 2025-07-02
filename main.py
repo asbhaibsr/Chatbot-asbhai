@@ -1,8 +1,11 @@
 import os
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton # ChatActions removed from here
-from pyrogram.enums import ChatActions # Naya import path for ChatActions
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+# from pyrogram.enums import ChatActions # THIS LINE IS REMOVED
+from pyrogram.raw.functions.messages import SetTyping # New import for typing action
+from pyrogram.raw.types import SendMessageTypingAction # New import for typing action type
+
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 import logging
@@ -179,7 +182,13 @@ async def generate_reply(message: Message):
     MongoDB operations are synchronous, so remove 'await' from calls.
     """
     # Typing action dikhao reply generate hone se pehle
-    await app.send_chat_action(message.chat.id, ChatActions.TYPING) # Typing action add kiya gaya hai
+    # Using app.invoke() for a low-level Telegram API call for typing
+    await app.invoke(
+        SetTyping(
+            peer=await app.resolve_peer(message.chat.id),
+            action=SendMessageTypingAction()
+        )
+    )
     await asyncio.sleep(0.5) # Thoda delay, real feel ke liye
 
     if not message.text and not message.sticker: # Agar message mein text ya sticker nahi hai to reply nahi
