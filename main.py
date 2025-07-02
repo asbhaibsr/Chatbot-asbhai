@@ -24,9 +24,9 @@ def handle_exception(loop, context):
 # पर्यावरण चर (Environment Variables)
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # BOT_TOKEN का उपयोग करें
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 MONGO_URL = os.environ.get("MONGO_URL")
-OWNER_ID = int(os.environ.get("OWNER_ID")) # मालिक का ID
+OWNER_ID = int(os.environ.get("OWNER_ID"))
 
 # Pyrogram क्लाइंट को बॉट टोकन के साथ इनिशियलाइज़ करें
 bot = Client("my_koyeb_bot", API_ID, API_HASH, bot_token=BOT_TOKEN)
@@ -60,7 +60,7 @@ async def start(client, message):
     # सुनिश्चित करें कि डुप्लिकेट्स स्टोर न हों
     existing_chat = user_chats_db.find_one({"chat_id": chat_id})
     if not existing_chat:
-        user_chats_db.insert_one({"chat_id": chat_id, "chat_type": chat_type.value}) # .value का उपयोग करें
+        user_chats_db.insert_one({"chat_id": chat_id, "chat_type": chat_type.value})
         logger.info(f"New chat added for broadcast: {chat_id} ({chat_type.value})")
     
     keyboard = InlineKeyboardMarkup(
@@ -85,8 +85,6 @@ async def callback_handler(client, callback_query):
     user_id = callback_query.from_user.id
     chat_id = callback_query.message.chat.id
 
-    # सुनिश्चित करें कि सिर्फ मालिक ही कुछ विशेष सेटिंग्स बदल सके (उदाहरण के लिए AI सेटिंग्स)
-    # आप इसे अपनी आवश्यकतानुसार बदल सकते हैं
     if data == "ai_settings" and user_id != OWNER_ID:
         await callback_query.answer("क्षमा करें, केवल मालिक ही AI सेटिंग्स बदल सकते हैं।", show_alert=True)
         return
@@ -133,7 +131,7 @@ async def callback_handler(client, callback_query):
             await callback_query.message.edit_text("चैटबॉट पहले से ही बंद है।")
     elif data == "back_to_start":
         # /start कमांड से कीबोर्ड को फिर से दिखाएं
-        await start(client, callback_query.message) # callback_query.message को पास करें
+        await start(client, callback_query.message)
         
 # ब्रॉडकास्ट कमांड (केवल मालिक के लिए)
 @bot.on_message(filters.command("broadcast") & owner_filter)
@@ -202,10 +200,6 @@ async def vickai(client: Client, message: Message):
                 hey = random.choice(K)
                 is_text = chat_db.find_one({"text": hey})
                 await (message.reply_sticker(hey) if is_text and is_text['check'] == "sticker" else message.reply_text(hey))
-            # यदि कोई उत्तर नहीं मिला और यह मालिक नहीं है, तो कुछ भी न भेजें
-            # आप यहां एक डिफ़ॉल्ट संदेश जोड़ सकते हैं यदि बॉट को कोई जवाब नहीं मिलता है
-            # else:
-            #     await message.reply_text("मुझे समझ नहीं आया। क्या आप मुझे कुछ सिखाना चाहेंगे?")
     else:
         getme = await bot.get_me()
         if message.reply_to_message.from_user.id == getme.id:
@@ -243,10 +237,6 @@ async def vickprivate(client: Client, message: Message):
             hey = random.choice(K)
             is_text = chat_db.find_one({"text": hey})
             await (message.reply_sticker(hey) if is_text and is_text['check'] == "sticker" else message.reply_text(hey))
-        # यदि कोई उत्तर नहीं मिला और यह मालिक नहीं है, तो कुछ भी न भेजें
-        # आप यहां एक डिफ़ॉल्ट संदेश जोड़ सकते हैं यदि बॉट को कोई जवाब नहीं मिलता है
-        # else:
-        #     await message.reply_text("मुझे समझ नहीं आया। क्या आप मुझे कुछ सिखाना चाहेंगे?")
     else:
         getme = await bot.get_me()
         if message.reply_to_message.from_user.id == getme.id:
@@ -271,13 +261,17 @@ async def main_startup():
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080) # Koyeb के 8080 पोर्ट पर लिसन करें
-    await site.start()
-    logger.info("Web server started for health checks on port 8080")
 
-    # Pyrogram क्लाइंट शुरू करें
-    logger.info("Starting Pyrogram Client...")
-    await bot.start()
-    logger.info("Pyrogram Client Started! Bot is ready.")
+    logger.info("Starting Pyrogram Client and Web Server...")
+
+    # asyncio.gather का उपयोग करके दोनों को एक साथ चलाएं
+    # bot.start() और site.start() दोनों awaitable हैं
+    await asyncio.gather(
+        bot.start(),
+        site.start()
+    )
+
+    logger.info("Pyrogram Client and Web Server Started! Bot is ready.")
 
     # बॉट को शुरू होने पर @aschat_group में शामिल होने का प्रयास करें (केवल एक बार)
     try:
@@ -287,11 +281,9 @@ async def main_startup():
     except Exception as e:
         logger.warning(f"Failed to join @aschat_group on startup: {e}")
 
-    # दोनों को एक साथ चलने दें: वेब सर्वर और बॉट
+    # यह बॉट को तब तक चलने देगा जब तक Koyeb उसे बंद न कर दे
     try:
-        # bot.idle() के बजाय asyncio.Future() का उपयोग करें
-        # यह इवेंट लूप को तब तक चालू रखेगा जब तक कोई बाहरी सिग्नल न हो (जैसे Koyeb द्वारा ऐप को बंद करना)
-        await asyncio.Future() 
+        await asyncio.Future() # यह इवेंट लूप को चालू रखता है
     except asyncio.CancelledError:
         logger.info("Main loop cancelled (expected during shutdown).")
     finally:
