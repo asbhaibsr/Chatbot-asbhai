@@ -2,4 +2,4 @@ pyrogram==2.0.106 # Or the latest stable version you prefer
 pymongo
 Flask
 gunicorn
-dumb-init # Essential for robust process management in Docker containers
+# dumb-init # Essential for robust process management in Docker containers
