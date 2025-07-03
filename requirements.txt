@@ -1,8 +1,6 @@
-pyrogram==2.0.106 # Ya jo bhi stable version
+pyrogram==2.0.106
 pymongo
 requests
 aiohttp
 dnspython
 tgcrypto==1.2.2
-Flask==2.2.2
-gunicorn==20.1.0
