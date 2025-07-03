@@ -258,7 +258,7 @@ async def start_private_command(client: Client, message: Message):
     )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Mujhe Apne Group Mein Bulao!", url=f"https://t.me/{client.me.username}?startgroup=true")],
-        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/@asbhai_bsr")] # Updated
+        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/asbhai_bsr")] # Updated
     ])
     await message.reply_text(welcome_message, reply_markup=keyboard)
     await store_message(message)
@@ -272,7 +272,7 @@ async def start_group_command(client: Client, message: Message):
         "Namaste to all the amazing people here! ✨ Mujhe group mein add karne ka shukriya. Main yahan ki baaton ko samjh kar aur behtar hoti jaungi. Ab toh har baat par mera jawaab milega! 🤭"
     ]
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/@asbhai_bsr")] # Updated
+        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/asbhai_bsr")] # Updated
     ])
     await message.reply_text(random.choice(welcome_messages), reply_markup=keyboard)
     await store_message(message)
@@ -326,7 +326,7 @@ async def help_command(client: Client, message: Message):
     )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Mujhe Apne Group Mein Bulao! 😉", url=f"https://t.me/{client.me.username}?startgroup=true")],
-        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 💖", url=f"https://t.me/@asbhai_bsr")] # Updated
+        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 💖", url=f"https://t.me/asbhai_bsr")] # Updated
     ])
     await message.reply_text(help_text, reply_markup=keyboard)
     await store_message(message)
@@ -824,7 +824,7 @@ async def finalize_clone_process(client: Client, message: Message):
     user_id = str(message.from_user.id)
     user_state = user_states_collection.find_one({"user_id": user_id, "status": "awaiting_channel"})
 
-    # Check if this message is a reply to ForceReply from process_clone_bot_after_approval
+    # Check if this message is a reply to the ForceReply from process_clone_bot_after_approval
     is_reply_to_force_reply = False
     if message.reply_to_message and message.reply_to_message.from_user.is_self and \
        message.reply_to_message.reply_markup and message.reply_to_message.reply_markup.force_reply:
@@ -885,11 +885,8 @@ async def finalize_clone_process(client: Client, message: Message):
 
 
 # --- Private Chat Non-Command Message Handler ---
-# IMPORTANT FIX: Replaced ~filters.command with a custom filter as ~ operator doesn't work directly on filters.command function.
-def is_not_command(_, __, message):
-    return not message.text or not message.text.startswith('/')
-
-@app.on_message(filters.text & filters.private & filters.create(is_not_command))
+# Corrected the filter for non-command private messages
+@app.on_message(filters.private & filters.text & ~filters.via_bot & (lambda _, __, msg: not msg.text.startswith('/')))
 async def handle_private_non_command_messages(client: Client, message: Message):
     user_id = str(message.from_user.id)
     user_state = user_states_collection.find_one({"user_id": user_id})
@@ -914,13 +911,15 @@ async def handle_general_messages(client: Client, message: Message):
         return # Ignore messages from other bots
     
     # If it's a private text message, and not a command, it's handled by handle_private_non_command_messages
+    # We explicitly check for filters.private here as this general handler also covers groups.
+    # The `handle_private_non_command_messages` function now has a robust filter,
+    # so we should ensure this general handler doesn't double-process private non-commands.
     if message.chat.type == "private" and message.text and not message.text.startswith('/'):
-        # This message is already handled by handle_private_non_command_messages if not part of clone flow.
-        # Or, if it is part of clone flow, it's handled by finalize_clone_process or receive_screenshot.
-        # So, no need to process it for learning/replying here.
+        # This message is specifically handled by handle_private_non_command_messages (the one we fixed).
+        # So, no need to process it for learning/replying here in private.
         return 
 
-    # For group messages, or commands in private, or stickers in private (not covered by general text handler)
+    # For group messages (text or sticker), or commands in private, or stickers in private (not covered by general text handler)
     # this will store and potentially reply.
     is_bot_reply_observed = False
     if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
