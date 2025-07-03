@@ -13,7 +13,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ForceReply
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
-from pyrogram.errors import BotTokenInvalid, ApiIdInvalid, ApiIdPublishedFlood
+from pyrogram.errors import exceptions # CHANGED THIS LINE: Import the exceptions module
 
 # MongoDB imports
 from pymongo import MongoClient
@@ -575,8 +575,8 @@ async def initiate_clone_payment(client: Client, message: Message):
     user_state = user_states_collection.find_one({"user_id": user_id, "status": "approved_for_clone"})
     if user_state:
         await message.reply_text(
-            "आप पहले से ही Bot Cloning के लिए अप्रूव्ड हैं! ✅\n"
-            "अब आप सीधे अपना बॉट टोकन भेज सकते हैं:\n"
+            "आप पहले से ही Bot Cloning ke liye approved hain! ✅\n"
+            "Ab aap seedhe apna bot token bhej sakte hain:\n"
             "**Upyog:** `/clonebot YOUR_BOT_TOKEN_HERE`\n"
             "(Pura token ek hi line mein hona chahiye.)"
         )
@@ -586,8 +586,8 @@ async def initiate_clone_payment(client: Client, message: Message):
     pending_request = user_states_collection.find_one({"user_id": user_id, "status": "pending_approval"})
     if pending_request:
         await message.reply_text(
-            "आपकी क्लोनिंग रिक्वेस्ट पहले से ही पेंडिंग है। ⏳\n"
-            "कपया एडमिन के अप्रूवल का इंतजार करें। यदि आपने पेमेंट कर दिया है और स्क्रीनशॉट भेज दिया है, तो धैर्य रखें।"
+            "Aapki cloning request pehle se hi pending hai. ⏳\n"
+            "Kripya admin ke approval ka intezaar karein. Yadi aapne payment kar diya hai aur screenshot bhej diya hai, to dhairya rakhein."
         )
         return
 
@@ -772,11 +772,11 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
             {"$set": {"status": "awaiting_channel", "bot_token": bot_token, "bot_username": bot_info.username}}
         )
 
-    except BotTokenInvalid:
+    except exceptions.unauthorized.BotTokenInvalid: # CHANGED THIS LINE
         await message.reply_text("Yeh bot token invalid hai. Kripya sahi token dein.")
         logger.warning(f"Bot token invalid during cloning for user {user_id}.")
         user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
-    except (ApiIdInvalid, ApiIdPublishedFlood):
+    except (exceptions.bad_request.ApiIdInvalid, exceptions.bad_request.ApiIdPublishedFlood): # CHANGED THIS LINE
         await message.reply_text("Hamare API ID/HASH mein kuch problem hai, kripya bot owner se contact karein.")
         logger.error(f"API ID/HASH issue during bot cloning attempt by user {user_id}.")
         user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
