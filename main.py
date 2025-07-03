@@ -1,16 +1,22 @@
+# main.py
+
 import os
 import asyncio
-import logging
-import random
-import re
-from datetime import datetime, timedelta
-
-from pyrogram import Client, filters, idle
+from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
+
 from pymongo import MongoClient
-from aiohttp import web
+from datetime import datetime, timedelta
+import logging
+import re
+import random
+
+# --- ये 3 लाइनें नई हैं, इन्हें ऊपर, दूसरे imports के साथ जोड़ें ---
+from flask import Flask, jsonify
+from threading import Thread
+# -----------------------------------------------------------------
 
 # --- Logger Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -19,50 +25,260 @@ logger = logging.getLogger(__name__)
 # --- Environment Variables ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_DB_URI = os.getenv("MONGO_DB_URI")
-OWNER_ID = os.getenv("OWNER_ID")
+OWNER_ID = os.getenv("OWNER_ID") # Owner की user ID (string format में)
 
-API_ID = int(os.getenv("API_ID"))
+API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
+
+# --- Constants ---
+MAX_MESSAGES_THRESHOLD = 100000 
+PRUNE_PERCENTAGE = 0.30          
+UPDATE_CHANNEL_USERNAME = "asbhai_bsr" 
 
 # --- MongoDB Setup ---
 try:
     client = MongoClient(MONGO_DB_URI)
-    db = client.bot_database
+    db = client.bot_database 
     messages_collection = db.messages
+    logger.info("MongoDB connection successful.")
 except Exception as e:
-    logger.error(f"MongoDB connection failed: {e}")
-    messages_collection = None
+    logger.error(f"Failed to connect to MongoDB: {e}")
+    exit(1)
 
-# --- Telegram Bot Setup ---
-bot = Client(
-    "asbhai_bot",
-    api_id=API_ID,
-    api_hash=API_HASH,
+# --- Pyrogram Client ---
+app = Client( # इसका नाम 'app' ही रहने दें, जैसे पहले था। Flask वाला अलग होगा।
+    "self_learning_bot", 
+    api_id=API_ID,       
+    api_hash=API_HASH,   
     bot_token=BOT_TOKEN
 )
 
-# Example /start command
-@bot.on_message(filters.command("start") & filters.private)
-async def start_command(c, m: Message):
-    await m.reply_text("Bot is working fine!", reply_markup=InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Update Channel", url="https://t.me/asbhai_bsr")]]
-    ))
+# --- Utility Functions (ये वैसे ही रहेंगे) ---
+def extract_keywords(text):
+    if not text: return []
+    words = re.findall(r'\b\w+\b', text.lower())
+    return list(set(words))
 
-# --- Health Check Route ---
-async def healthcheck(request):
-    return web.Response(text="OK", status=200)
+async def prune_old_messages():
+    total_messages = messages_collection.count_documents({})
+    logger.info(f"Current total messages in DB: {total_messages}")
+    if total_messages > MAX_MESSAGES_THRESHOLD:
+        messages_to_delete_count = int(total_messages * PRUNE_PERCENTAGE)
+        logger.info(f"Threshold reached. Deleting {messages_to_delete_count} oldest messages.")
+        oldest_message_ids = []
+        for msg in messages_collection.find({}).sort("timestamp", 1).limit(messages_to_delete_count):
+            oldest_message_ids.append(msg['_id'])
+        if oldest_message_ids:
+            delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
+            logger.info(f"Successfully deleted {delete_result.deleted_count} messages.")
+        else:
+            logger.warning("No oldest messages found to delete despite threshold being reached.")
+    else:
+        logger.info("Message threshold not reached. No pruning needed.")
 
-app = web.Application()
-app.router.add_get("/", healthcheck)
+async def store_message(message: Message):
+    try:
+        if message.from_user and message.from_user.is_bot: return
+        message_data = {
+            "message_id": message.id,
+            "user_id": message.from_user.id if message.from_user else None,
+            "username": message.from_user.username if message.from_user else None,
+            "first_name": message.from_user.first_name if message.from_user else None,
+            "chat_id": message.chat.id,
+            "chat_type": message.chat.type.name,
+            "chat_title": message.chat.title if message.chat.type != "private" else None,
+            "timestamp": datetime.now(),
+            "is_bot_observed_pair": False,
+        }
+        if message.text:
+            message_data["type"] = "text"
+            message_data["content"] = message.text
+            message_data["keywords"] = extract_keywords(message.text)
+            message_data["sticker_id"] = None
+        elif message.sticker:
+            message_data["type"] = "sticker"
+            message_data["content"] = message.sticker.emoji if message.sticker.emoji else ""
+            message_data["sticker_id"] = message.sticker.file_id
+            message_data["keywords"] = extract_keywords(message.sticker.emoji)
+        if message.reply_to_message:
+            message_data["is_reply"] = True
+            message_data["replied_to_message_id"] = message.reply_to_message.id
+            message_data["replied_to_user_id"] = message.reply_to_message.from_user.id if message.reply_to_message.from_user else None
+            replied_content = None
+            if message.reply_to_message.text: replied_content = message.reply_to_message.text
+            elif message.reply_to_message.sticker: replied_content = message.reply_to_message.sticker.emoji if message.reply_to_message.sticker.emoji else ""
+            message_data["replied_to_content"] = replied_content
+            original_msg_in_db = messages_collection.find_one({"chat_id": message.chat.id, "message_id": message.reply_to_message.id})
+            if original_msg_in_db:
+                messages_collection.update_one({"_id": original_msg_in_db["_id"]}, {"$set": {"is_bot_observed_pair": True}})
+                message_data["is_bot_observed_pair"] = True
+        messages_collection.insert_one(message_data)
+        logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}")
+        await prune_old_messages()
+    except Exception as e:
+        logger.error(f"Error storing message {message.id}: {e}")
 
-# --- Start bot and health server ---
-async def start_services():
-    await bot.start()
-    logger.info("Bot started")
-    await idle()
-    await bot.stop()
-    logger.info("Bot stopped")
+async def generate_reply(message: Message):
+    await app.invoke(SetTyping(peer=await app.resolve_peer(message.chat.id), action=SendMessageTypingAction()))
+    await asyncio.sleep(0.5)
+    if not message.text and not message.sticker: return
+    query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
+    query_keywords = extract_keywords(query_content)
+    if not query_keywords and not query_content:
+        logger.debug("No content or keywords extracted for reply generation.")
+        return
+    learned_replies_group_cursor = messages_collection.find({
+        "chat_id": message.chat.id, "is_bot_observed_pair": True,
+        "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}
+    })
+    potential_replies = []
+    for doc in learned_replies_group_cursor: potential_replies.append(doc)
+    if not potential_replies:
+        learned_replies_global_cursor = messages_collection.find({
+            "is_bot_observed_pair": True,
+            "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}
+        })
+        for doc in learned_replies_global_cursor: potential_replies.append(doc)
+    if potential_replies: return random.choice(potential_replies)
+    logger.info(f"No direct observed reply for: '{query_content}'. Falling back to keyword search.")
+    keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
+    general_replies_group_cursor = messages_collection.find({
+        "chat_id": message.chat.id, "type": {"$in": ["text", "sticker"]},
+        "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
+    })
+    potential_replies = []
+    for doc in general_replies_group_cursor: potential_replies.append(doc)
+    if not potential_replies:
+        general_replies_global_cursor = messages_collection.find({
+            "type": {"$in": ["text", "sticker"]},
+            "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
+        })
+        for doc in general_replies_global_cursor: potential_replies.append(doc)
+    if potential_replies: return random.choice(potential_replies)
+    logger.info(f"No general keyword reply found for: '{query_content}'.")
+    return None
 
-loop = asyncio.get_event_loop()
-loop.create_task(start_services())
-web.run_app(app, port=8080)
+# --- Pyrogram Event Handlers (ये वैसे ही रहेंगे, 'app' नाम सही है) ---
+@app.on_message(filters.command("start") & filters.private)
+async def start_private_command(client: Client, message: Message):
+    welcome_messages = ["Hi there! 👋 Main aa gayi hoon aapki baaton ka hissa banne. Chalo, kuch mithaas bhari baatein karte hain!", "Helloooo! 💖 Main sunne aur seekhne ke liye taiyar hoon. Aapki har baat mere liye khaas hai!", "Namaste, pyaare dost! ✨ Main yahan aapke shabdon ko sametne aur unhe naya roop dene aayi hoon. Kaisi ho/ho tum?", "Hey cutie! Main aa gayi hoon aapke sath baatein karne. Ready to chat? 😉", "Koshish karne walon ki kabhi haar nahi hoti! Main bhi aapki baaton se seekhne ki koshish kar rahi hoon. Aao, baat karein!", "Hello! Main ek bot hoon jo aapki baaton ko samajhta aur unse seekhta hai. Aao, baat karte hain, theek hai?"]
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("➕ Add Me to Your Group", url=f"https://t.me/{client.me.username}?startgroup=true")], [InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}")]])
+    await message.reply_text(random.choice(welcome_messages), reply_markup=keyboard)
+    await store_message(message)
+
+@app.on_message(filters.command("start") & filters.group)
+async def start_group_command(client: Client, message: Message):
+    welcome_messages = ["Hello, my lovely group! 👋 Main aa gayi hoon aapki conversations mein shamil hone. Kya chal raha hai sabke beech?", "Hey everyone! 💖 Main sun rahi hoon aap sab ki baatein. Chalo, kuch interesting discussions karte hain!", "Is group ki conversations ko samajhne aayi hoon! ✨ Aap sab ki baaton se seekhna kitna mazedaar hai. Shuru ho jao!", "Namaste to all the amazing people here! Let's create some beautiful memories (aur data) together. 😄", "Duniya gol hai, aur baatein anmol! Main bhi yahan aapki anmol baaton ko store karne aayi hoon. Sunane ko taiyar hoon! 📚"]
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}")]])
+    await message.reply_text(random.choice(welcome_messages), reply_markup=keyboard)
+    await store_message(message)
+
+@app.on_message(filters.command("broadcast") & filters.private)
+async def broadcast_command(client: Client, message: Message):
+    if str(message.from_user.id) != OWNER_ID:
+        await message.reply_text("Sorry, aapko yeh command use karne ki anumati nahi hai.")
+        return
+    if len(message.command) < 2:
+        await message.reply_text("Kripya broadcast karne ke liye ek message dein. Upyog: `/broadcast Aapka message yahan`")
+        return
+    broadcast_text = " ".join(message.command[1:])
+    unique_chat_ids = messages_collection.distinct("chat_id")
+    sent_count = 0
+    failed_count = 0
+    for chat_id in unique_chat_ids:
+        try:
+            if chat_id == message.chat.id and message.chat.type == "private": continue
+            await client.send_message(chat_id, broadcast_text)
+            sent_count += 1
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.error(f"Failed to send broadcast to chat {chat_id}: {e}")
+            failed_count += 1
+    await message.reply_text(f"Broadcast poora hua! {sent_count} chats ko bheja, {failed_count} chats ke liye asafal raha.")
+    await store_message(message)
+
+@app.on_message(filters.command("stats") & filters.private)
+async def stats_private_command(client: Client, message: Message):
+    if len(message.command) < 2 or message.command[1].lower() != "check":
+        await message.reply_text("Upyog: `/stats check`")
+        return
+    total_messages = messages_collection.count_documents({})
+    unique_group_ids = messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}})
+    num_groups = len(unique_group_ids)
+    stats_text = (
+        "📊 **Bot Statistics** 📊\n"
+        f"• Jitne groups mein main hoon: **{num_groups}**\n"
+        f"• Total messages jo maine store kiye: **{total_messages}**"
+    )
+    await message.reply_text(stats_text)
+    await store_message(message)
+
+@app.on_message(filters.command("stats") & filters.group)
+async def stats_group_command(client: Client, message: Message):
+    if len(message.command) < 2 or message.command[1].lower() != "check":
+        await message.reply_text("Upyog: `/stats check`")
+        return
+    total_messages = messages_collection.count_documents({})
+    unique_group_ids = messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}})
+    num_groups = len(unique_group_ids)
+    stats_text = (
+        "📊 **Bot Statistics** 📊\n"
+        f"• Jitne groups mein main hoon: **{num_groups}**\n"
+        f"• Total messages jo maine store kiye: **{total_messages}**"
+    )
+    await message.reply_text(stats_text)
+    await store_message(message)
+
+@app.on_message(filters.text | filters.sticker)
+async def handle_message_and_reply(client: Client, message: Message):
+    if message.from_user and message.from_user.is_bot:
+        return
+    await store_message(message)
+    logger.info(f"Attempting to generate reply for chat {message.chat.id}")
+    reply_doc = await generate_reply(message)
+    if reply_doc:
+        try:
+            if reply_doc.get("type") == "text":
+                await message.reply_text(reply_doc["content"])
+                logger.info(f"Replied with text: {reply_doc['content']}")
+            elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
+                await message.reply_sticker(reply_doc["sticker_id"])
+                logger.info(f"Replied with sticker: {reply_doc['sticker_id']}")
+            else:
+                logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}")
+        except Exception as e:
+            logger.error(f"Error sending reply for message {message.id}: {e}")
+    else:
+        logger.info("No suitable reply found.")
+
+
+# --- Flask Web Server for Health Check ---
+flask_app = Flask(__name__) # Flask app का इंस्टेंस बनाया
+
+@flask_app.route('/')
+def health_check():
+    # हेल्थ चेक के लिए JSON रिस्पांस
+    # Pyrogram app की कनेक्टिविटी को भी दर्शा सकते हैं (वैकल्पिक)
+    return jsonify(status="Bot Health OK!", pyrogram_connected=app.is_connected)
+
+def run_flask_app():
+    # Koyeb PORT environment variable देता है (आमतौर पर 8000)
+    # अगर तुम 8080 चाहते हो, तो इसे os.getenv('PORT', 8080) कर सकते हो,
+    # लेकिन Koyeb की सेटिंग में भी पोर्ट 8080 करना होगा।
+    # सबसे अच्छा होगा Koyeb को डिफ़ॉल्ट 8000 पर रहने देना।
+    port = int(os.getenv('PORT', 8000)) 
+    logger.info(f"Flask health check server starting on 0.0.0.0:{port}")
+    flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+# --- Main entry point ---
+if __name__ == "__main__":
+    logger.info("Starting bot and Flask server...")
+    
+    # Flask app को एक अलग थ्रेड में शुरू करें
+    # यह मुख्य बॉट लॉजिक को ब्लॉक नहीं करेगा
+    flask_thread = Thread(target=run_flask_app)
+    flask_thread.daemon = True # Flask थ्रेड मुख्य थ्रेड के बंद होने पर बंद हो जाएगा
+    flask_thread.start()
+
+    # Pyrogram बॉट को शुरू करें (यह ब्लॉकिंग कॉल है और मुख्य थ्रेड को चलाएगा)
+    app.run()
