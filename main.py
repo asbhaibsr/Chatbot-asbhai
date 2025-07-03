@@ -18,7 +18,7 @@ from pyrogram.errors import exceptions # Keep this updated import
 
 # MongoDB imports
 from pymongo import MongoClient
-from pymongo.errors import ServerSelectionTimeoutError # Import specific error
+from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure # Import specific errors
 
 # Flask imports for web server
 from flask import Flask, jsonify
@@ -67,18 +67,28 @@ PAYMENT_INFO = {
 main_mongo_client = None
 main_db = None
 messages_collection = None # Initialize as None
-try:
-    if MAIN_MONGO_DB_URI: # Only attempt if URI is set
-        main_mongo_client = MongoClient(MAIN_MONGO_DB_URI)
+
+logger.info(f"Attempting to connect to Main Learning MongoDB. MAIN_MONGO_DB_URI: {'[SET]' if MAIN_MONGO_DB_URI else '[NOT SET]'}")
+if MAIN_MONGO_DB_URI:
+    try:
+        # Increased server selection timeout for initial connection
+        main_mongo_client = MongoClient(MAIN_MONGO_DB_URI, serverSelectionTimeoutMS=5000)
+        # The ismaster command is cheap and does not require auth.
+        main_mongo_client.admin.command('ping')
         main_db = main_mongo_client.bot_learning_database
         messages_collection = main_db.messages
-        logger.info("MongoDB (Main Learning DB) connection successful.")
-    else:
-        logger.error("MAIN_MONGO_DB_URI is not set. Main learning database will not be connected.")
-except Exception as e:
-    logger.error(f"Failed to connect to Main Learning MongoDB: {e}")
-    # Do not exit, allow bot to run without learning if DB is not critical for basic functions
-    # For a self-learning bot, this connection IS critical, but we don't want to crash on startup.
+        logger.info("MongoDB (Main Learning DB) connection successful and client is ready.")
+    except ServerSelectionTimeoutError as err:
+        logger.error(f"MongoDB (Main Learning DB) connection timed out: {err}")
+        messages_collection = None # Ensure it's None if connection fails
+    except ConnectionFailure as err:
+        logger.error(f"MongoDB (Main Learning DB) connection failed: {err}")
+        messages_collection = None
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while connecting to Main Learning MongoDB: {e}", exc_info=True)
+        messages_collection = None
+else:
+    logger.error("MAIN_MONGO_DB_URI environment variable is NOT SET. Main learning database will not be functional.")
 
 
 # Connection 2: For Clone Requests and User States (hardcoded)
@@ -86,13 +96,20 @@ clone_state_mongo_client = None
 clone_state_db = None
 user_states_collection = None # Initialize as None
 try:
-    clone_state_mongo_client = MongoClient(CLONE_AND_STATE_MONGO_DB_URI)
+    clone_state_mongo_client = MongoClient(CLONE_AND_STATE_MONGO_DB_URI, serverSelectionTimeoutMS=5000)
+    clone_state_mongo_client.admin.command('ping') # Test connection
     clone_state_db = clone_state_mongo_client.bot_clone_states_db
     user_states_collection = clone_state_db.user_states
     logger.info("MongoDB (Clone/State DB) connection successful.")
+except ServerSelectionTimeoutError as err:
+    logger.error(f"MongoDB (Clone/State DB) connection timed out: {err}")
+    user_states_collection = None
+except ConnectionFailure as err:
+    logger.error(f"MongoDB (Clone/State DB) connection failed: {err}")
+    user_states_collection = None
 except Exception as e:
-    logger.error(f"Failed to connect to Clone/State MongoDB: {e}")
-    # Do not exit, basic bot functions might still work
+    logger.error(f"Failed to connect to Clone/State MongoDB: {e}", exc_info=True)
+    user_states_collection = None
 
 
 # Connection 3: For Commands and Button related settings (hardcoded)
@@ -100,13 +117,20 @@ commands_settings_mongo_client = None
 commands_settings_db = None
 group_configs_collection = None # Initialize as None
 try:
-    commands_settings_mongo_client = MongoClient(COMMANDS_AND_BUTTONS_MONGO_DB_URI)
+    commands_settings_mongo_client = MongoClient(COMMANDS_AND_BUTTONS_MONGO_DB_URI, serverSelectionTimeoutMS=5000)
+    commands_settings_mongo_client.admin.command('ping') # Test connection
     commands_settings_db = commands_settings_mongo_client.bot_settings_db
     group_configs_collection = commands_settings_db.group_configs
     logger.info("MongoDB (Commands/Settings DB) connection successful.")
+except ServerSelectionTimeoutError as err:
+    logger.error(f"MongoDB (Commands/Settings DB) connection timed out: {err}")
+    group_configs_collection = None
+except ConnectionFailure as err:
+    logger.error(f"MongoDB (Commands/Settings DB) connection failed: {err}")
+    group_configs_collection = None
 except Exception as e:
-    logger.error(f"Failed to connect to Commands/Settings MongoDB: {e}")
-    # Do not exit, basic bot functions might still work
+    logger.error(f"Failed to connect to Commands/Settings MongoDB: {e}", exc_info=True)
+    group_configs_collection = None
 
 
 # --- Pyrogram Client ---
@@ -156,7 +180,7 @@ async def prune_old_messages():
 async def store_message(message: Message, is_bot_sent: bool = False, sent_message_id: int = None):
     # If messages_collection is not initialized, we cannot store.
     if messages_collection is None:
-        logger.error("messages_collection is not initialized. Cannot store message.")
+        logger.error("messages_collection is NOT initialized. Cannot store message. Please check MongoDB connection for MAIN_MONGO_DB_URI.")
         return
 
     try:
@@ -199,10 +223,9 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
             logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. Bot sent: {is_bot_sent}")
             await prune_old_messages()
         else:
-            logger.error("messages_collection is not initialized. Cannot store message.")
+            logger.error("messages_collection is STILL None after initial check. This should not happen here.")
     except ServerSelectionTimeoutError as e:
         logger.error(f"MongoDB connection error while storing message {message.id}: {e}")
-        # Add a more user-friendly error message if applicable, but for production, logging is key.
     except Exception as e:
         logger.error(f"Error storing message {message.id}: {e}", exc_info=True)
 
@@ -348,8 +371,8 @@ async def stats_command(client: Client, message: Message):
         )
         await message.reply_text(stats_text)
     else:
-        await message.reply_text("Maaf karna, statistics abhi available nahi hain. Database mein kuch gadbad hai. 🥺")
-    await store_message(message)
+        await message.reply_text("Maaf karna, statistics abhi available nahi hain. Database mein kuch gadbad hai. 🥺 (Main Learning DB connect nahi ho paya)")
+    await store_message(message) # Store incoming command message
 
 # HELP COMMAND
 @app.on_message(filters.command("help") & (filters.private | filters.group))
@@ -383,21 +406,21 @@ async def help_command(client: Client, message: Message):
         [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 💖", url=f"https://t.me/asbhai_bsr")] # Updated
     ])
     await message.reply_text(help_text, reply_markup=keyboard)
-    await store_message(message)
+    await store_message(message) # Store incoming command message
 
 # MYID COMMAND
 @app.on_message(filters.command("myid") & (filters.private | filters.group))
 async def my_id_command(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else "N/A"
     await message.reply_text(f"Hehe, tumhari user ID: `{user_id}`. Ab tum mere liye aur bhi special ho gaye! 😊")
-    await store_message(message)
+    await store_message(message) # Store incoming command message
 
 # CHATID COMMAND
 @app.on_message(filters.command("chatid") & (filters.private | filters.group))
 async def chat_id_command(client: Client, message: Message):
     chat_id = message.chat.id
     await message.reply_text(f"Is chat ki ID: `{chat_id}`. Kya tum mujhe secrets bataoge? 😉")
-    await store_message(message)
+    await store_message(message) # Store incoming command message
 
 # --- ADMIN COMMANDS ---
 
@@ -407,9 +430,9 @@ def is_owner(user_id):
 
 # Admin check decorator (FIXED: Added check for message.from_user)
 def owner_only_filter(_, __, message):
-    if message.from_user is not None: # Changed to 'is not None'
+    if message.from_user is not None:
         return is_owner(message.from_user.id)
-    return False # Agar sender nahi hai (system message hai), toh owner nahi hai
+    return False
 
 # BROADCAST COMMAND
 @app.on_message(filters.command("broadcast") & filters.private & filters.create(owner_only_filter))
@@ -437,8 +460,8 @@ async def broadcast_command(client: Client, message: Message):
                 failed_count += 1
         await message.reply_text(f"Broadcast poora hua, Malik! {sent_count} chats ko bheja, {failed_count} chats ke liye asafal raha. Maine apna best diya! 🥰")
     else:
-        await message.reply_text("Maaf karna, broadcast nahi kar payi. Database mein kuch gadbad hai. 🥺")
-    await store_message(message)
+        await message.reply_text("Maaf karna, broadcast nahi kar payi. Database (Main Learning DB) connect nahi ho paya hai. 🥺")
+    await store_message(message) # Store incoming command message
 
 # RESET DATA COMMAND
 @app.on_message(filters.command("resetdata") & filters.private & filters.create(owner_only_filter))
@@ -454,7 +477,7 @@ async def reset_data_command(client: Client, message: Message):
 
         # Ensure messages_collection is not None before using it
         if messages_collection is None:
-            await message.reply_text("Maaf karna, data reset nahi kar payi. Database mein kuch gadbad hai. 🥺")
+            await message.reply_text("Maaf karna, data reset nahi kar payi. Database (Main Learning DB) connect nahi ho paya hai. 🥺")
             return
 
         total_messages = messages_collection.count_documents({})
@@ -488,7 +511,7 @@ async def reset_data_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"Data reset karte samay error aaya, Malik: {e}. Kya hua? 😭")
         logger.error(f"Error resetting data by owner {message.from_user.id}: {e}", exc_info=True)
-    await store_message(message)
+    await store_message(message) # Store incoming command message
 
 # DELETE MESSAGE BY ID COMMAND
 @app.on_message(filters.command("deletemessage") & filters.private & filters.create(owner_only_filter))
@@ -509,13 +532,13 @@ async def delete_message_by_id_command(client: Client, message: Message):
             else:
                 await message.reply_text(f"Message ID `{msg_id_to_delete}` database mein nahi mila, Malik. Shayad main use janti hi nahi thi! 😅")
         else:
-            await message.reply_text("Maaf karna, message delete nahi kar payi. Database mein kuch gadbad hai. 🥺")
+            await message.reply_text("Maaf karna, message delete nahi kar payi. Database (Main Learning DB) connect nahi ho paya hai. 🥺")
     except ValueError:
         await message.reply_text("Invalid message ID. Kripya ek number dein, Malik! 🔢")
     except Exception as e:
         await message.reply_text(f"Message delete karne mein error aaya, Malik: {e}. Kya hua? 🥺")
         logger.error(f"Error deleting message by owner {message.from_user.id}: {e}", exc_info=True)
-    await store_message(message)
+    await store_message(message) # Store incoming command message
 
 # GROUP ADMIN COMMANDS (BAN, UNBAN, KICK, PIN, UNPIN)
 async def perform_chat_action(client: Client, message: Message, action_type: str):
@@ -566,7 +589,7 @@ async def perform_chat_action(client: Client, message: Message, action_type: str
     except Exception as e:
         await message.reply_text(f"Malik, {action_type} karte samay error aaya: {e}. Mujhse ho nahi pa raha! 😭")
         logger.error(f"Error performing {action_type} by user {message.from_user.id if message.from_user else 'None'}: {e}", exc_info=True)
-    await store_message(message)
+    await store_message(message) # Store incoming command message
 
 @app.on_message(filters.command("ban") & filters.group & filters.create(owner_only_filter))
 async def ban_command(client: Client, message: Message):
@@ -604,8 +627,8 @@ async def set_welcome_command(client: Client, message: Message):
         )
         await message.reply_text("Naya welcome message set kar diya gaya hai, Malik! Jab naya member aayega, toh main yahi pyaara message bhejoongi! 🥰")
     else:
-        await message.reply_text("Maaf karna, welcome message set nahi kar payi. Database mein kuch gadbad hai. 🥺")
-    await store_message(message)
+        await message.reply_text("Maaf karna, welcome message set nahi kar payi. Database (Commands/Settings DB) connect nahi ho paya hai. 🥺")
+    await store_message(message) # Store incoming command message
 
 @app.on_message(filters.command("getwelcome") & filters.group & filters.create(owner_only_filter))
 async def get_welcome_command(client: Client, message: Message):
@@ -618,7 +641,7 @@ async def get_welcome_command(client: Client, message: Message):
         await message.reply_text(f"Malik, current welcome message:\n`{config['welcome_message']}`. Pasand aaya? 😉")
     else:
         await message.reply_text("Malik, is group ke liye koi custom welcome message set nahi hai. Kya set karna chahte ho? 🥺")
-    await store_message(message)
+    await store_message(message) # Store incoming command message
 
 @app.on_message(filters.command("clearwelcome") & filters.group & filters.create(owner_only_filter))
 async def clear_welcome_command(client: Client, message: Message):
@@ -630,8 +653,8 @@ async def clear_welcome_command(client: Client, message: Message):
         )
         await message.reply_text("Malik, custom welcome message hata diya gaya hai. Ab main default welcome message bhejoongi. Kya main bori...ng ho gayi? 😔")
     else:
-        await message.reply_text("Maaf karna, welcome message clear nahi kar payi. Database mein kuch gadbad hai. 🥺")
-    await store_message(message)
+        await message.reply_text("Maaf karna, welcome message clear nahi kar payi. Database (Commands/Settings DB) connect nahi ho paya hai. 🥺")
+    await store_message(message) # Store incoming command message
 
 # Handle new chat members for welcome message
 @app.on_message(filters.new_chat_members & filters.group)
@@ -654,7 +677,7 @@ async def new_member_welcome(client: Client, message: Message):
         final_welcome_text = final_welcome_text.replace("{chat_title}", message.chat.title)
         
         await client.send_message(message.chat.id, final_welcome_text)
-    await store_message(message)
+    await store_message(message) # Store new chat members event message
 
 
 # --- PREMIUM CLONING LOGIC ---
@@ -666,7 +689,7 @@ async def initiate_clone_payment(client: Client, message: Message):
     
     # Ensure user_states_collection is not None
     if user_states_collection is None:
-        await message.reply_text("Maaf karna, abhi bot cloning service available nahi hai. Database mein kuch gadbad hai. 🥺")
+        await message.reply_text("Maaf karna, abhi bot cloning service available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺")
         return
 
     # Check if user is already approved for clone
@@ -722,7 +745,7 @@ async def initiate_clone_payment(client: Client, message: Message):
         upsert=True
     )
     logger.info(f"User {user_id} initiated clone, status set to awaiting_screenshot.")
-    await store_message(message)
+    await store_message(message) # Store incoming command message
 
 # Step 2: Handle 'Screenshot Bhejein' callback
 @app.on_callback_query(filters.regex("send_screenshot_prompt"))
@@ -731,7 +754,7 @@ async def prompt_for_screenshot(client: Client, callback_query: CallbackQuery):
     
     # Ensure user_states_collection is not None
     if user_states_collection is None:
-        await callback_query.answer("Maaf karna, abhi service available nahi hai. Database mein kuch gadbad hai. 🥺", show_alert=True)
+        await callback_query.answer("Maaf karna, abhi service available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺", show_alert=True)
         return
 
     user_state = user_states_collection.find_one({"user_id": user_id})
@@ -762,7 +785,7 @@ async def receive_screenshot(client: Client, message: Message):
     
     # Ensure user_states_collection is not None
     if user_states_collection is None:
-        await message.reply_text("Maaf karna, service abhi available nahi hai. Database mein kuch gadbad hai. 🥺")
+        await message.reply_text("Maaf karna, service abhi available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺")
         await store_message(message) # Store original message
         return
 
@@ -821,7 +844,7 @@ async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
     
     # Ensure user_states_collection is not None
     if user_states_collection is None:
-        await callback_query.answer("Maaf karna, service abhi available nahi hai. Database mein kuch gadbad hai. 🥺", show_alert=True)
+        await callback_query.answer("Maaf karna, service abhi available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺", show_alert=True)
         return
 
     user_state = user_states_collection.find_one({"user_id": target_user_id})
@@ -874,7 +897,7 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
     
     # Ensure user_states_collection is not None
     if user_states_collection is None:
-        await message.reply_text("Maaf karna, abhi bot cloning service available nahi hai. Database mein kuch gadbad hai. 🥺")
+        await message.reply_text("Maaf karna, abhi bot cloning service available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺")
         await store_message(message)
         return
 
@@ -936,10 +959,10 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
         if user_states_collection is not None: # Check again before update
             user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
     finally:
-        if temp_mongo_client:
-            temp_mongo_client.close()
+        # No need to close temp_mongo_client here, as it's not opened in this block
+        pass
 
-    await store_message(message)
+    await store_message(message) # Store incoming command message
 
 # Step 6: Receive update channel link and finalize clone
 @app.on_message(filters.text & filters.private)
@@ -1012,7 +1035,7 @@ async def finalize_clone_process(client: Client, message: Message):
     if user_states_collection is not None: # Check before deleting
         user_states_collection.delete_one({"user_id": user_id})
     logger.info(f"User {user_id} clone process finalized and state cleared.")
-    await store_message(message)
+    await store_message(message) # Store incoming message
 
 
 # --- Private Chat Non-Command Message Handler ---
@@ -1023,14 +1046,14 @@ async def handle_private_non_command_messages(client: Client, message: Message):
     
     # Ensure user_states_collection is not None
     if user_states_collection is None:
-        await message.reply_text("Maaf karna, bot abhi poori tarah se ready nahi hai. Kuch database issues hain. 🥺")
+        await message.reply_text("Maaf karna, bot abhi poori tarah se ready nahi hai. Kuch database issues hain (Clone/State DB connect nahi ho paya). 🥺")
         await store_message(message) # Store original message
         return
 
     user_state = user_states_collection.find_one({"user_id": user_id})
 
     # If user is in any cloning state, don't interfere, let the cloning handlers manage
-    if user_state is not None and user_state.get("status") in ["awaiting_screenshot", "expecting_screenshot", "awaiting_channel", "pending_approval"]: # Changed to 'is not None'
+    if user_state is not None and user_state.get("status") in ["awaiting_screenshot", "expecting_screenshot", "awaiting_channel", "pending_approval"]:
         return # Let the specific handlers (receive_screenshot, finalize_clone_process) take over
 
     # Otherwise, prompt user to use commands
@@ -1038,8 +1061,11 @@ async def handle_private_non_command_messages(client: Client, message: Message):
         "Hehe, darling! Main abhi sirf commands samajhti hoon. 😉\n"
         "Apne sawal poochne ke liye kripya commands ka hi use karein na! Jaise `/help` ya `/start`."
     )
-    # Don't store this message as learning data here, it's a bot's instructional reply
-    # await store_message(message) # Optional: Store only incoming for logging
+    # Store this instructional message for general logs, but not necessarily for learning.
+    # We already store this via `handle_general_messages` if it falls through, but since
+    # this function handles it specifically, we can decide if we want to store.
+    # For now, keeping it consistent with other command handlers storing their incoming messages.
+    await store_message(message)
 
 # --- Standard message handler (general text/sticker messages in groups, or bot replies in private) ---
 @app.on_message(filters.text | filters.sticker)
@@ -1056,8 +1082,7 @@ async def handle_general_messages(client: Client, message: Message):
     if message.chat.type == "private" and message.text and not message.text.startswith('/'):
         # This message is specifically handled by handle_private_non_command_messages (the one we fixed).
         # So, no need to process it for learning/replying here in private.
-        # But we still store it for learning if the user state allows.
-        await store_message(message, is_bot_sent=False)
+        await store_message(message, is_bot_sent=False) # Still store if it's a private chat for general logging/future use
         return
 
     # Store incoming message for learning (always store, even if not replying immediately)
@@ -1074,11 +1099,6 @@ async def handle_general_messages(client: Client, message: Message):
             if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
                 logger.info(f"Cooldown active for chat {chat_id}. Not generating reply for message {message.id}.")
                 return # Exit early, do not reply
-
-        # This check is actually handled by store_message update logic.
-        # is_bot_reply_observed = False
-        # if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
-        #    is_bot_reply_observed = True
 
         logger.info(f"Attempting to generate reply for chat {message.chat.id}")
         reply_doc = await generate_reply(message) # This function now handles the typing indicator
@@ -1103,7 +1123,7 @@ async def handle_general_messages(client: Client, message: Message):
             except Exception as e:
                 logger.error(f"Error sending reply for message {message.id}: {e}", exc_info=True)
         else:
-            logger.info(f"No suitable reply generated (might be due to cooldown) for message {message.id}.")
+            logger.info(f"No suitable reply generated for message {message.id}.")
 
 
 # --- Flask Web Server for Health Check ---
@@ -1152,3 +1172,4 @@ if __name__ == "__main__":
     flask_thread.start()
 
     app.run()
+
