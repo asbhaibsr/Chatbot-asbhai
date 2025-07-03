@@ -1,2 +1,2 @@
-web: gunicorn --bind 0.0.0.0:$PORT health_check_server:app
+web: gunicorn --bind 0.0.0.0:$PORT app:app
 bot: python bot.py
