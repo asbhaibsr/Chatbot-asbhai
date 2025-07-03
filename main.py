@@ -18,7 +18,7 @@ from pyrogram.errors import exceptions
 
 # MongoDB imports
 from pymongo import MongoClient
-from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure 
+from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure, InvalidURI # Added InvalidURI
 
 # Flask imports for web server
 from flask import Flask, jsonify
@@ -74,6 +74,9 @@ if MAIN_MONGO_DB_URI:
     except ConnectionFailure as err:
         logger.error(f"MongoDB (Main Learning DB) connection failed: {err}")
         messages_collection = None
+    except InvalidURI as err: # Added handler for InvalidURI
+        logger.error(f"MongoDB (Main Learning DB) Invalid URI: {err}")
+        messages_collection = None
     except Exception as e:
         logger.error(f"An unexpected error occurred while connecting to Main Learning MongoDB: {e}", exc_info=True)
         messages_collection = None
@@ -100,6 +103,9 @@ if CLONE_STATE_MONGO_DB_URI:
     except ConnectionFailure as err:
         logger.error(f"MongoDB (Clone/State DB) connection failed: {err}")
         user_states_collection = None
+    except InvalidURI as err: # Added handler for InvalidURI
+        logger.error(f"MongoDB (Clone/State DB) Invalid URI: {err}")
+        user_states_collection = None
     except Exception as e:
         logger.error(f"Failed to connect to Clone/State MongoDB: {e}", exc_info=True)
         user_states_collection = None
@@ -125,6 +131,9 @@ if COMMANDS_SETTINGS_MONGO_DB_URI:
         group_configs_collection = None
     except ConnectionFailure as err:
         logger.error(f"MongoDB (Commands/Settings DB) connection failed: {err}")
+        group_configs_collection = None
+    except InvalidURI as err: # Added handler for InvalidURI
+        logger.error(f"MongoDB (Commands/Settings DB) Invalid URI: {err}")
         group_configs_collection = None
     except Exception as e:
         logger.error(f"Failed to connect to Commands/Settings MongoDB: {e}", exc_info=True)
@@ -187,6 +196,9 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
         if message.from_user and message.from_user.is_bot and not is_bot_sent:
             return
 
+        content_type = "text" if message.text else ("sticker" if message.sticker else "other")
+        content_value = message.text if message.text else (message.sticker.emoji if message.sticker else "")
+
         message_data = {
             "message_id": message.id,
             "user_id": message.from_user.id if message.from_user else None,
@@ -197,10 +209,10 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
             "chat_title": message.chat.title if message.chat.type != "private" else None,
             "timestamp": datetime.now(),
             "is_bot_sent": is_bot_sent,
-            "content_type": "text" if message.text else ("sticker" if message.sticker else "other"),
-            "content": message.text if message.text else (message.sticker.emoji if message.sticker else ""),
+            "content_type": content_type, # Use the determined content type
+            "content": content_value, # Use the determined content value
             "sticker_id": message.sticker.file_id if message.sticker else None,
-            "keywords": extract_keywords(message.text) if message.text else extract_keywords(message.sticker.emoji if message.sticker else ""),
+            "keywords": extract_keywords(content_value), # Use the content value for keywords
             "replied_to_message_id": message.reply_to_message.id if message.reply_to_message else None,
             "replied_to_user_id": message.reply_to_message.from_user.id if message.reply_to_message and message.reply_to_message.from_user else None,
             "replied_to_content": message.reply_to_message.text if message.reply_to_message and message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message and message.reply_to_message.sticker else None),
@@ -237,6 +249,9 @@ async def generate_reply(message: Message):
 
     query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
     query_keywords = extract_keywords(query_content)
+
+    # Determine the content type of the incoming message for filtering
+    query_content_type = "text" if message.text else ("sticker" if message.sticker else "other")
 
     if not query_keywords and not query_content:
         logger.debug("No content or keywords extracted for reply generation.")
@@ -288,9 +303,10 @@ async def generate_reply(message: Message):
         if potential_replies:
             logger.info(f"Found {len(potential_replies)} general keyword-based replies.")
             if len(potential_replies) > 1:
+                # FIX: Use query_content_type (derived from incoming message) instead of message.content_type
                 filtered_replies = [
                     doc for doc in potential_replies
-                    if not (doc.get("content", "").lower() == query_content.lower() and doc.get("content_type") == message.content_type)
+                    if not (doc.get("content", "").lower() == query_content.lower() and doc.get("content_type") == query_content_type)
                 ]
                 if filtered_replies:
                     return random.choice(filtered_replies)
@@ -694,7 +710,7 @@ async def initiate_clone_payment(client: Client, message: Message):
     user_state = user_states_collection.find_one({"user_id": user_id, "status": "approved_for_clone"})
     if user_state:
         await message.reply_text(
-            "Tum toh pehle se hi meri permission le chuke ho, mere dost! ✅\n"
+            "Tum toh pehle se ही meri permission le chuke ho, mere dost! ✅\n"
             "Ab bas apna bot token bhejo, main tumhare liye ek naya bot bana dungi:\n"
             "**Kaise?** `/clonebot YOUR_BOT_TOKEN_HERE`\n"
             "(Pura token ek hi line mein hona chahiye, theek hai? 😉)"
@@ -975,7 +991,7 @@ async def finalize_clone_process(client: Client, message: Message):
 
     is_reply_to_force_reply = False
     if message.reply_to_message and message.reply_to_message.from_user.is_self and \
-       isinstance(message.reply_to_message.reply_markup, ForceReply): # <--- YEH LINE CHECK KARO
+       isinstance(message.reply_to_message.reply_markup, ForceReply): 
         is_reply_to_force_reply = True
 
     if not user_state or not is_reply_to_force_reply:
@@ -1062,14 +1078,20 @@ async def handle_general_messages(client: Client, message: Message):
     if message.from_user and message.from_user.is_bot:
         return 
     
+    # Updated: If it's a private chat and not a command, let handle_private_non_command_messages handle it.
+    # This prevents the bot from trying to "learn" from general private chat messages.
     if message.chat.type == "private" and message.text and not message.text.startswith('/'):
+        # Store message even if not handled immediately by this function
         await store_message(message, is_bot_sent=False) 
-        return
+        return # Let the specific private handler manage the reply
 
     # Store incoming message for learning (always store, even if not replying immediately)
     await store_message(message, is_bot_sent=False)
     
     # Only generate replies in groups for non-command messages
+    # Or for private chats IF it's a reply to bot or a command that was handled and we expect a reply.
+    # The `handle_private_non_command_messages` is above this and will catch most private messages.
+    # So this part primarily focuses on group replies.
     if message.chat.type != "private" and message.text and not message.text.startswith('/'): 
         chat_id = message.chat.id
         current_time = time.time()
