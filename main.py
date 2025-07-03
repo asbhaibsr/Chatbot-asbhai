@@ -246,7 +246,7 @@ async def start_private_command(client: Client, message: Message):
     user_name = message.from_user.first_name if message.from_user else "mere pyare dost"
     welcome_message = (
         f"Hey, **{user_name}**! 👋 Main aa gayi hoon aapki baaton ka hissa banne. "
-        "Mera naam hai **Asbhaibsr**! 💖"
+        "Mera naam hai **⎯᪵⎯꯭̽🤍꯭᪳ ⃪𝗖𝘂꯭𝘁𝗶𝗲꯭ 𝗣𝗶𝗲꯭ ⃪🌸͎᪳᪳𝆺꯭𝅥⎯꯭̽⎯꯭**! 💖"
         "\n\nAgar aap mujhe apne **group mein add karte hain**, toh main wahan ki conversations se seekh kar sabko aur bhi mazedaar jawab de paungi. "
         "Jaise, aapki har baat par main apni cute si ray dungi! 😉"
         "\n\nGroup mein add karke aapko milenge: "
@@ -258,7 +258,7 @@ async def start_private_command(client: Client, message: Message):
     )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Mujhe Apne Group Mein Bulao!", url=f"https://t.me/{client.me.username}?startgroup=true")],
-        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/{(DEFAULT_UPDATE_CHANNEL_USERNAME)}")]
+        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/@asbhai_bsr")] # Updated
     ])
     await message.reply_text(welcome_message, reply_markup=keyboard)
     await store_message(message)
@@ -272,7 +272,7 @@ async def start_group_command(client: Client, message: Message):
         "Namaste to all the amazing people here! ✨ Mujhe group mein add karne ka shukriya. Main yahan ki baaton ko samjh kar aur behtar hoti jaungi. Ab toh har baat par mera jawaab milega! 🤭"
     ]
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/{(DEFAULT_UPDATE_CHANNEL_USERNAME)}")]
+        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/@asbhai_bsr")] # Updated
     ])
     await message.reply_text(random.choice(welcome_messages), reply_markup=keyboard)
     await store_message(message)
@@ -326,7 +326,7 @@ async def help_command(client: Client, message: Message):
     )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Mujhe Apne Group Mein Bulao! 😉", url=f"https://t.me/{client.me.username}?startgroup=true")],
-        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 💖", url=f"https://t.me/{(DEFAULT_UPDATE_CHANNEL_USERNAME)}")]
+        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 💖", url=f"https://t.me/@asbhai_bsr")] # Updated
     ])
     await message.reply_text(help_text, reply_markup=keyboard)
     await store_message(message)
@@ -438,7 +438,7 @@ async def delete_message_by_id_command(client: Client, message: Message):
         
         if delete_result.deleted_count > 0:
             await message.reply_text(f"Message ID `{msg_id_to_delete}` database se successfully delete kar diya gaya, Malik! Poof! ✨")
-            logger.info(f"Owner {message.from_user.id} deleted message ID {msg_id_to_id}.")
+            logger.info(f"Owner {message.from_user.id} deleted message ID {msg_id_to_delete}.") # Corrected variable name
         else:
             await message.reply_text(f"Message ID `{msg_id_to_delete}` database mein nahi mila, Malik. Shayad main use janti hi nahi thi! 😅")
     except ValueError:
@@ -875,7 +875,7 @@ async def finalize_clone_process(client: Client, message: Message):
         "2. Apni `main.py` file mein `BOT_TOKEN`, `API_ID`, `API_HASH` aur `OWNER_ID` ko apne hisaab se Environment Variables mein set karo.\n"
         f"3. Aur haan, `main.py` mein `DEFAULT_UPDATE_CHANNEL_USERNAME` ko `'{final_update_channel}'` par set karna mat bhoolna! (Ya phir apne forked repo mein yeh value directly daal do)\n"
         "4. Koyeb (ya kisi bhi hosting) par deploy karo, Environment Variables mein saari details dena. Fir dekho mera jaisa pyaara bot kaise kaam karta hai! 💖\n\n"
-        "Kisi bhi sawal ke liye @asbhai_bsr channel par aana na bhoolna! Main wahin milungi! 😉"
+        "Kisi bhi sawal ke liye @aschat_group channel par aana na bhoolna! Main wahin milungi! 😉" # Updated to support group
     )
     
     # Clear the user state after successful clone finalization
@@ -885,7 +885,11 @@ async def finalize_clone_process(client: Client, message: Message):
 
 
 # --- Private Chat Non-Command Message Handler ---
-@app.on_message(filters.text & filters.private & ~filters.command)
+# IMPORTANT FIX: Replaced ~filters.command with a custom filter as ~ operator doesn't work directly on filters.command function.
+def is_not_command(_, __, message):
+    return not message.text or not message.text.startswith('/')
+
+@app.on_message(filters.text & filters.private & filters.create(is_not_command))
 async def handle_private_non_command_messages(client: Client, message: Message):
     user_id = str(message.from_user.id)
     user_state = user_states_collection.find_one({"user_id": user_id})
@@ -988,7 +992,7 @@ def run_flask_app():
 
 # --- Main entry point ---
 if __name__ == "__main__":
-    logger.info("Asbhaibsr bot running.") # Custom start log message
+    logger.info("Cutie Pie bot running. ✨") # Custom start log message with new name
     
     flask_thread = Thread(target=run_flask_app)
     flask_thread.daemon = True 
