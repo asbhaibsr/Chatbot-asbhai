@@ -66,21 +66,25 @@ PAYMENT_INFO = {
 # Connection 1: For Bot's Learning Messages (from Environment Variable)
 main_mongo_client = None
 main_db = None
-messages_collection = None
+messages_collection = None # Initialize as None
 try:
-    main_mongo_client = MongoClient(MAIN_MONGO_DB_URI)
-    main_db = main_mongo_client.bot_learning_database
-    messages_collection = main_db.messages
-    logger.info("MongoDB (Main Learning DB) connection successful.")
+    if MAIN_MONGO_DB_URI: # Only attempt if URI is set
+        main_mongo_client = MongoClient(MAIN_MONGO_DB_URI)
+        main_db = main_mongo_client.bot_learning_database
+        messages_collection = main_db.messages
+        logger.info("MongoDB (Main Learning DB) connection successful.")
+    else:
+        logger.error("MAIN_MONGO_DB_URI is not set. Main learning database will not be connected.")
 except Exception as e:
     logger.error(f"Failed to connect to Main Learning MongoDB: {e}")
-    # Exit if main DB is critical for learning
-    exit(1)
+    # Do not exit, allow bot to run without learning if DB is not critical for basic functions
+    # For a self-learning bot, this connection IS critical, but we don't want to crash on startup.
+
 
 # Connection 2: For Clone Requests and User States (hardcoded)
 clone_state_mongo_client = None
 clone_state_db = None
-user_states_collection = None
+user_states_collection = None # Initialize as None
 try:
     clone_state_mongo_client = MongoClient(CLONE_AND_STATE_MONGO_DB_URI)
     clone_state_db = clone_state_mongo_client.bot_clone_states_db
@@ -88,13 +92,13 @@ try:
     logger.info("MongoDB (Clone/State DB) connection successful.")
 except Exception as e:
     logger.error(f"Failed to connect to Clone/State MongoDB: {e}")
-    # Exit if essential
-    exit(1)
+    # Do not exit, basic bot functions might still work
+
 
 # Connection 3: For Commands and Button related settings (hardcoded)
 commands_settings_mongo_client = None
 commands_settings_db = None
-group_configs_collection = None
+group_configs_collection = None # Initialize as None
 try:
     commands_settings_mongo_client = MongoClient(COMMANDS_AND_BUTTONS_MONGO_DB_URI)
     commands_settings_db = commands_settings_mongo_client.bot_settings_db
@@ -102,8 +106,7 @@ try:
     logger.info("MongoDB (Commands/Settings DB) connection successful.")
 except Exception as e:
     logger.error(f"Failed to connect to Commands/Settings MongoDB: {e}")
-    # Exit if essential
-    exit(1)
+    # Do not exit, basic bot functions might still work
 
 
 # --- Pyrogram Client ---
@@ -127,6 +130,9 @@ def extract_keywords(text):
     return list(set(words))
 
 async def prune_old_messages():
+    if messages_collection is None:
+        logger.warning("messages_collection is None. Cannot prune messages.")
+        return
     try:
         total_messages = messages_collection.count_documents({})
         logger.info(f"Current total messages in DB: {total_messages}")
@@ -148,6 +154,11 @@ async def prune_old_messages():
 
 
 async def store_message(message: Message, is_bot_sent: bool = False, sent_message_id: int = None):
+    # If messages_collection is not initialized, we cannot store.
+    if messages_collection is None:
+        logger.error("messages_collection is not initialized. Cannot store message.")
+        return
+
     try:
         if message.from_user and message.from_user.is_bot and not is_bot_sent:
             return
@@ -176,14 +187,14 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
             message_data["is_bot_observed_pair"] = True
             logger.debug(f"Observed user reply to bot's message: {message.reply_to_message.id}")
             # Ensure messages_collection is not None before using it
-            if messages_collection:
+            if messages_collection is not None:
                 messages_collection.update_one(
                     {"chat_id": message.chat.id, "message_id": message.reply_to_message.id, "is_bot_sent": True},
                     {"$set": {"is_bot_observed_pair": True}}
                 )
 
         # Ensure messages_collection is not None before using it
-        if messages_collection:
+        if messages_collection is not None:
             messages_collection.insert_one(message_data)
             logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. Bot sent: {is_bot_sent}")
             await prune_old_messages()
@@ -197,17 +208,8 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
 
 
 async def generate_reply(message: Message):
-    # This delay is *before* the reply is generated/sent, ensuring the cooldown.
-    global last_bot_reply_time
-    chat_id = message.chat.id
-    current_time = time.time()
-
-    if chat_id in last_bot_reply_time:
-        time_since_last_reply = current_time - last_bot_reply_time[chat_id]
-        if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
-            logger.info(f"Cooldown active for chat {chat_id}. Ignoring message for immediate reply.")
-            return None # Do not generate reply if within cooldown
-
+    # This function now only generates the reply, the cooldown logic is in handle_general_messages
+    
     # Indicate typing before starting reply generation
     await app.invoke(SetTyping(peer=await app.resolve_peer(message.chat.id), action=SendMessageTypingAction()))
     await asyncio.sleep(0.5) # Small delay for typing indicator to show
@@ -220,35 +222,34 @@ async def generate_reply(message: Message):
         return None
 
     # --- Strategy 1: Direct observed reply (User-to-User, or Bot-to-User) ---
-    if message.reply_to_message:
-        replied_to_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
-        if replied_to_content and messages_collection: # Ensure collection is available
-            logger.info(f"Searching for observed replies to: '{replied_to_content}'")
-            observed_replies_cursor = messages_collection.find({
-                "replied_to_content": {"$regex": f"^{re.escape(replied_to_content)}$", "$options": "i"},
-                "is_bot_observed_pair": True,
-                "chat_id": message.chat.id
-            })
-            potential_replies = list(observed_replies_cursor)
-            if potential_replies:
-                logger.info(f"Found {len(potential_replies)} contextual replies based on direct reply.")
-                return random.choice(potential_replies)
-            else:
+    if messages_collection is not None: # Ensure collection is available for query
+        if message.reply_to_message:
+            replied_to_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
+            if replied_to_content:
+                logger.info(f"Searching for observed replies to: '{replied_to_content}'")
                 observed_replies_cursor = messages_collection.find({
                     "replied_to_content": {"$regex": f"^{re.escape(replied_to_content)}$", "$options": "i"},
-                    "is_bot_observed_pair": True
+                    "is_bot_observed_pair": True,
+                    "chat_id": message.chat.id
                 })
                 potential_replies = list(observed_replies_cursor)
                 if potential_replies:
-                    logger.info(f"Found {len(potential_replies)} global contextual replies based on direct reply.")
+                    logger.info(f"Found {len(potential_replies)} contextual replies based on direct reply.")
                     return random.choice(potential_replies)
+                else:
+                    observed_replies_cursor = messages_collection.find({
+                        "replied_to_content": {"$regex": f"^{re.escape(replied_to_content)}$", "$options": "i"},
+                        "is_bot_observed_pair": True
+                    })
+                    potential_replies = list(observed_replies_cursor)
+                    if potential_replies:
+                        logger.info(f"Found {len(potential_replies)} global contextual replies based on direct reply.")
+                        return random.choice(potential_replies)
 
-    # --- Strategy 2: Keyword-based general reply ---
-    logger.info(f"No direct contextual reply. Falling back to keyword search for: '{query_content}'")
-    keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
+        # --- Strategy 2: Keyword-based general reply ---
+        logger.info(f"No direct contextual reply. Falling back to keyword search for: '{query_content}'")
+        keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
 
-    # Ensure collection is available for query
-    if messages_collection:
         general_replies_group_cursor = messages_collection.find({
             "chat_id": message.chat.id,
             "content_type": {"$in": ["text", "sticker"]},
@@ -334,7 +335,7 @@ async def stats_command(client: Client, message: Message):
         return
 
     # Ensure messages_collection is not None before using it
-    if messages_collection:
+    if messages_collection is not None:
         total_messages = messages_collection.count_documents({})
         unique_group_ids = messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}})
         num_groups = len(unique_group_ids)
@@ -406,7 +407,7 @@ def is_owner(user_id):
 
 # Admin check decorator (FIXED: Added check for message.from_user)
 def owner_only_filter(_, __, message):
-    if message.from_user: # Pehle check karo ki sender hai ya nahi
+    if message.from_user is not None: # Changed to 'is not None'
         return is_owner(message.from_user.id)
     return False # Agar sender nahi hai (system message hai), toh owner nahi hai
 
@@ -418,7 +419,7 @@ async def broadcast_command(client: Client, message: Message):
         return
     broadcast_text = " ".join(message.command[1:])
     # Ensure messages_collection is not None before using it
-    if messages_collection:
+    if messages_collection is not None:
         unique_chat_ids = messages_collection.distinct("chat_id")
         sent_count = 0
         failed_count = 0
@@ -452,7 +453,7 @@ async def reset_data_command(client: Client, message: Message):
             return
 
         # Ensure messages_collection is not None before using it
-        if not messages_collection:
+        if messages_collection is None:
             await message.reply_text("Maaf karna, data reset nahi kar payi. Database mein kuch gadbad hai. 🥺")
             return
 
@@ -499,7 +500,7 @@ async def delete_message_by_id_command(client: Client, message: Message):
         msg_id_to_delete = int(message.command[1])
 
         # Ensure messages_collection is not None before using it
-        if messages_collection:
+        if messages_collection is not None:
             delete_result = messages_collection.delete_one({"message_id": msg_id_to_delete})
 
             if delete_result.deleted_count > 0:
@@ -595,7 +596,7 @@ async def set_welcome_command(client: Client, message: Message):
         return
     welcome_msg_text = " ".join(message.command[1:])
     # Ensure group_configs_collection is not None before using it
-    if group_configs_collection:
+    if group_configs_collection is not None:
         group_configs_collection.update_one(
             {"chat_id": message.chat.id},
             {"$set": {"welcome_message": welcome_msg_text}},
@@ -609,20 +610,20 @@ async def set_welcome_command(client: Client, message: Message):
 @app.on_message(filters.command("getwelcome") & filters.group & filters.create(owner_only_filter))
 async def get_welcome_command(client: Client, message: Message):
     # Ensure group_configs_collection is not None before using it
-    if group_configs_collection:
+    config = None
+    if group_configs_collection is not None:
         config = group_configs_collection.find_one({"chat_id": message.chat.id})
-        if config and "welcome_message" in config:
-            await message.reply_text(f"Malik, current welcome message:\n`{config['welcome_message']}`. Pasand aaya? 😉")
-        else:
-            await message.reply_text("Malik, is group ke liye koi custom welcome message set nahi hai. Kya set karna chahte ho? 🥺")
+    
+    if config and "welcome_message" in config:
+        await message.reply_text(f"Malik, current welcome message:\n`{config['welcome_message']}`. Pasand aaya? 😉")
     else:
-        await message.reply_text("Maaf karna, welcome message retrieve nahi kar payi. Database mein kuch gadbad hai. 🥺")
+        await message.reply_text("Malik, is group ke liye koi custom welcome message set nahi hai. Kya set karna chahte ho? 🥺")
     await store_message(message)
 
 @app.on_message(filters.command("clearwelcome") & filters.group & filters.create(owner_only_filter))
 async def clear_welcome_command(client: Client, message: Message):
     # Ensure group_configs_collection is not None before using it
-    if group_configs_collection:
+    if group_configs_collection is not None:
         group_configs_collection.update_one(
             {"chat_id": message.chat.id},
             {"$unset": {"welcome_message": ""}}
@@ -637,7 +638,7 @@ async def clear_welcome_command(client: Client, message: Message):
 async def new_member_welcome(client: Client, message: Message):
     # Ensure group_configs_collection is not None before using it
     config = None
-    if group_configs_collection:
+    if group_configs_collection is not None:
         config = group_configs_collection.find_one({"chat_id": message.chat.id})
     
     welcome_text = "Hello {user}, welcome to {chat_title}! Main yahan aapka swagat karti hoon! 🥰"
@@ -664,7 +665,7 @@ async def initiate_clone_payment(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     # Ensure user_states_collection is not None
-    if not user_states_collection:
+    if user_states_collection is None:
         await message.reply_text("Maaf karna, abhi bot cloning service available nahi hai. Database mein kuch gadbad hai. 🥺")
         return
 
@@ -729,7 +730,7 @@ async def prompt_for_screenshot(client: Client, callback_query: CallbackQuery):
     user_id = str(callback_query.from_user.id)
     
     # Ensure user_states_collection is not None
-    if not user_states_collection:
+    if user_states_collection is None:
         await callback_query.answer("Maaf karna, abhi service available nahi hai. Database mein kuch gadbad hai. 🥺", show_alert=True)
         return
 
@@ -749,7 +750,8 @@ async def prompt_for_screenshot(client: Client, callback_query: CallbackQuery):
     else:
         # User is not in the correct state, clear pending if any
         await callback_query.answer("Arre! Kuch gadbad ho gayi, kripya /clonebot se dobara shuru karo na! 🥺", show_alert=True)
-        user_states_collection.delete_one({"user_id": user_id})
+        if user_states_collection is not None: # Check again before deleting
+            user_states_collection.delete_one({"user_id": user_id})
         logger.warning(f"User {user_id} tried screenshot prompt from wrong state: {user_state.get('status') if user_state else 'None'}")
 
 
@@ -759,7 +761,7 @@ async def receive_screenshot(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     # Ensure user_states_collection is not None
-    if not user_states_collection:
+    if user_states_collection is None:
         await message.reply_text("Maaf karna, service abhi available nahi hai. Database mein kuch gadbad hai. 🥺")
         await store_message(message) # Store original message
         return
@@ -795,10 +797,11 @@ async def receive_screenshot(client: Client, message: Message):
             )
             logger.info(f"Screenshot received from user {user_id}. Sent to owner for approval.")
             
-            user_states_collection.update_one(
-                {"user_id": user_id},
-                {"$set": {"status": "pending_approval", "screenshot_message_id": message.id}}
-            )
+            if user_states_collection is not None: # Check again before update
+                user_states_collection.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"status": "pending_approval", "screenshot_message_id": message.id}}
+                )
         else:
             # If photo is sent but not in expecting_screenshot state, ignore it or inform
             await message.reply_text("Yeh screenshot abhi mujhe samajh nahi aaya. Kya tum /clonebot se dobara shuru karoge? 🤔")
@@ -817,7 +820,7 @@ async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
     action, _, target_user_id = callback_query.data.split('_', 2)
     
     # Ensure user_states_collection is not None
-    if not user_states_collection:
+    if user_states_collection is None:
         await callback_query.answer("Maaf karna, service abhi available nahi hai. Database mein kuch gadbad hai. 🥺", show_alert=True)
         return
 
@@ -838,10 +841,11 @@ async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
         await client.send_message(OWNER_ID, f"Maaf karna Malik, user {target_user_id} ke message ko edit nahi kar payi. {action} status: {new_caption}")
 
     if action == "approve_clone":
-        user_states_collection.update_one(
-            {"user_id": target_user_id},
-            {"$set": {"status": "approved_for_clone", "approved_on": datetime.now()}}
-        )
+        if user_states_collection is not None: # Check again before update
+            user_states_collection.update_one(
+                {"user_id": target_user_id},
+                {"$set": {"status": "approved_for_clone", "approved_on": datetime.now()}}
+            )
         await client.send_message(
             int(target_user_id),
             "Badhai ho, mere dost! 🎉 Tumhari Bot Cloning request approve ho gayi hai! ✅\n"
@@ -851,7 +855,8 @@ async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
         )
         logger.info(f"User {target_user_id} approved for cloning.")
     elif action == "reject_clone":
-        user_states_collection.delete_one({"user_id": target_user_id}) # Clear the state on rejection
+        if user_states_collection is not None: # Check again before delete
+            user_states_collection.delete_one({"user_id": target_user_id}) # Clear the state on rejection
         await client.send_message(
             int(target_user_id),
             "Maaf karna, darling! 😔 Tumhari Bot Cloning request reject ho gayi hai.\n"
@@ -868,7 +873,7 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     # Ensure user_states_collection is not None
-    if not user_states_collection:
+    if user_states_collection is None:
         await message.reply_text("Maaf karna, abhi bot cloning service available nahi hai. Database mein kuch gadbad hai. 🥺")
         await store_message(message)
         return
@@ -908,24 +913,28 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
             , reply_markup=ForceReply(True)
         )
         logger.info(f"Bot token valid for user {user_id}. Proceeding to channel setup.")
-        user_states_collection.update_one(
-            {"user_id": user_id},
-            {"$set": {"status": "awaiting_channel", "bot_token": bot_token, "bot_username": bot_info.username}}
-        )
+        if user_states_collection is not None: # Check again before update
+            user_states_collection.update_one(
+                {"user_id": user_id},
+                {"$set": {"status": "awaiting_channel", "bot_token": bot_token, "bot_username": bot_info.username}}
+            )
 
     except exceptions.unauthorized.BotTokenInvalid:
         await message.reply_text("Arre! Yeh bot token invalid hai. Kripya sahi token dein na, please! 🥺")
         logger.warning(f"Bot token invalid during cloning for user {user_id}.")
         # Keep user in approved state so they can try again without repaying
-        user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
+        if user_states_collection is not None: # Check again before update
+            user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
     except (exceptions.bad_request.ApiIdInvalid, exceptions.bad_request.ApiIdPublishedFlood):
         await message.reply_text("Hamare API ID/HASH mein kuch problem hai, darling! 😭 Kripya bot owner se contact karein. Yeh toh sad ho gaya!")
         logger.error(f"API ID/HASH issue during bot cloning attempt by user {user_id}.")
-        user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
+        if user_states_collection is not None: # Check again before update
+            user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
     except Exception as e:
         await message.reply_text(f"Bot connect karne mein error aaya, darling: `{e}`\nKripya dobara koshish karein ya sahi token dein. Mujhse ho nahi raha! 😭")
         logger.error(f"Error during bot cloning for user {user_id}: {e}", exc_info=True)
-        user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
+        if user_states_collection is not None: # Check again before update
+            user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
     finally:
         if temp_mongo_client:
             temp_mongo_client.close()
@@ -938,7 +947,7 @@ async def finalize_clone_process(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     # Ensure user_states_collection is not None
-    if not user_states_collection:
+    if user_states_collection is None:
         # If user_states_collection is not initialized, don't proceed with cloning flow.
         # This message might be a general text message, let it pass to other handlers.
         return 
@@ -1000,7 +1009,8 @@ async def finalize_clone_process(client: Client, message: Message):
     )
     
     # Clear the user state after successful clone finalization
-    user_states_collection.delete_one({"user_id": user_id})
+    if user_states_collection is not None: # Check before deleting
+        user_states_collection.delete_one({"user_id": user_id})
     logger.info(f"User {user_id} clone process finalized and state cleared.")
     await store_message(message)
 
@@ -1012,7 +1022,7 @@ async def handle_private_non_command_messages(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     # Ensure user_states_collection is not None
-    if not user_states_collection:
+    if user_states_collection is None:
         await message.reply_text("Maaf karna, bot abhi poori tarah se ready nahi hai. Kuch database issues hain. 🥺")
         await store_message(message) # Store original message
         return
@@ -1020,7 +1030,7 @@ async def handle_private_non_command_messages(client: Client, message: Message):
     user_state = user_states_collection.find_one({"user_id": user_id})
 
     # If user is in any cloning state, don't interfere, let the cloning handlers manage
-    if user_state and user_state.get("status") in ["awaiting_screenshot", "expecting_screenshot", "awaiting_channel", "pending_approval"]:
+    if user_state is not None and user_state.get("status") in ["awaiting_screenshot", "expecting_screenshot", "awaiting_channel", "pending_approval"]: # Changed to 'is not None'
         return # Let the specific handlers (receive_screenshot, finalize_clone_process) take over
 
     # Otherwise, prompt user to use commands
@@ -1046,13 +1056,15 @@ async def handle_general_messages(client: Client, message: Message):
     if message.chat.type == "private" and message.text and not message.text.startswith('/'):
         # This message is specifically handled by handle_private_non_command_messages (the one we fixed).
         # So, no need to process it for learning/replying here in private.
+        # But we still store it for learning if the user state allows.
+        await store_message(message, is_bot_sent=False)
         return
 
     # Store incoming message for learning (always store, even if not replying immediately)
     await store_message(message, is_bot_sent=False)
     
-    # Only generate replies in groups
-    if message.chat.type != "private":
+    # Only generate replies in groups for non-command messages
+    if message.chat.type != "private" and message.text and not message.text.startswith('/'): # Added check for group non-command
         chat_id = message.chat.id
         current_time = time.time()
 
@@ -1063,37 +1075,35 @@ async def handle_general_messages(client: Client, message: Message):
                 logger.info(f"Cooldown active for chat {chat_id}. Not generating reply for message {message.id}.")
                 return # Exit early, do not reply
 
-        is_bot_reply_observed = False
-        if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
-            is_bot_reply_observed = True
+        # This check is actually handled by store_message update logic.
+        # is_bot_reply_observed = False
+        # if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
+        #    is_bot_reply_observed = True
 
-        # Only generate reply if it's not an observed reply (to avoid double-processing)
-        # and after cooldown check
-        if not is_bot_reply_observed:
-            logger.info(f"Attempting to generate reply for chat {message.chat.id}")
-            reply_doc = await generate_reply(message) # This function now handles the cooldown
-            
-            if reply_doc: # If generate_reply returned a reply (meaning it passed cooldown)
-                try:
-                    sent_msg = None
-                    if reply_doc.get("type") == "text":
-                        sent_msg = await message.reply_text(reply_doc["content"])
-                        logger.info(f"Replied with text: {reply_doc['content']}")
-                    elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
-                        sent_msg = await message.reply_sticker(reply_doc["sticker_id"])
-                        logger.info(f"Replied with sticker: {reply_doc['sticker_id']}")
-                    else:
-                        logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}")
+        logger.info(f"Attempting to generate reply for chat {message.chat.id}")
+        reply_doc = await generate_reply(message) # This function now handles the typing indicator
 
-                    if sent_msg:
-                        # Update last reply time for this chat only IF a message was actually sent
-                        last_bot_reply_time[chat_id] = time.time()
-                        # Store bot's outgoing message for learning
-                        await store_message(sent_msg, is_bot_sent=True, sent_message_id=sent_msg.id)
-                except Exception as e:
-                    logger.error(f"Error sending reply for message {message.id}: {e}", exc_info=True)
-            else:
-                logger.info(f"No suitable reply found or cooldown active for message {message.id}.")
+        if reply_doc: # If generate_reply returned a reply (meaning it passed cooldown check inside)
+            try:
+                sent_msg = None
+                if reply_doc.get("type") == "text":
+                    sent_msg = await message.reply_text(reply_doc["content"])
+                    logger.info(f"Replied with text: {reply_doc['content']}")
+                elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
+                    sent_msg = await message.reply_sticker(reply_doc["sticker_id"])
+                    logger.info(f"Replied with sticker: {reply_doc['sticker_id']}")
+                else:
+                    logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}")
+
+                if sent_msg:
+                    # Update last reply time for this chat only IF a message was actually sent
+                    last_bot_reply_time[chat_id] = time.time()
+                    # Store bot's outgoing message for learning
+                    await store_message(sent_msg, is_bot_sent=True, sent_message_id=sent_msg.id)
+            except Exception as e:
+                logger.error(f"Error sending reply for message {message.id}: {e}", exc_info=True)
+        else:
+            logger.info(f"No suitable reply generated (might be due to cooldown) for message {message.id}.")
 
 
 # --- Flask Web Server for Health Check ---
@@ -1105,17 +1115,17 @@ def health_check():
     mongo_status_clone_state = "Disconnected"
     mongo_status_commands_settings = "Disconnected"
     try:
-        if main_mongo_client:
+        if main_mongo_client is not None:
             main_mongo_client.admin.command('ping')
             mongo_status_main = "Connected"
     except Exception: pass
     try:
-        if clone_state_mongo_client:
+        if clone_state_mongo_client is not None:
             clone_state_mongo_client.admin.command('ping')
             mongo_status_clone_state = "Connected"
     except Exception: pass
     try:
-        if commands_settings_mongo_client:
+        if commands_settings_mongo_client is not None:
             commands_settings_mongo_client.admin.command('ping')
             mongo_status_commands_settings = "Connected"
     except Exception: pass
