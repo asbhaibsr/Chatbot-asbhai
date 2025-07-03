@@ -58,7 +58,7 @@ PAYMENT_INFO = {
 # Connection 1: For Bot's Learning Messages (from MAIN_MONGO_DB_URI)
 main_mongo_client = None
 main_db = None
-messages_collection = None 
+messages_collection = None # This will now store the learning pairs and general messages
 
 logger.info(f"Attempting to connect to Main Learning MongoDB. MAIN_MONGO_DB_URI: {'[SET]' if MAIN_MONGO_DB_URI else '[NOT SET]'}")
 if MAIN_MONGO_DB_URI:
@@ -66,7 +66,12 @@ if MAIN_MONGO_DB_URI:
         main_mongo_client = MongoClient(MAIN_MONGO_DB_URI, serverSelectionTimeoutMS=5000)
         main_mongo_client.admin.command('ping')
         main_db = main_mongo_client.bot_learning_database
-        messages_collection = main_db.messages
+        messages_collection = main_db.messages_data # Renamed to avoid confusion with new learning structure
+        # Ensure indexes for faster lookup if needed
+        messages_collection.create_index([("word", 1)])
+        messages_collection.create_index([("is_bot_observed_pair", 1)])
+        messages_collection.create_index([("timestamp", 1)])
+
         logger.info("MongoDB (Main Learning DB) connection successful.")
     except ServerSelectionTimeoutError as err:
         logger.error(f"MongoDB (Main Learning DB) connection timed out: {err}")
@@ -159,7 +164,12 @@ last_bot_reply_time = {}
 
 def extract_keywords(text):
     if not text: return []
+    # Remove common punctuation but keep spaces for word separation
+    text = re.sub(r'[^\w\s]', '', text) 
     words = re.findall(r'\b\w+\b', text.lower())
+    # Optionally, add a list of stopwords to remove common words like 'a', 'the', 'is' etc.
+    # stopwords = ["a", "an", "the", "is", "are", "was", "were", "and", "or", "but", "for", "with", "me", "you", "he", "she", "it", "we", "they", "i", "to", "of", "in", "on", "at", "by", "from", "him", "her", "us", "them", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those"]
+    # return list(set(word for word in words if word not in stopwords))
     return list(set(words))
 
 async def prune_old_messages():
@@ -173,6 +183,7 @@ async def prune_old_messages():
             messages_to_delete_count = int(total_messages * PRUNE_PERCENTAGE)
             logger.info(f"Threshold reached. Deleting {messages_to_delete_count} oldest messages.")
             oldest_message_ids = []
+            # Find and delete oldest entries based on timestamp
             for msg in messages_collection.find({}).sort("timestamp", 1).limit(messages_to_delete_count):
                 oldest_message_ids.append(msg['_id'])
             if oldest_message_ids:
@@ -197,18 +208,22 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
         if message.from_user and message.from_user.is_bot and not is_bot_sent:
             return
 
-        content_type = "text" if message.text else ("sticker" if message.sticker else "other")
-        
+        # Determine content and type
         content_value = None
+        content_type = "other"
+        sticker_file_id = None
         if message.text:
             content_value = message.text
+            content_type = "text"
         elif message.sticker:
             content_value = message.sticker.file_id # Store file_id for stickers
-            content_type = "sticker" # Ensure content type is explicitly 'sticker'
-        # else: content_value remains None for other types
+            sticker_file_id = message.sticker.file_id
+            content_type = "sticker" 
 
+        # Prepare message data for general storage (for broadcast, stats, etc.)
+        # This is separate from the 'learned pair' storage, but we'll use this collection for both
         message_data = {
-            "message_id": message.id,
+            "pyro_message_id": message.id, # Using a distinct name to avoid clash with _id for learning pairs
             "user_id": message.from_user.id if message.from_user else None,
             "username": message.from_user.username if message.from_user else None,
             "first_name": message.from_user.first_name if message.from_user else None,
@@ -219,32 +234,76 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
             "is_bot_sent": is_bot_sent,
             "content_type": content_type,
             "content": content_value,
-            "sticker_id": message.sticker.file_id if message.sticker else None, # Keep sticker_id separate for direct access
-            "keywords": extract_keywords(message.text) if message.text else [], # Only extract keywords from text content
-            "replied_to_message_id": message.reply_to_message.id if message.reply_to_message else None,
-            "replied_to_user_id": message.reply_to_message.from_user.id if message.reply_to_message and message.reply_to_message.from_user else None,
-            "replied_to_content": message.reply_to_message.text if message.reply_to_message and message.reply_to_message.text else (message.reply_to_message.sticker.file_id if message.reply_to_message and message.reply_to_message.sticker else None), # Store sticker file_id for replied_to_content
-            "is_bot_observed_pair": False, # Will be set to True if this message is a user's reply to bot's message
+            "sticker_id": sticker_file_id, 
+            "keywords": extract_keywords(message.text) if message.text else [], 
+            "is_observed_for_learning": False # Default: not a direct learning pair yet
         }
 
-        # Check if this message is a user replying to the bot's *own* message
-        if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
-            # This is a user's reply to the bot's message, this pair is observed by the bot
-            # We want to use the *user's message* (current message) as the "reply" to the *bot's message* (replied_to_message)
-            # So, we update the bot's original message to mark it as observed.
-            # And also, the current message's 'replied_to_content' becomes the 'word' for learning.
-            message_data["is_bot_observed_pair"] = True # Mark the incoming user message as part of an observed pair
+        # Handle reply-to-message context for learning
+        if message.reply_to_message:
+            replied_to_content = None
+            if message.reply_to_message.text:
+                replied_to_content = message.reply_to_message.text
+            elif message.reply_to_message.sticker:
+                replied_to_content = message.reply_to_message.file_id # Use sticker file_id for content
 
-            # Update the original bot message in DB to reflect it received a reply
-            if messages_collection is not None:
-                messages_collection.update_one(
-                    {"chat_id": message.chat.id, "message_id": message.reply_to_message.id, "is_bot_sent": True},
-                    {"$set": {"received_reply": True, "reply_user_id": message.from_user.id}}
-                )
+            message_data["replied_to_message_id"] = message.reply_to_message.id
+            message_data["replied_to_user_id"] = message.reply_to_message.from_user.id if message.reply_to_message.from_user else None
+            message_data["replied_to_content"] = replied_to_content
+
+            # If this message is a user replying to *another user's* message,
+            # this forms a (PREVIOUS_MESSAGE -> CURRENT_MESSAGE) pair.
+            # We explicitly store this as a learned pair in our collection.
+            if message.from_user and message.reply_to_message.from_user and \
+               not message.from_user.is_self and not message.reply_to_message.from_user.is_self:
+                
+                # 'word' is the trigger (the message that was replied to)
+                # 'text' is the response (the current message)
+                # 'check' is the type of the response (text/sticker)
+                # 'id' is sticker_file_id if it's a sticker response
+                
+                # Only store if both parts of the pair exist
+                if replied_to_content and content_value:
+                    learning_pair = {
+                        "word": replied_to_content, # The message that triggered the reply
+                        "text": content_value,      # The actual reply content
+                        "check": content_type,      # Type of the reply content
+                        "id": sticker_file_id,      # Sticker ID if type is sticker
+                        "timestamp": datetime.now(),
+                        "is_bot_observed_pair": True, # This flag denotes it's a learned pair (A->B)
+                        "chat_id": message.chat.id # Store chat_id for group-specific learning
+                    }
+                    # Prevent exact duplicate learning pairs
+                    if messages_collection.find_one({
+                        "word": learning_pair["word"],
+                        "text": learning_pair["text"],
+                        "check": learning_pair["check"],
+                        "id": learning_pair["id"],
+                        "is_bot_observed_pair": True # Crucial to only check for observed pairs
+                    }) is None:
+                        messages_collection.insert_one(learning_pair)
+                        logger.info(f"Learned new pair (User->User): '{replied_to_content}' -> '{content_value}' ({content_type}) in chat {message.chat.id}")
+                        message_data["is_observed_for_learning"] = True # Mark the original user message as part of a learning instance
+            
+            # If this message is a user replying to the bot's *own* message
+            elif message.from_user and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
+                # This is a user's reply to the bot's message.
+                # Mark the bot's original message (the one replied to) as having received a reply.
+                if messages_collection is not None:
+                    # Find the bot's message by pyro_message_id and chat_id
+                    messages_collection.update_one(
+                        {"chat_id": message.chat.id, "pyro_message_id": message.reply_to_message.id, "is_bot_sent": True},
+                        {"$set": {"received_reply_from_user": True, "reply_user_id": message.from_user.id}}
+                    )
+                    logger.debug(f"Bot's message {message.reply_to_message.id} in chat {message.chat.id} received a reply.")
+
 
         if messages_collection is not None:
-            messages_collection.insert_one(message_data)
-            logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. Bot sent: {is_bot_sent}")
+            # Store the current message itself (for broadcast, general search, and stats)
+            messages_collection.insert_one(message_data) 
+            logger.debug(f"Message stored: {message.id} (pyro_message_id) from {message.from_user.id if message.from_user else 'None'}. Bot sent: {is_bot_sent}")
+            
+            # Run pruning asynchronously
             await prune_old_messages()
         else:
             logger.error("messages_collection is STILL None after initial check. This should not happen here.")
@@ -256,11 +315,16 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
 
 async def generate_reply(message: Message):
     # Ensure typing action is initiated immediately
-    await app.invoke(SetTyping(peer=await app.resolve_peer(message.chat.id), action=SendMessageTypingAction()))
+    try:
+        await app.invoke(SetTyping(peer=await app.resolve_peer(message.chat.id), action=SendMessageTypingAction()))
+    except Exception as e:
+        logger.warning(f"Could not send typing action in chat {message.chat.id}: {e}")
 
-    query_content = message.text if message.text else (message.sticker.file_id if message.sticker else "") # Use file_id for stickers
-    query_keywords = extract_keywords(message.text) # Only extract keywords from text content
+    await asyncio.sleep(0.5) # Thoda delay, real feel ke liye
 
+    # Get incoming message content
+    query_content = message.text if message.text else (message.sticker.file_id if message.sticker else "")
+    query_keywords = extract_keywords(message.text) # Keywords only from text
     query_content_type = "text" if message.text else ("sticker" if message.sticker else "other")
 
     if not query_keywords and not query_content:
@@ -271,114 +335,113 @@ async def generate_reply(message: Message):
         logger.error("messages_collection is None. Cannot generate reply.")
         return None
 
-    # --- Learning/Reply Strategy ---
+    # --- Reply Strategy ---
 
-    # If the message is a reply to *another user's* message (User-to-User observed pair)
-    # This is the primary learning mechanism: "When X is said/sent, Y is replied."
-    if message.reply_to_message and not message.reply_to_message.from_user.is_self:
-        replied_to_content = message.reply_to_message.text if message.reply_to_message.text else \
-                             (message.reply_to_message.sticker.file_id if message.reply_to_message.sticker else None)
+    # 1. Direct Contextual Match (User replying to Bot) or Learned Pairs (User-to-User observed)
+    # If the bot was mentioned OR it's a private chat OR it's a reply to bot's message
+    if message.chat.type == "private" or message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self or \
+       (message.text and (f"@{app.me.username.lower()}" in message.text.lower() or f"{app.me.first_name.lower()}" in message.text.lower())):
+
+        # Search for exact match first (case-insensitive, full content) from 'word' field
+        # This prioritizes direct learned pairs where a specific 'word' was replied to with a 'text'/'sticker'
         
-        current_message_content = message.text if message.text else \
-                                  (message.sticker.file_id if message.sticker else None)
-        current_message_type = "text" if message.text else \
-                               ("sticker" if message.sticker else None)
+        # Exact match for text
+        if query_content_type == "text":
+            match_query = {"word": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}, "is_bot_observed_pair": True}
+        # Exact match for sticker (using file_id)
+        elif query_content_type == "sticker" and message.sticker:
+            match_query = {"word": message.sticker.file_id, "is_bot_observed_pair": True}
+        else:
+            match_query = {} # Fallback, unlikely to be hit
 
-        if replied_to_content and current_message_content and current_message_type:
-            # Store this as an observed pair (replied_to_content -> current_message_content)
-            # This is the "A -> B" learning.
-            entry = {
-                "word": replied_to_content,
-                "text": current_message_content,
-                "check": current_message_type,
-                "id": message.sticker.file_unique_id if message.sticker else None,
-                "timestamp": datetime.now(),
-                "is_bot_observed_pair": True # Explicitly mark this as a learned pair
-            }
-            # Check if an identical entry already exists to prevent duplicates
-            if messages_collection.find_one({
-                "word": entry["word"],
-                "text": entry["text"],
-                "check": entry["check"],
-                "id": entry["id"]
-            }) is None:
-                messages_collection.insert_one(entry)
-                logger.info(f"Learned new pair: '{replied_to_content}' -> '{current_message_content}' ({current_message_type})")
-            
-            # Since this was a learning opportunity, the bot might not *immediately* reply
-            # Instead, it learns for future interactions.
-            return None # Do not generate a reply immediately after learning.
+        potential_replies = list(messages_collection.find(match_query))
 
-    # If the message is not a reply, or is a reply to the bot's own message,
-    # then the bot should try to generate a reply based on its learned data.
-
-    # --- Strategy 1: Direct observed reply to bot's previous message (if user replied to bot) ---
-    if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
-        # Find responses that users have given to what the bot previously said
-        bot_previous_content = message.reply_to_message.text if message.reply_to_message.text else \
-                               (message.reply_to_message.sticker.file_id if message.reply_to_message.sticker else None)
-        
-        if bot_previous_content:
-            # Find responses where `word` is bot's previous content and `is_bot_observed_pair` is True
-            # This is like: "If I said X, and a user replied Y, then Y is a good response to X."
-            observed_bot_replies_cursor = messages_collection.find({
-                "word": bot_previous_content, # The 'word' field here is what the bot previously said
-                "is_bot_observed_pair": True, # This means a user replied to this 'word'
-                "content_type": {"$in": ["text", "sticker"]} # Ensure reply is text or sticker
-            })
-            potential_replies = list(observed_bot_replies_cursor)
-            
-            if potential_replies:
-                logger.info(f"Found {len(potential_replies)} replies based on bot's previous message.")
-                filtered_potential_replies = [
-                    doc for doc in potential_replies 
-                    if (doc.get("content_type") == "text" and doc.get("text")) or \
-                       (doc.get("content_type") == "sticker" and doc.get("sticker_id"))
-                ]
-                if filtered_potential_replies:
-                    chosen_reply = random.choice(filtered_potential_replies)
-                    return {"type": chosen_reply["check"], "content": chosen_reply["text"], "sticker_id": chosen_reply.get("id")}
+        # Filter out replies that are identical to the input query_content if they are text and exact match
+        if query_content_type == "text":
+            potential_replies = [
+                doc for doc in potential_replies
+                if not (doc.get("text", "").lower() == query_content.lower() and doc.get("check") == "text")
+            ]
+        elif query_content_type == "sticker" and message.sticker:
+             potential_replies = [
+                doc for doc in potential_replies
+                if not (doc.get("id") == message.sticker.file_id and doc.get("check") == "sticker")
+            ]
 
 
-    # --- Strategy 2: General keyword-based reply ---
-    logger.info(f"Falling back to keyword/content search for: '{query_content}'")
+        if potential_replies:
+            logger.info(f"Found {len(potential_replies)} direct observed replies for: '{query_content}'")
+            chosen_reply = random.choice(potential_replies)
+            # Return dict with 'type', 'content' (for text), 'sticker_id' (for sticker)
+            return {"type": chosen_reply["check"], "content": chosen_reply.get("text"), "sticker_id": chosen_reply.get("id")}
     
-    query_terms = [query_content.lower()]
-    if query_keywords:
-        query_terms.extend(query_keywords)
+    logger.info(f"No direct observed reply for: '{query_content}'. Falling back to keyword/content search.")
+
+    # 2. General Keyword/Content Matching (from all stored messages, preferring replies to bot)
+    # This searches through all `content` and `keywords` for a general match
     
-    # Create a regex to match any of the query terms in the 'word' field
-    search_regex = "|".join([re.escape(term) for term in query_terms if term])
-    
-    if search_regex:
-        # Try to find a message in the 'word' field (the trigger) that matches the incoming message's content/keywords
-        # This covers general "A -> B" learning pairs
-        general_replies_cursor = messages_collection.find({
-            "word": {"$regex": f".*({search_regex}).*", "$options": "i"},
-            "content_type": {"$in": ["text", "sticker"]} # Ensure reply is text or sticker
-        })
+    search_terms = []
+    if query_content_type == "text":
+        search_terms.extend(query_keywords)
+        if query_content: search_terms.append(query_content.lower()) # Add full content as a term
+    elif query_content_type == "sticker" and message.sticker:
+        search_terms.append(message.sticker.file_id) # Search by sticker file ID
+
+    # Create regex for searching
+    keyword_regex = "|".join([re.escape(term) for term in search_terms if term])
+
+    if keyword_regex:
+        # Search in 'word' (for learned pairs) or 'content' (for general messages)
+        general_search_query = {
+            "$or": [
+                {"word": {"$regex": f".*({keyword_regex}).*", "$options": "i"}}, # Learned pairs
+                {"content": {"$regex": f".*({keyword_regex}).*", "$options": "i"}} # General messages
+            ],
+            "$and": [
+                {"$or": [
+                    {"check": "text"}, # For learned pairs
+                    {"content_type": "text"} # For general messages
+                ]},
+                {"$or": [
+                    {"check": "sticker"}, # For learned pairs
+                    {"content_type": "sticker"} # For general messages
+                ]}
+            ]
+        }
         
-        potential_replies = list(general_replies_cursor)
-        
+        potential_replies_cursor = messages_collection.find(general_search_query)
+        potential_replies = list(potential_replies_cursor)
+
         if potential_replies:
             logger.info(f"Found {len(potential_replies)} general keyword-based replies.")
+            
             # Filter out replies that are identical to the incoming message and ensure content/sticker_id
             filtered_replies = [
                 doc for doc in potential_replies
-                if not (doc.get("word", "").lower() == query_content.lower() and doc.get("check") == query_content_type) and
+                if not (doc.get("content", "").lower() == query_content.lower() and doc.get("content_type") == query_content_type) and # General content match
+                   not (doc.get("text", "").lower() == query_content.lower() and doc.get("check") == "text") and # Learned text match
+                   not (doc.get("id") == message.sticker.file_id and doc.get("check") == "sticker") and # Learned sticker match
+                   (doc.get("content_type") == "text" and doc.get("content")) or \
+                   (doc.get("content_type") == "sticker" and doc.get("sticker_id")) or \
                    (doc.get("check") == "text" and doc.get("text")) or \
-                   (doc.get("check") == "sticker" and doc.get("sticker_id"))
+                   (doc.get("check") == "sticker" and doc.get("id")) # Ensure valid content for reply
             ]
             
             if filtered_replies:
                 chosen_reply = random.choice(filtered_replies)
-                return {"type": chosen_reply["check"], "content": chosen_reply["text"], "sticker_id": chosen_reply.get("id")}
+                
+                # Determine type and content for the reply
+                reply_type = chosen_reply.get("content_type") or chosen_reply.get("check")
+                reply_content = chosen_reply.get("content") or chosen_reply.get("text")
+                reply_sticker_id = chosen_reply.get("sticker_id") or chosen_reply.get("id")
+
+                return {"type": reply_type, "content": reply_content, "sticker_id": reply_sticker_id}
             else:
-                logger.warning(f"All potential replies for '{query_content}' were identical to input or had no content. Falling back.")
+                logger.warning(f"All potential general replies for '{query_content}' were identical to input or had no content. Falling back.")
 
     logger.info(f"No suitable learned reply found for: '{query_content}'.")
 
-    # --- Strategy 3: Fallback generic replies ---
+    # 3. Fallback generic replies
     fallback_messages = [
         {"type": "text", "content": "Hmm, main is bare mein kya kahoon?"},
         {"type": "text", "content": "Interesting! Aur kuch?"},
@@ -409,7 +472,7 @@ async def start_private_command(client: Client, message: Message):
     )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Mujhe Apne Group Mein Bulao!", url=f"https://t.me/{client.me.username}?startgroup=true")],
-        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/asbhai_bsr")] 
+        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/{DEFAULT_UPDATE_CHANNEL_USERNAME}")] 
     ])
     await message.reply_text(welcome_message, reply_markup=keyboard)
     await store_message(message)
@@ -423,7 +486,7 @@ async def start_group_command(client: Client, message: Message):
         "Namaste to all the amazing people here! ✨ Mujhe group mein add karne ka shukriya. Main yahan ki baaton ko samjh kar aur behtar hoti jaungi. Ab toh har baat par mera jawaab milega! 🤭"
     ]
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/asbhai_bsr")] 
+        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/{DEFAULT_UPDATE_CHANNEL_USERNAME}")] 
     ])
     await message.reply_text(random.choice(welcome_messages), reply_markup=keyboard)
     await store_message(message)
@@ -436,14 +499,15 @@ async def stats_command(client: Client, message: Message):
         return
 
     if messages_collection is not None:
-        total_messages = messages_collection.count_documents({})
+        # Count all unique messages (not just learning pairs)
+        total_stored_messages = messages_collection.count_documents({})
         unique_group_ids = messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}})
         num_groups = len(unique_group_ids)
 
         stats_text = (
             "📊 **Meri Cute Cute Statistics** 📊\n"
             f"• Kitne groups mein main masti karti hoon: **{num_groups}**\n"
-            f"• Kitne messages maine apne dimag mein store kiye hain: **{total_messages}**\n"
+            f"• Total messages jo maine apne dimag mein store kiye hain: **{total_stored_messages}**\n"
             "Ab batao, main smart hoon na? 🤩"
         )
         await message.reply_text(stats_text)
@@ -480,7 +544,7 @@ async def help_command(client: Client, message: Message):
     )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Mujhe Apne Group Mein Bulao! 😉", url=f"https://t.me/{client.me.username}?startgroup=true")],
-        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 💖", url=f"https://t.me/asbhai_bsr")] 
+        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 💖", url=f"https://t.me/{DEFAULT_UPDATE_CHANNEL_USERNAME}")] 
     ])
     await message.reply_text(help_text, reply_markup=keyboard)
     await store_message(message) 
@@ -519,6 +583,7 @@ async def broadcast_command(client: Client, message: Message):
         return
     broadcast_text = " ".join(message.command[1:])
     if messages_collection is not None:
+        # Fetch distinct chat_ids from all stored messages (not just learning pairs)
         unique_chat_ids = messages_collection.distinct("chat_id")
         sent_count = 0
         failed_count = 0
@@ -567,14 +632,14 @@ async def reset_data_command(client: Client, message: Message):
             await message.reply_text("Malik, itne kam messages hain ki diye gaye percentage par kuch delete nahi hoga. Kya karna hai? 🤔")
             return
 
-        await message.reply_text(f"{messages_to_delete_count} sabse purane messages delete kiye ja rahe hain ({percentage}% of {total_messages}). Kripya intezaar karein, main saaf-safai kar rahi hoon! 🧹✨")
+        await message.reply_text(f"{messages_to_delete_count} sabse purane messages database se delete kiye ja rahe hain ({percentage}% of {total_messages}). Kripya intezaar karein, main saaf-safai kar rahi hoon! 🧹✨")
 
-        oldest_message_ids = []
+        oldest_message_ids_to_delete = []
         for msg in messages_collection.find({}).sort("timestamp", 1).limit(messages_to_delete_count):
-            oldest_message_ids.append(msg['_id'])
+            oldest_message_ids_to_delete.append(msg['_id'])
 
-        if oldest_message_ids:
-            delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
+        if oldest_message_ids_to_delete:
+            delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids_to_delete}})
             await message.reply_text(f"Successfully {delete_result.deleted_count} messages database se delete ho gaye, Malik! Ab main aur smart banungi! 💖")
             logger.info(f"Owner {message.from_user.id} deleted {delete_result.deleted_count} messages ({percentage}%).")
         else:
@@ -591,16 +656,31 @@ async def reset_data_command(client: Client, message: Message):
 @app.on_message(filters.command("deletemessage") & filters.private & filters.create(owner_only_filter))
 async def delete_message_by_id_command(client: Client, message: Message):
     if len(message.command) < 2:
-        await message.reply_text("Malik, kripya us message ki ID dein jise delete karna hai. Upyog: `/deletemessage <message_id>`")
+        await message.reply_text("Malik, kripya us message ki ID dein jise delete karna hai. Upyog: `/deletemessage <pyro_message_id>`")
         return
     try:
         msg_id_to_delete = int(message.command[1])
 
         if messages_collection is not None:
-            delete_result = messages_collection.delete_one({"message_id": msg_id_to_delete})
+            # Delete entries where pyro_message_id matches (general messages or bot's own sent messages)
+            delete_result_pyro = messages_collection.delete_many({"pyro_message_id": msg_id_to_delete})
+            
+            # Also delete any learned pairs where this message ID was the 'word' or 'text' if applicable
+            # (Though learning pairs might not strictly use pyro_message_id for word/text itself,
+            # this is a more robust cleanup)
+            delete_result_learning = messages_collection.delete_many(
+                {"$or": [
+                    {"word": str(msg_id_to_delete)}, # If message ID was used as content for learning
+                    {"text": str(msg_id_to_delete)},
+                ],
+                "is_bot_observed_pair": True
+                }
+            )
 
-            if delete_result.deleted_count > 0:
-                await message.reply_text(f"Message ID `{msg_id_to_delete}` database se successfully delete kar diya gaya, Malik! Poof! ✨")
+
+            if delete_result_pyro.deleted_count > 0 or delete_result_learning.deleted_count > 0:
+                await message.reply_text(f"Message ID `{msg_id_to_delete}` database se successfully delete kar diya gaya, Malik! Poof! ✨ "
+                                         f"(General entries: {delete_result_pyro.deleted_count}, Learning entries: {delete_result_learning.deleted_count})")
                 logger.info(f"Owner {message.from_user.id} deleted message ID {msg_id_to_delete}.") 
             else:
                 await message.reply_text(f"Message ID `{msg_id_to_delete}` database mein nahi mila, Malik. Shayad main use janti hi nahi thi! 😅")
@@ -1079,6 +1159,7 @@ async def finalize_clone_process(client: Client, message: Message):
                 final_update_channel = update_channel_input.replace('@', '')
             
             try:
+                # Check if bot can get info about the channel
                 chat = await client.get_chat(f"@{final_update_channel}")
                 if not chat.type == "channel":
                     await message.reply_text("Yeh ek valid channel username/link nahi lag raha, darling! Kripya sahi channel ka username (@channelname) ya link (t.me/channelname) dein, ya 'no' type karo. Mujhko samjho na! 🥺")
@@ -1132,12 +1213,35 @@ async def handle_private_non_command_messages(client: Client, message: Message):
     if user_state is not None and user_state.get("status") in ["awaiting_screenshot", "expecting_screenshot", "awaiting_channel", "pending_approval"]:
         return 
 
-    # Otherwise, prompt user to use commands
-    await message.reply_text(
-        "Hehe, darling! Main abhi sirf commands samajhti hoon. 😉\n"
-        "Apne sawal poochne ke liye kripya commands ka hi use karein na! Jaise `/help` ya `/start`."
-    )
-    await store_message(message) 
+    # Otherwise, try to generate a reply for the private chat
+    logger.info(f"Attempting to generate reply for private chat {message.chat.id}")
+    reply_doc = await generate_reply(message) # Call generate_reply for private messages as well
+    
+    if reply_doc: 
+        try:
+            sent_msg = None
+            if reply_doc.get("type") == "text":
+                sent_msg = await message.reply_text(reply_doc["content"])
+                logger.info(f"Replied with text in private chat: {reply_doc['content']}")
+            elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
+                sent_msg = await message.reply_sticker(reply_doc["sticker_id"])
+                logger.info(f"Replied with sticker in private chat: {reply_doc['sticker_id']}")
+            else:
+                logger.warning(f"Private chat reply document found but no content/sticker_id: {reply_doc}")
+
+            if sent_msg:
+                # Store the bot's sent message
+                await store_message(sent_msg, is_bot_sent=True, sent_message_id=sent_msg.id)
+        except Exception as e:
+            logger.error(f"Error sending reply in private chat for message {message.id}: {e}", exc_info=True)
+    else:
+        logger.info(f"No suitable reply generated for private message {message.id}. This could be a learning instance or a generic fallback.")
+        # If no smart reply is found, provide a generic prompt for private chat
+        await message.reply_text(
+            "Hehe, darling! Main abhi sirf commands samajhti hoon ya conversations se seekhti hoon. 😉\n"
+            "Apne sawal poochne ke liye kripya commands ka hi use karein na! Jaise `/help` ya `/start`."
+        )
+
 
 # --- Main message handler for learning and replying ---
 @app.on_message(filters.text | filters.sticker)
@@ -1148,45 +1252,42 @@ async def handle_general_messages(client: Client, message: Message):
     if message.from_user and message.from_user.is_bot and not message.from_user.is_self:
         return
 
-    # Special handling for private chats: if it's a text message and not a command,
-    # and not part of the clone bot flow (which `finalize_clone_process` handles),
-    # then `handle_private_non_command_messages` should deal with it.
-    if message.chat.type == "private" and message.text and not message.text.startswith('/'):
-        user_id = str(message.from_user.id)
-        is_in_clone_flow = False
-        if user_states_collection is not None:
-            user_state = user_states_collection.find_one({"user_id": user_id})
-            is_in_clone_flow = user_state is not None and user_state.get("status") in ["awaiting_screenshot", "expecting_screenshot", "awaiting_channel", "pending_approval"]
-        
-        is_reply_to_bot_force_reply = False
-        if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
-            try:
-                replied_to_msg = await client.get_messages(message.chat.id, message.reply_to_message.id)
-                if replied_to_msg and isinstance(replied_to_msg.reply_markup, ForceReply):
-                    is_reply_to_bot_force_reply = True
-            except Exception as e:
-                logger.warning(f"Could not fetch replied_to_message for ForceReply check in general handler: {e}")
-
-        # If it's a private text message, not a command, and not part of a ForceReply cloning step,
-        # then let the specific private handler manage it.
-        if not is_in_clone_flow and not is_reply_to_bot_force_reply:
-            await handle_private_non_command_messages(client, message)
-            await store_message(message, is_bot_sent=False) # Still store this message
-            return
-        # If it *is* a ForceReply or part of clone flow, `finalize_clone_process` or `receive_screenshot` will handle it.
-        # So we don't return here. It will proceed to store_message and potentially generate_reply for those cases.
-
+    # Check for /clonebot command specifically to avoid general message handling during cloning setup
+    if message.chat.type == "private" and message.text and message.text.startswith('/clonebot'):
+        # Let the /clonebot handler take precedence
+        return
 
     # Store incoming message for learning (always store, even if not replying immediately)
     await store_message(message, is_bot_sent=False)
     
-    # Only generate replies in groups or if it's a private chat message where bot is expected to respond (e.g., reply to its own message)
-    # The condition `message.chat.type != "private"` ensures general group chat responses.
-    # The `message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self`
-    # handles cases where a user replies to the bot in private, triggering a response.
-    if (message.chat.type != "private" and message.text and not message.text.startswith('/')) or \
-       (message.chat.type == "private" and message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self):
-        
+    # Decide if the bot should generate a reply based on chat type and context
+    should_reply = False
+    if message.chat.type == "private":
+        # In private chat, bot should always try to reply unless it's a command or part of cloning flow
+        if message.text and message.text.startswith('/'): # Commands handled separately
+            should_reply = False
+        else: # Non-command private text/sticker messages are handled by `handle_private_non_command_messages`
+              # But if it's a reply to bot's message in private, it should get a reply
+            if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
+                should_reply = True
+            else:
+                # For general private messages, we delegate to `handle_private_non_command_messages`
+                # which already calls generate_reply. Avoid double calling.
+                return 
+    elif message.chat.type in ["group", "supergroup"]:
+        # In groups, reply if bot is mentioned or if it's a reply to bot's message
+        if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
+            should_reply = True
+        elif message.text and (f"@{client.me.username.lower()}" in message.text.lower() or f"{client.me.first_name.lower()}" in message.text.lower()):
+            should_reply = True
+        else:
+            # Random reply chance for non-mentioned messages in groups to keep conversation alive
+            # You can adjust this probability
+            if random.random() < 0.2: # 20% chance to reply without mention/reply
+                should_reply = True
+
+
+    if should_reply:
         chat_id = message.chat.id
         current_time = time.time()
 
@@ -1214,11 +1315,26 @@ async def handle_general_messages(client: Client, message: Message):
 
                 if sent_msg:
                     last_bot_reply_time[chat_id] = time.time()
+                    # Store the bot's sent message in the general messages_data collection
                     await store_message(sent_msg, is_bot_sent=True, sent_message_id=sent_msg.id)
             except Exception as e:
                 logger.error(f"Error sending reply for message {message.id}: {e}", exc_info=True)
         else:
-            logger.info(f"No suitable reply generated for message {message.id}. This could be a learning instance.")
+            logger.info(f"No suitable reply generated for message {message.id}. This could be a learning instance or a generic fallback for groups/mentions.")
+            # If no smart reply is found and it's a group/mention, still reply with a generic one to acknowledge
+            if message.chat.type in ["group", "supergroup"] and (message.reply_to_message and message.reply_to_message.from_user.is_self or message.text and f"@{client.me.username.lower()}" in message.text.lower()):
+                 fallback_messages = [
+                    {"type": "text", "content": "Hmm, main is bare mein kya kahoon?"},
+                    {"type": "text", "content": "Interesting! Aur kuch?"},
+                    {"type": "text", "content": "Main sun rahi hoon... 👋"},
+                    {"type": "text", "content": "Aapki baat sunkar acha laga!"},
+                    {"type": "text", "content": "Kya haal-chal?"}
+                ]
+                 chosen_fallback = random.choice(fallback_messages)
+                 sent_msg = await message.reply_text(chosen_fallback["content"])
+                 if sent_msg:
+                     last_bot_reply_time[chat_id] = time.time()
+                     await store_message(sent_msg, is_bot_sent=True, sent_message_id=sent_msg.id)
 
 
 # --- Flask Web Server for Health Check ---
@@ -1268,4 +1384,3 @@ if __name__ == "__main__":
     flask_thread.start()
 
     app.run()
-
