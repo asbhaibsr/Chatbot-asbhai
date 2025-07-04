@@ -923,8 +923,9 @@ async def initiate_clone_payment(client: Client, message: Message):
         await store_message(message) 
         return
 
-    user_state = user_states_collection.find_one({"user_id": user_id, "status": "approved_for_clone"})
-    if user_state:
+    user_state = user_states_collection.find_one({"user_id": user_id})
+    
+    if user_state and user_state.get("status") == "approved_for_clone":
         await message.reply_text(
             "Tum toh pehle se hi meri permission le chuke ho, mere dost! ✅\n"
             "Ab bas apna bot token bhejo, main tumhare liye ek naya bot bana dungi:\n"
@@ -942,7 +943,8 @@ async def initiate_clone_payment(client: Client, message: Message):
         )
         await store_message(message) 
         return
-
+    
+    # If no pending or approved state, start fresh
     payment_message = (
         f"Agar tum bhi mujhse milta julta ek cute sa bot banana chahte ho, toh bas ₹{PAYMENT_INFO['amount']} ka payment karna hoga. 💰"
         f"\n\n**Payment Details (Meri Secret Jaan!):**\n"
@@ -1001,24 +1003,25 @@ async def prompt_for_screenshot(client: Client, callback_query: CallbackQuery):
         logger.info(f"User {user_id} clicked screenshot prompt, status set to expecting_screenshot.")
     else:
         await callback_query.answer("Arre! Kuch gadbad ho gayi, kripya /clonebot se dobara shuru karo na! 🥺", show_alert=True)
+        # It's better to reset the state if it's not the expected "awaiting_screenshot"
         if user_states_collection is not None: 
             user_states_collection.delete_one({"user_id": user_id})
         logger.warning(f"User {user_id} tried screenshot prompt from wrong state: {user_state.get('status') if user_state else 'None'}")
 
 
 # Step 3: Receive screenshot and send to owner for approval
-# Modified filter to be more specific for replies to ForceReply in private chats
 @app.on_message(
     filters.photo & filters.private & 
-    filters.reply # Ensure it's a reply
-    # FIX 2: Correct lambda filter arguments from (_, __, msg) to (_, message)
-    & (lambda _, message: message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self and
-                         message.reply_to_message.reply_markup and isinstance(message.reply_to_message.reply_markup, ForceReply))
+    filters.reply & # Ensure it's a reply
+    (lambda _, message: message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self and
+                         message.reply_to_message.reply_markup and isinstance(message.reply_to_message.reply_markup, ForceReply) and
+                         "screenshot" in message.reply_to_message.text.lower()) # Added a check for text to be more specific
 )
 async def receive_screenshot(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     if user_states_collection is None:
+        logger.error("messages_collection is None. Cannot store message.") # Changed to error, as it's critical here
         return # Cannot process without database, let general handler (if any) or simply ignore
 
     user_state = user_states_collection.find_one({"user_id": user_id})
@@ -1054,7 +1057,7 @@ async def receive_screenshot(client: Client, message: Message):
                 {"$set": {"status": "pending_approval", "screenshot_message_id": message.id}}
             )
     else:
-        # If not in the expected state, just ignore this specific photo (it will be handled by handle_private_general_messages later if it's a general photo)
+        # If not in the expected state, let the general handler process it
         logger.warning(f"Photo received from user {user_id} but not in expected state for screenshot: {user_state.get('status') if user_state else 'None'}. Not processing as screenshot.")
     
     await store_message(message)
@@ -1076,7 +1079,13 @@ async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
         await callback_query.answer("Arre! Yeh request ab valid nahi hai ya pehle hi process ho chuki hai, Malik! 🙄", show_alert=True)
         return
 
-    new_caption = callback_query.message.caption + (f"\n\n**Admin ne Approve Kar Diya! ✅**" if action == "approve_clone" else "\n\n**Admin ne Reject Kar Diya! ❌**")
+    # FIX: Correctly set the new_caption based on action
+    new_caption = callback_query.message.caption.split("\n\n")[0] # Get original caption
+    if action == "approve_clone":
+        new_caption += "\n\n**Admin ne Approve Kar Diya! ✅**"
+    else: # reject_clone
+        new_caption += "\n\n**Admin ne Reject Kar Diya! ❌**"
+
     try:
         await callback_query.message.edit_caption(
             caption=new_caption,
@@ -1093,6 +1102,7 @@ async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
                 {"$set": {"status": "approved_for_clone", "approved_on": datetime.now()}}
             )
         try:
+            # FIX: Send approval message to the user
             await client.send_message(
                 int(target_user_id),
                 "Badhai ho, mere dost! 🎉 Tumhari Bot Cloning request approve ho gayi hai! ✅\n"
@@ -1197,15 +1207,16 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
 # Step 6: Receive update channel link and finalize clone
 @app.on_message(
     filters.text & filters.private &
-    filters.reply # Ensure it's a reply
-    # FIX 2: Correct lambda filter arguments from (_, __, msg) to (_, message)
-    & (lambda _, message: message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self and
-                         message.reply_to_message.reply_markup and isinstance(message.reply_to_message.reply_markup, ForceReply))
+    filters.reply & # Ensure it's a reply
+    (lambda _, message: message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self and
+                         message.reply_to_message.reply_markup and isinstance(message.reply_to_message.reply_markup, ForceReply) and
+                         "update channel" in message.reply_to_message.text.lower()) # Added a check for text to be more specific
 )
 async def finalize_clone_process(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     if user_states_collection is None:
+        logger.error("messages_collection is None. Cannot store message.") # Changed to error, as it's critical here
         return 
 
     user_state = user_states_collection.find_one({"user_id": user_id, "status": "awaiting_channel"})
@@ -1226,6 +1237,7 @@ async def finalize_clone_process(client: Client, message: Message):
                 final_update_channel = update_channel_input.replace('@', '')
             
             try:
+                # Attempt to get chat to verify it's a valid channel
                 chat = await client.get_chat(f"@{final_update_channel}")
                 if not chat.type == ChatType.CHANNEL:
                     await message.reply_text("Yeh ek valid channel username/link nahi lag raha, darling! Kripya sahi channel ka username (@channelname) ya link (t.me/channelname) dein, ya 'no' type karo. Mujhko samjho na! 🥺")
@@ -1271,7 +1283,7 @@ async def finalize_clone_process(client: Client, message: Message):
     filters.private & 
     (filters.text | filters.sticker | filters.photo | filters.video | filters.document | filters.audio | filters.voice | filters.animation) & 
     ~filters.via_bot & 
-    (lambda _, __, msg: not msg.text.startswith('/')) &
+    (lambda _, __, msg: not msg.text or not msg.text.startswith('/')) & # Ensure it's not a command
     ~filters.reply # IMPORTANT: This excludes replies, letting specific handlers like receive_screenshot handle them
 )
 async def handle_private_general_messages(client: Client, message: Message):
