@@ -1371,11 +1371,7 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
 
 # Step 6: Receive update channel link and finalize clone
 @app.on_message(
-    filters.text & filters.private &
-    filters.reply & # Ensure it's a reply
-    (lambda client_obj, message: message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self and
-                         message.reply_to_message.reply_markup and isinstance(message.reply_to_message.reply_markup, ForceReply) and
-                         "update channel" in message.reply_to_message.text.lower())
+    filters.text & filters.private # Removed filters.reply and the complex lambda for reply_to_message content
 )
 async def finalize_clone_process(client: Client, message: Message):
     user_id = str(message.from_user.id)
@@ -1387,10 +1383,8 @@ async def finalize_clone_process(client: Client, message: Message):
     user_state = user_states_collection.find_one({"user_id": user_id, "status": "awaiting_channel"})
 
     if not user_state:
-        logger.warning(f"Text received from user {user_id} but not in expected state for channel: {user_state.get('status') if user_state else 'None'}. Not processing as channel link.")
-        # If it's not in the expected state, let the general message handler take over
-        # This will prevent an infinite loop if the user replies with something irrelevant
-        return
+        logger.debug(f"User {user_id} is not in 'awaiting_channel' state. Skipping finalize_clone_process.")
+        return # Not in the correct state for this handler
 
     update_channel_input = message.text.strip()
     final_update_channel = DEFAULT_UPDATE_CHANNEL_USERNAME
@@ -1452,17 +1446,14 @@ async def finalize_clone_process(client: Client, message: Message):
 @app.on_message(
     filters.private &
     (filters.text | filters.sticker | filters.photo | filters.video | filters.document | filters.audio | filters.voice | filters.animation) &
-    ~filters.via_bot &
-    (lambda client_obj, msg: not msg.text or not msg.text.startswith('/')) & # Ensure it's not a command
-    ~filters.reply # IMPORTANT: This excludes replies, letting specific handlers like receive_screenshot handle them for cloning
-)
+    ~filters.via_bot
+) # Removed ~filters.reply
 async def handle_private_general_messages(client: Client, message: Message):
     user_id = str(message.from_user.id) if message.from_user else "N/A"
 
-    # Store user's message if it's a command (already handled by specific command handlers)
-    # or if it's part of the cloning flow where we specifically need to track replies (e.g., screenshot)
-    # General private chat messages are NOT stored for learning as per new requirement.
-    # The store_message function itself now filters based on ChatType.PRIVATE
+    if message.text and message.text.startswith('/'):
+        # Let command handlers take care of commands
+        return
 
     if user_states_collection is None:
         await message.reply_text("Maaf karna, bot abhi poori tarah se ready nahi hai. Kuch database issues hain (Clone/State DB connect nahi ho paya). 🥺")
@@ -1478,7 +1469,9 @@ async def handle_private_general_messages(client: Client, message: Message):
             await message.reply_text("Kripya apna payment screenshot bhej do, darling! Main uska intezaar kar rahi hoon. 👇")
             return
         elif status == "awaiting_channel":
-            await message.reply_text("Hehe, darling! Main abhi bas channel link ka intezaar kar rahi hoon. Ya toh apna channel link bhej do, ya 'no' type kar do. 😉")
+            # If user is in awaiting_channel state, try to process their message as a channel link
+            # Call the finalize_clone_process function directly
+            await finalize_clone_process(client, message)
             return
         elif status == "pending_approval":
             await message.reply_text("Meri cute si request pehle se hi pending hai, darling! ⏳ Admin ke approval ka intezaar karo. 😊")
