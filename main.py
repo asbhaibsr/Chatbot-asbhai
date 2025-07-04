@@ -597,6 +597,7 @@ async def help_command(client: Client, message: Message):
         "\n• `/resetdata <percentage>` - Kuch purani yaadein mita do! (Agar data bahot ho jaye) (Owner Only)"
         "\n• `/deletemessage <message_id>` - Ek khaas message delete karo! (Owner Only)"
         "\n• `/clearpending` - Saari pending approvals hata do! (Owner Only)" # Added
+        "\n• `/readyclone <user_id>` - User ko bot clone karne ke liye approve karein! (Owner Only) " # New command
         "\n• `/ban <user_id_or_username>` - Gande logon ko group se bhagao! 😤 (Admins & Owner)" 
         "\n• `/unban <user_id_or_username>` - Acha, maaf kar do unhe! 😊 (Admins & Owner)" 
         "\n• `/kick <user_id_or_username>` - Thoda bahar ghuma ke lao! 😉 (Admins & Owner)" 
@@ -799,6 +800,62 @@ async def clear_pending_requests_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"Pending requests clear karte samay error aaya, Malik: {e}. Kya hua? 😭")
         logger.error(f"Error clearing pending requests by owner {message.from_user.id}: {e}", exc_info=True)
+    await store_message(message)
+
+
+# NEW COMMAND: /readyclone <user_id> to approve a user for cloning
+@app.on_message(filters.command("readyclone") & filters.private & filters.create(owner_only_filter))
+async def ready_clone_command(client: Client, message: Message):
+    if len(message.command) < 2:
+        await message.reply_text("Malik, kripya us user ki ID dein jise clone karne ki anumati deni hai. Upyog: `/readyclone <user_id>`")
+        return
+
+    try:
+        target_user_id = str(message.command[1])
+        
+        if user_states_collection is None:
+            await message.reply_text("Maaf karna, service abhi available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺")
+            return
+
+        user_state = user_states_collection.find_one({"user_id": target_user_id})
+
+        if not user_state:
+            await message.reply_text(f"Malik, user ID `{target_user_id}` ka koi record nahi mila. Shayad usne abhi tak bot cloning start nahi kiya hai ya uska state clear ho gaya hai. 🤔")
+            return
+        
+        if user_state.get("status") == "approved_for_clone":
+            await message.reply_text(f"Malik, user `{target_user_id}` pehle se hi approved hai. Dobara karne ki zaroorat nahi! 😉")
+            return
+
+        # Update user status to approved_for_clone
+        user_states_collection.update_one(
+            {"user_id": target_user_id},
+            {"$set": {"status": "approved_for_clone", "approved_on": datetime.now()}},
+            upsert=True # In case state was somehow missing but user exists
+        )
+        logger.info(f"Owner {message.from_user.id} manually approved user {target_user_id} for cloning.")
+
+        await message.reply_text(f"Malik, user `{target_user_id}` ko bot clone karne ke liye approve kar diya gaya hai! ✅")
+        
+        # Notify the user
+        notify_message = (
+            "Badhai ho, mere dost! 🎉 Tumhari Bot Cloning request approve ho gayi hai! ✅\n"
+            "Ab tum apni pyaari si bot banane ke liye token bhej sakte ho:\n"
+            "**Kaise?** `/clonebot YOUR_BOT_TOKEN_HERE`\n"
+            "(Pura token ek hi line mein hona chahiye, jaldi karo na! 😉)"
+        )
+        try:
+            await client.send_message(int(target_user_id), notify_message)
+            await message.reply_text(f"User `{target_user_id}` ko approval notification bhej diya gaya hai. 😉")
+        except Exception as e:
+            logger.error(f"Error notifying user {target_user_id} about approval: {e}")
+            await message.reply_text(f"User `{target_user_id}` ko notification bhejne mein error aaya: {e}. Lekin state update ho gayi hai! 🥺")
+
+    except ValueError:
+        await message.reply_text("Invalid user ID. Kripya ek valid number dein, Malik! 🔢")
+    except Exception as e:
+        await message.reply_text(f"Malik, user ko approve karte samay error aaya: {e}. Kya hua? 😭")
+        logger.error(f"Error approving user for clone by owner {message.from_user.id}: {e}", exc_info=True)
     await store_message(message)
 
 
@@ -1047,20 +1104,19 @@ async def prompt_for_screenshot(client: Client, callback_query: CallbackQuery):
         logger.warning(f"User {user_id} tried screenshot prompt from wrong state: {user_state.get('status') if user_state else 'None'}")
 
 
-# Step 3: Receive screenshot and send to owner for approval
+# Step 3: Receive screenshot and forward to owner
+# `filters.reply` हट जाएगा क्योंकि अब हम किसी specific message के reply का इंतजार नहीं कर रहे हैं,
+# बल्कि `expecting_screenshot` state में किसी भी photo को accept कर रहे हैं।
 @app.on_message(
-    filters.photo & filters.private & 
-    filters.reply & # Ensure it's a reply
-    (lambda _, message: message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self and
-                         message.reply_to_message.reply_markup and isinstance(message.reply_to_message.reply_markup, ForceReply) and
-                         "screenshot" in message.reply_to_message.text.lower()) # Added a check for text to be more specific
+    filters.photo & filters.private &
+    (lambda _, message: user_states_collection and user_states_collection.find_one({"user_id": str(message.from_user.id), "status": "expecting_screenshot"}))
 )
 async def receive_screenshot(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     if user_states_collection is None:
-        logger.error("user_states_collection is None. Cannot store message for clone flow. Please check MongoDB connection for CLONE_STATE_MONGO_DB_URI.") 
-        return # Cannot process without database, let general handler (if any) or simply ignore
+        logger.error("user_states_collection is None. Cannot process screenshot. Please check MongoDB connection for CLONE_STATE_MONGO_DB_URI.") 
+        return 
 
     user_state = user_states_collection.find_one({"user_id": user_id})
     logger.info(f"Received photo from user {user_id}. User state: {user_state.get('status') if user_state else 'None'}")
@@ -1072,22 +1128,20 @@ async def receive_screenshot(client: Client, message: Message):
             "tum phir se `/clonebot` command de kar apna clone bana sakoge! Thoda wait karo na! 😉"
         )
         
-        caption = f"💰 **Payment Proof (Malik, Dekho!):**\n" \
-                  f"User: {message.from_user.mention} (`{user_id}`)\n" \
-                  f"Amount: ₹{PAYMENT_INFO['amount']}"
+        caption_to_owner = (
+            f"💰 **New Payment Proof (Malik, Dekho!):**\n"
+            f"User: {message.from_user.mention} (`{user_id}`)\n"
+            f"Amount: ₹{PAYMENT_INFO['amount']}\n\n"
+            f"Is user ko approve karne ke liye: `/readyclone {user_id}`"
+        )
         
-        approve_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Clone Approve Karo Na! 🥰", callback_data=f"approve_clone_{user_id}")],
-            [InlineKeyboardButton("❌ Reject Karo! 😤", callback_data=f"reject_clone_{user_id}")]
-        ])
-        
-        await app.send_photo(
+        # Screenshot owner ko forward kiya jayega, buttons ab nahi honge
+        await client.send_photo(
             chat_id=int(OWNER_ID), 
             photo=message.photo.file_id,
-            caption=caption,
-            reply_markup=approve_keyboard
+            caption=caption_to_owner
         )
-        logger.info(f"Screenshot received from user {user_id}. Sent to owner for approval.")
+        logger.info(f"Screenshot received from user {user_id}. Forwarded to owner for approval with user ID.")
         
         if user_states_collection is not None: 
             user_states_collection.update_one(
@@ -1095,83 +1149,17 @@ async def receive_screenshot(client: Client, message: Message):
                 {"$set": {"status": "pending_approval", "screenshot_message_id": message.id}}
             )
     else:
-        # If not in the expected state, let the general handler process it
         logger.warning(f"Photo received from user {user_id} but not in expected state for screenshot: {user_state.get('status') if user_state else 'None'}. Not processing as screenshot.")
     
     await store_message(message)
 
 
-# Step 4: Owner approves/rejects clone request
-@app.on_callback_query(filters.regex(r"^(approve_clone|reject_clone)_(\d+)$") & filters.create(owner_only_filter))
-async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
-    action, _, target_user_id_str = callback_query.data.split('_', 2)
-    target_user_id = str(target_user_id_str) 
-    
-    if user_states_collection is None:
-        await callback_query.answer("Maaf karna, service abhi available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺", show_alert=True)
-        return
-
-    user_state = user_states_collection.find_one({"user_id": target_user_id})
-
-    if not user_state or user_state.get("status") != "pending_approval":
-        await callback_query.answer("Arre! Yeh request ab valid nahi hai ya pehle hi process ho chuki hai, Malik! 🙄", show_alert=True)
-        return
-
-    # Construct the new caption to indicate approval/rejection status
-    original_caption_lines = callback_query.message.caption.split('\n')
-    # Take the first few lines that contain user and amount info
-    base_caption = '\n'.join(original_caption_lines[:3]) 
-    
-    # --- IMPORTANT FIX START ---
-    if action == "approve_clone":
-        new_caption = f"{base_caption}\n\n**Admin ne Approve Kar Diya! ✅\nUser ko bot banane ki anumati mil gayi hai!**"
-        update_status = "approved_for_clone"
-        notify_message = (
-            "Badhai ho, mere dost! 🎉 Tumhari Bot Cloning request approve ho gayi hai! ✅\n"
-            "Ab tum apni pyaari si bot banane ke liye token bhej sakte ho:\n"
-            "**Kaise?** `/clonebot YOUR_BOT_TOKEN_HERE`\n"
-            "(Pura token ek hi line mein hona chahiye, jaldi karo na! 😉)"
-        )
-    elif action == "reject_clone": # Added elif for reject_clone
-        new_caption = f"{base_caption}\n\n**Admin ne Reject Kar Diya! ❌**"
-        update_status = "rejected" # Or simply delete the state
-        notify_message = (
-            "Maaf karna, darling! 😔 Tumhari Bot Cloning request reject ho gayi hai.\n"
-            "Kisi bhi sawal ke liye mere Malik se contact karo na! 🥺"
-        )
-    else: # Fallback for unexpected actions (should not happen with current regex)
-        await callback_query.answer("Kuch anap-shanap ho gaya, Malik! 🤷‍♀️", show_alert=True)
-        logger.warning(f"Unexpected action received: {action} for user {target_user_id}")
-        return
-    # --- IMPORTANT FIX END ---
-
-    try:
-        await callback_query.message.edit_caption(
-            caption=new_caption,
-            reply_markup=None # Remove buttons after action
-        )
-    except Exception as e:
-        logger.error(f"Error editing owner's message for approval: {e}", exc_info=True)
-        await client.send_message(int(OWNER_ID), f"Maaf karna Malik, user {target_user_id} ke message ko edit nahi kar payi. {action} status: {new_caption}")
-
-    if user_states_collection is not None: 
-        if action == "approve_clone":
-            user_states_collection.update_one(
-                {"user_id": target_user_id},
-                {"$set": {"status": update_status, "approved_on": datetime.now()}}
-            )
-            logger.info(f"User {target_user_id} approved for cloning.")
-        elif action == "reject_clone":
-            user_states_collection.delete_one({"user_id": target_user_id}) # Remove state on rejection
-            logger.info(f"User {target_user_id} rejected for cloning, state cleared.")
-    
-    try:
-        await client.send_message(int(target_user_id), notify_message)
-    except Exception as e:
-        logger.error(f"Error notifying user {target_user_id} about {action}ion: {e}")
-        await client.send_message(int(OWNER_ID), f"User {target_user_id} ko {action} notification bhejne mein error aaya. {e}")
-    
-    await callback_query.answer(f"Request {action.split('_')[0]}d for user {target_user_id}.", show_alert=True)
+# Step 4: Owner approves/rejects clone request - Removed old callback query handler
+# @app.on_callback_query(filters.regex(r"^(approve_clone|reject_clone)_(\d+)$") & filters.create(owner_only_filter))
+# async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
+#    # This function is now replaced by the /readyclone command.
+#    # The inline keyboard buttons for approval/rejection are no longer sent with the screenshot.
+#    pass
 
 
 # Step 5: Process actual clonebot command after approval
