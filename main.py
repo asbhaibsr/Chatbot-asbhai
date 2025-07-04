@@ -8,12 +8,12 @@ import logging
 from datetime import datetime, timedelta
 from threading import Thread
 import time 
-import sys # Added for sys.executable
+import sys 
 
 # Pyrogram imports
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ForceReply
-from pyrogram.enums import ChatType, ChatMemberStatus # Added ChatMemberStatus
+from pyrogram.enums import ChatType, ChatMemberStatus 
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
 from pyrogram.errors import exceptions 
@@ -43,14 +43,14 @@ COMMANDS_SETTINGS_MONGO_DB_URI = os.getenv("COMMANDS_SETTINGS_MONGO_DB_URI")
 # --- Constants ---
 MAX_MESSAGES_THRESHOLD = 100000
 PRUNE_PERCENTAGE = 0.30
-DEFAULT_UPDATE_CHANNEL_USERNAME = "asbhai_bsr" # यह आपके डिफ़ॉल्ट अपडेट चैनल का यूजरनेम है
+DEFAULT_UPDATE_CHANNEL_USERNAME = "asbhai_bsr" 
 REPLY_COOLDOWN_SECONDS = 3 
 
 # --- Payment Details ---
 PAYMENT_INFO = {
     "amount": "200",
     "upi_id": "arsadsaifi8272@ibl", 
-    "qr_code_url": "", # <--- यदि आपके पास QR कोड URL है तो यहाँ डालें, अन्यथा खाली छोड़ दें।
+    "qr_code_url": "", 
     "instructions": "UPI ID par ₹200 bhejien aur payment ka screenshot 'Screenshot Bhejein' button par click karke bhejen."
 }
 
@@ -64,8 +64,8 @@ if MAIN_MONGO_DB_URI:
     try:
         main_mongo_client = MongoClient(MAIN_MONGO_DB_URI, serverSelectionTimeoutMS=5000)
         main_mongo_client.admin.command('ping')
-        main_db = main_mongo_client.bot_learning_database # डेटाबेस का नाम
-        messages_collection = main_db.messages # सीखे हुए संदेश/स्टिकर
+        main_db = main_mongo_client.bot_learning_database 
+        messages_collection = main_db.messages 
         logger.info("MongoDB (Main Learning DB) connection successful.")
     except ServerSelectionTimeoutError as err:
         logger.error(f"MongoDB (Main Learning DB) connection timed out: {err}")
@@ -89,8 +89,8 @@ if CLONE_STATE_MONGO_DB_URI:
     try:
         clone_state_mongo_client = MongoClient(CLONE_STATE_MONGO_DB_URI, serverSelectionTimeoutMS=5000)
         clone_state_mongo_client.admin.command('ping') 
-        clone_state_db = clone_state_mongo_client.bot_clone_states_db # डेटाबेस का नाम
-        user_states_collection = clone_state_db.user_states # क्लोनिंग रिक्वेस्ट की स्थिति
+        clone_state_db = clone_state_mongo_client.bot_clone_states_db 
+        user_states_collection = clone_state_db.user_states 
         logger.info("MongoDB (Clone/State DB) connection successful.")
     except ServerSelectionTimeoutError as err:
         logger.error(f"MongoDB (Clone/State DB) connection timed out: {err}")
@@ -114,8 +114,8 @@ if COMMANDS_SETTINGS_MONGO_DB_URI:
     try:
         commands_settings_mongo_client = MongoClient(COMMANDS_SETTINGS_MONGO_DB_URI, serverSelectionTimeoutMS=5000)
         commands_settings_mongo_client.admin.command('ping') 
-        commands_settings_db = commands_settings_mongo_client.bot_settings_db # डेटाबेस का नाम
-        group_configs_collection = commands_settings_db.group_configs # ग्रुप सेटिंग्स
+        commands_settings_db = commands_settings_mongo_client.bot_settings_db 
+        group_configs_collection = commands_settings_db.group_configs 
         logger.info("MongoDB (Commands/Settings DB) connection successful.")
     except ServerSelectionTimeoutError as err:
         logger.error(f"MongoDB (Commands/Settings DB) connection timed out: {err}")
@@ -133,7 +133,7 @@ else:
 # --- Pyrogram Client ---
 app = Client(
     "self_learning_bot",
-    api_id=int(API_ID) if API_ID else None, # Ensure API_ID is int
+    api_id=int(API_ID) if API_ID else None,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
@@ -146,7 +146,6 @@ last_bot_reply_time = {}
 
 def extract_keywords(text):
     if not text: return []
-    # Using more robust word extraction, lowercasing, and unique words
     words = re.findall(r'\b\w+\b', text.lower())
     return list(set(words))
 
@@ -161,7 +160,6 @@ async def prune_old_messages():
             messages_to_delete_count = int(total_messages * PRUNE_PERCENTAGE)
             logger.info(f"Threshold reached. Deleting {messages_to_delete_count} oldest messages.")
             oldest_message_ids = []
-            # Find _id of messages to delete, sorted by timestamp
             for msg in messages_collection.find({}).sort("timestamp", 1).limit(messages_to_delete_count):
                 oldest_message_ids.append(msg['_id'])
             if oldest_message_ids:
@@ -209,7 +207,6 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
         elif message.animation:
             content_type = "animation"
             file_id = message.animation.file_id
-        # Add more content types if needed for learning and replying with them
 
         message_data = {
             "message_id": message.id,
@@ -222,14 +219,14 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
             "timestamp": datetime.now(),
             "is_bot_sent": is_bot_sent,
             "content_type": content_type,
-            "content": message.text if message.text else (message.sticker.emoji if message.sticker else ""), # Store emoji for stickers
-            "file_id": file_id, # Store file_id for media types
+            "content": message.text if message.text else (message.sticker.emoji if message.sticker else ""), 
+            "file_id": file_id, 
             "keywords": extract_keywords(message.text) if message.text else extract_keywords(message.sticker.emoji if message.sticker else ""),
             "replied_to_message_id": None,
             "replied_to_user_id": None,
             "replied_to_content": None,
             "replied_to_content_type": None,
-            "is_bot_observed_pair": False, # Is this message a direct reply to bot's message?
+            "is_bot_observed_pair": False, 
         }
 
         # Store reply-to information
@@ -244,24 +241,23 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
                 replied_to_content = message.reply_to_message.sticker.emoji
                 replied_to_content_type = "sticker"
             elif message.reply_to_message.photo:
-                replied_to_content = message.reply_to_message.caption # If photo has caption
+                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "photo"
             elif message.reply_to_message.video:
-                replied_to_content = message.reply_to_message.caption # If video has caption
+                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "video"
             elif message.reply_to_message.document:
-                replied_to_content = message.reply_to_message.caption # If document has caption
+                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "document"
             elif message.reply_to_message.audio:
-                replied_to_content = message.reply_to_message.caption # If audio has caption
+                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "audio"
             elif message.reply_to_message.voice:
-                replied_to_content = message.reply_to_message.caption # If voice has caption
+                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "voice"
             elif message.reply_to_message.animation:
-                replied_to_content = message.reply_to_message.caption # If animation has caption
+                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "animation"
-            # Add more replied_to_content_type logic for other media types if needed
 
             message_data["replied_to_content"] = replied_to_content
             message_data["replied_to_content_type"] = replied_to_content_type
@@ -270,7 +266,6 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
             if message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
                 message_data["is_bot_observed_pair"] = True
                 logger.debug(f"Observed user reply to bot's message ({message.reply_to_message.id}). Marking this as observed pair.")
-                # Also, update the bot's sent message in DB to mark it as part of an observed pair
                 if messages_collection is not None:
                     messages_collection.update_one(
                         {"chat_id": message.chat.id, "message_id": message.reply_to_message.id, "is_bot_sent": True},
@@ -304,7 +299,6 @@ async def generate_reply(message: Message):
         logger.warning("messages_collection is None. Cannot generate reply.")
         return None
 
-    # Determine the content type of the incoming message for better matching
     message_actual_content_type = "text"
     if message.sticker:
         message_actual_content_type = "sticker"
@@ -323,8 +317,6 @@ async def generate_reply(message: Message):
 
 
     # --- Strategy 1: Contextual Reply (User's reply to a message) ---
-    # This is for "Hello" -> "Han ji bolo" type learning when the bot is the "Hello" part.
-    # OR, if user replies to another user's "Hello" and the bot observes this.
     if message.reply_to_message:
         replied_to_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
         replied_to_content_type = "text"
@@ -346,22 +338,18 @@ async def generate_reply(message: Message):
         if replied_to_content:
             logger.info(f"Strategy 1: Searching for contextual replies to replied_to_content: '{replied_to_content}' (Type: {replied_to_content_type})")
             
-            # Find messages that *are replies* to content similar to `replied_to_content`
-            # and prefer those that were *not* sent by the bot (human-like interactions).
             contextual_query = {
                 "replied_to_content": {"$regex": f"^{re.escape(replied_to_content)}$", "$options": "i"},
                 "replied_to_content_type": replied_to_content_type,
-                "is_bot_sent": False, # Prioritize human-observed replies
+                "is_bot_sent": False, 
             }
 
-            # If in a group, prioritize replies observed within that group first
             if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
                 group_contextual_matches = list(messages_collection.find({"chat_id": message.chat.id, **contextual_query}))
                 if group_contextual_matches:
                     logger.info(f"Found {len(group_contextual_matches)} group-specific contextual replies.")
                     return random.choice(group_contextual_matches)
 
-            # Fallback to global contextual matches
             global_contextual_matches = list(messages_collection.find(contextual_query))
             if global_contextual_matches:
                 logger.info(f"Found {len(global_contextual_matches)} global contextual replies.")
@@ -372,77 +360,59 @@ async def generate_reply(message: Message):
     # --- Strategy 2: Keyword-based General Reply (including partial match and content type) ---
     logger.info(f"Strategy 2: Falling back to keyword/content search for: '{query_content}' (Type: {message_actual_content_type}) with keywords {query_keywords}")
 
-    # Build the query for keyword matching and content type matching
     content_match_conditions = []
 
-    # Add exact content match if it's text or sticker emoji
     if query_content:
         content_match_conditions.append({"content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
 
-    # Add keyword-based fuzzy search for text content
     if query_keywords:
         for kw in query_keywords:
             content_match_conditions.append({"content": {"$regex": f".*{re.escape(kw)}.*", "$options": "i"}})
 
-    # Add file_id match for media if the incoming message is media
     if message.sticker and message.sticker.file_id:
         content_match_conditions.append({"file_id": message.sticker.file_id, "content_type": "sticker"})
     elif message.photo and message.photo.file_id:
         content_match_conditions.append({"file_id": message.photo.file_id, "content_type": "photo"})
     elif message.video and message.video.file_id:
         content_match_conditions.append({"file_id": message.video.file_id, "content_type": "video"})
-    # Add conditions for other media types if you want to match them specifically
-
+    
     final_query_conditions = {
-        "is_bot_sent": False, # Prefer replies learned from human messages
+        "is_bot_sent": False, 
     }
     
     if content_match_conditions:
         final_query_conditions["$or"] = content_match_conditions
 
-    # Prefer content of same type as query, or text/sticker if query is media
-    # This helps in responding to a sticker with a sticker, or text with text
-    target_reply_content_types = ["text", "sticker"] # Default for now
+    target_reply_content_types = ["text", "sticker"] 
     if message_actual_content_type in ["photo", "video", "document", "audio", "voice", "animation"]:
         target_reply_content_types.append(message_actual_content_type)
     
     final_query_conditions["content_type"] = {"$in": target_reply_content_types}
 
     potential_replies = []
-    # Prioritize group-specific content for group chats
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         group_specific_query = {"chat_id": message.chat.id, **final_query_conditions}
         potential_replies.extend(list(messages_collection.find(group_specific_query)))
         logger.info(f"Found {len(potential_replies)} group-specific keyword/content matches.")
             
-    # Always perform a global search as a fallback or for private chats
     global_query = {**final_query_conditions}
     potential_replies.extend(list(messages_collection.find(global_query)))
     logger.info(f"Found {len(potential_replies) - (len(group_specific_query) if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] else 0)} global keyword/content matches.")
 
-
-    # Filter out replies that are identical to the query message (to avoid loops or boring replies)
-    # Also ensure the chosen reply is not the *same instance* of the message just received
-    # and not a message sent by the bot itself in response previously (unless it's part of an observed pattern).
     
     if potential_replies:
-        # Deduplicate, as a message might be found via both group and global search
         unique_replies = {doc['_id']: doc for doc in potential_replies}.values()
         
         filtered_replies = []
         for doc in unique_replies:
-            # Avoid replying with the exact same text/emoji content to the user's query
             if doc.get("content", "").lower() == query_content.lower() and doc.get("content_type") == message_actual_content_type:
                 continue
             
-            # Avoid replying with the exact same media file_id
             if doc.get("file_id") and doc.get("file_id") == (message.sticker.file_id if message.sticker else (message.photo.file_id if message.photo else (message.video.file_id if message.video else None))):
                 continue
 
-            # Ensure the reply isn't the bot's own previous response that wasn't part of a learning pair
-            # Or, if it was a bot's reply, ensure it was to a different query
             if doc.get("is_bot_sent", False):
-                continue # For now, strictly prefer human-generated content to reply from
+                continue 
             
             filtered_replies.append(doc)
         
@@ -472,8 +442,7 @@ async def generate_reply(message: Message):
         "Mere paas toh shabd hi nahi hain! 😶",
         "Main sikhti rahungi, tum bas bolte raho! 📚"
     ]
-    # Add a random chance to not send a fallback message in private chats
-    if message.chat.type == ChatType.PRIVATE and random.random() < 0.2: # 20% chance to not send a fallback in private
+    if message.chat.type == ChatType.PRIVATE and random.random() < 0.2: 
         logger.info("Randomly decided not to send a fallback reply in private chat.")
         return None
         
@@ -500,10 +469,26 @@ async def start_private_command(client: Client, message: Message):
     )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Mujhe Apne Group Mein Bulao!", url=f"https://t.me/{client.me.username}?startgroup=true")],
-        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/{DEFAULT_UPDATE_CHANNEL_USERNAME}")] 
+        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 😉", url=f"https://t.me/{DEFAULT_UPDATE_CHANNEL_USERNAME}")],
+        [InlineKeyboardButton("🤖 Apna Khud Ka Bot Banayein! (Premium)", callback_data="clone_bot_start")] # Added button
     ])
     await message.reply_text(welcome_message, reply_markup=keyboard)
     await store_message(message)
+
+# Handle callback from "Apna Khud Ka Bot Banayein!" button
+@app.on_callback_query(filters.regex("clone_bot_start"))
+async def handle_clone_bot_start_callback(client: Client, callback_query: CallbackQuery):
+    await callback_query.answer("Bot cloning process shuru ho raha hai! 😉", show_alert=True)
+    # Simulate /clonebot command for the user
+    fake_message = Message(
+        id=0, # Dummy ID
+        from_user=callback_query.from_user,
+        chat=callback_query.message.chat,
+        text="/clonebot",
+        date=datetime.now(),
+        command=["clonebot"]
+    )
+    await initiate_clone_payment(client, fake_message)
 
 # START COMMAND (GROUP CHAT)
 @app.on_message(filters.command("start") & filters.group)
@@ -535,7 +520,6 @@ async def stats_command(client: Client, message: Message):
     unique_group_ids = messages_collection.distinct("chat_id", {"chat_type": {"$in": ["group", "supergroup"]}})
     num_groups = len(unique_group_ids)
 
-    # Clone stats
     total_clone_requests = 0
     pending_clone_requests = 0
     approved_clones = 0
@@ -569,25 +553,27 @@ async def help_command(client: Client, message: Message):
         "\n• `/myid` - Apni user ID dekho, kahin kho na jaye! 🆔"
         "\n• `/chatid` - Is chat ki ID dekho, sab secrets yahi hain! 🤫"
         "\n• `/clonebot` - Apna khud ka bot banao, bilkul mere jaisa! (Premium Feature, but worth it! 😉)"
-        "\n\n**Admin Commands (Sirf mere Malik aur Group Admins ke liye, shhh!):**" # Updated text
+        "\n\n**Admin Commands (Sirf mere Malik aur Group Admins ke liye, shhh!):**"
         "\n• `/broadcast <message>` - Sabko mera pyaara message bhejo! (Owner Only)"
         "\n• `/resetdata <percentage>` - Kuch purani yaadein mita do! (Agar data bahot ho jaye) (Owner Only)"
         "\n• `/deletemessage <message_id>` - Ek khaas message delete karo! (Owner Only)"
-        "\n• `/ban <user_id_or_username>` - Gande logon ko group se bhagao! 😤 (Admins & Owner)" # Updated text
-        "\n• `/unban <user_id_or_username>` - Acha, maaf kar do unhe! 😊 (Admins & Owner)" # Updated text
-        "\n• `/kick <user_id_or_username>` - Thoda bahar ghuma ke lao! 😉 (Admins & Owner)" # Updated text
-        "\n• `/pin <message_id>` - Important message ko upar rakho, sabko dikhe! ✨ (Admins & Owner)" # Updated text
-        "\n• `/unpin` - Ab bas karo, bohot ho gaya pin! 😅 (Admins & Owner)" # Updated text
-        "\n• `/setwelcome <message>` - Group mein naye guests ka swagat, mere style mein! 💖 (Admins & Owner)" # Updated text
-        "\n• `/getwelcome` - Dekho maine kya welcome message set kiya hai! (Admins & Owner)" # Updated text
-        "\n• `/clearwelcome` - Agar welcome message pasand nahi, toh hata do! 🤷‍♀️ (Admins & Owner)" # Updated text
-        "\n• `/restart bot` - Mujhe dubara se shuru karo aur deploy kar do! (Owner Only! 🚨)" # Added
-        "\n• `/resetall` - Saara data delete kar do, sab kuch! (Owner Only! 🚨🚨)" # Added
+        "\n• `/clearpending` - Saari pending approvals hata do! (Owner Only)" # Added
+        "\n• `/ban <user_id_or_username>` - Gande logon ko group se bhagao! 😤 (Admins & Owner)" 
+        "\n• `/unban <user_id_or_username>` - Acha, maaf kar do unhe! 😊 (Admins & Owner)" 
+        "\n• `/kick <user_id_or_username>` - Thoda bahar ghuma ke lao! 😉 (Admins & Owner)" 
+        "\n• `/pin <message_id>` - Important message ko upar rakho, sabko dikhe! ✨ (Admins & Owner)" 
+        "\n• `/unpin` - Ab bas karo, bohot ho gaya pin! 😅 (Admins & Owner)" 
+        "\n• `/setwelcome <message>` - Group mein naye guests ka swagat, mere style mein! 💖 (Admins & Owner)" 
+        "\n• `/getwelcome` - Dekho maine kya welcome message set kiya hai! (Admins & Owner)" 
+        "\n• `/clearwelcome` - Agar welcome message pasand nahi, toh hata do! 🤷‍♀️ (Admins & Owner)" 
+        "\n• `/restart bot` - Mujhe dubara se shuru karo aur deploy kar do! (Owner Only! 🚨)" 
+        "\n• `/resetall` - Saara data delete kar do, sab kuch! (Owner Only! 🚨🚨)" 
         "\n\n**Note:** Admin commands ke liye, mujhe group mein zaroori permissions dena mat bhoolna, warna main kuch nahi kar paungi! 🥺"
     )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Mujhe Apne Group Mein Bulao! 😉", url=f"https://t.me/{client.me.username}?startgroup=true")],
-        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 💖", url=f"https://t.me/{DEFAULT_UPDATE_CHANNEL_USERNAME}")] 
+        [InlineKeyboardButton("📣 Meri Updates Yahan Milengi! 💖", url=f"https://t.me/{DEFAULT_UPDATE_CHANNEL_USERNAME}")],
+        [InlineKeyboardButton("🤖 Apna Khud Ka Bot Banayein! (Premium)", callback_data="clone_bot_start")] # Added button
     ])
     await message.reply_text(help_text, reply_markup=keyboard)
     await store_message(message) 
@@ -621,29 +607,26 @@ def owner_only_filter(_, __, message):
 # New decorator for group admins (including owner)
 async def group_admin_filter(_, client, message):
     if not message.from_user:
-        return False # यदि कोई यूजर नहीं है (जैसे चैनल पोस्ट)
+        return False 
 
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    # बॉट ओनर हमेशा एडमिन कमांड चला सकता है
     if is_owner(user_id):
         return True
 
-    # अगर निजी चैट है, और यूजर ओनर नहीं है, तो फॉल्स
     if message.chat.type == ChatType.PRIVATE:
         return False
 
     try:
         member = await client.get_chat_member(chat_id, user_id)
-        # सदस्य की स्थिति OWNER या ADMINISTRATOR होनी चाहिए
         if member.status in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR]:
             return True
         else:
             return False
     except Exception as e:
         logger.error(f"Error checking admin status for user {user_id} in chat {chat_id}: {e}")
-        return False # त्रुटि होने पर एडमिन नहीं माना जाएगा
+        return False 
 
 # BROADCAST COMMAND
 @app.on_message(filters.command("broadcast") & filters.private & filters.create(owner_only_filter))
@@ -664,7 +647,6 @@ async def broadcast_command(client: Client, message: Message):
     await message.reply_text("Malik, main ab sabko aapka message bhej rahi hoon! 😉")
     for chat_id in unique_chat_ids:
         try:
-            # Avoid sending broadcast to the owner's private chat again if it's already sent as a reply
             if chat_id == message.chat.id and message.chat.type == ChatType.PRIVATE:
                 continue
             await client.send_message(chat_id, broadcast_text)
@@ -760,6 +742,27 @@ async def delete_message_by_id_command(client: Client, message: Message):
         logger.error(f"Error deleting message by owner {message.from_user.id}: {e}", exc_info=True)
     await store_message(message) 
 
+# CLEAR PENDING REQUESTS COMMAND (NEW)
+@app.on_message(filters.command("clearpending") & filters.private & filters.create(owner_only_filter))
+async def clear_pending_requests_command(client: Client, message: Message):
+    if user_states_collection is None:
+        await message.reply_text("Maaf karna, pending requests clear nahi kar payi. Database (Clone/State DB) connect nahi ho paya hai. 🥺")
+        await store_message(message)
+        return
+
+    try:
+        delete_result = user_states_collection.delete_many({"status": "pending_approval"})
+        if delete_result.deleted_count > 0:
+            await message.reply_text(f"Malik, {delete_result.deleted_count} pending approval requests delete ho gayi hain! Ab database saaf hai! ✨")
+            logger.info(f"Owner {message.from_user.id} cleared {delete_result.deleted_count} pending clone requests.")
+        else:
+            await message.reply_text("Malik, koi pending approval request mili hi nahi! Sab theek hai! 😊")
+    except Exception as e:
+        await message.reply_text(f"Pending requests clear karte samay error aaya, Malik: {e}. Kya hua? 😭")
+        logger.error(f"Error clearing pending requests by owner {message.from_user.id}: {e}", exc_info=True)
+    await store_message(message)
+
+
 # GROUP ADMIN COMMANDS (BAN, UNBAN, KICK, PIN, UNPIN)
 async def perform_chat_action(client: Client, message: Message, action_type: str):
     if not message.reply_to_message and len(message.command) < 2:
@@ -773,7 +776,7 @@ async def perform_chat_action(client: Client, message: Message, action_type: str
         try:
             target_user_id = int(message.command[1])
         except ValueError:
-            target_user_id = message.command[1] # It's a username or invalid ID
+            target_user_id = message.command[1] 
 
     if not target_user_id:
         await message.reply_text("Malik, main us user ko dhundh nahi pa rahi hoon! Kya tumne sahi ID ya username diya? 🤔")
@@ -817,7 +820,6 @@ async def perform_chat_action(client: Client, message: Message, action_type: str
         logger.error(f"Error performing {action_type} by user {message.from_user.id if message.from_user else 'None'}: {e}", exc_info=True)
     await store_message(message) 
 
-# Changed filters for group admin commands to allow all group admins
 @app.on_message(filters.command("ban") & filters.group & filters.create(group_admin_filter))
 async def ban_command(client: Client, message: Message):
     await perform_chat_action(client, message, "ban")
@@ -839,7 +841,7 @@ async def unpin_command(client: Client, message: Message):
     await perform_chat_action(client, message, "unpin")
 
 # --- CUSTOM WELCOME MESSAGE ---
-@app.on_message(filters.command("setwelcome") & filters.group & filters.create(group_admin_filter)) # Changed filter
+@app.on_message(filters.command("setwelcome") & filters.group & filters.create(group_admin_filter)) 
 async def set_welcome_command(client: Client, message: Message):
     if len(message.command) < 2:
         await message.reply_text("Malik, kripya welcome message dein.\nUpyog: `/setwelcome Aapka naya welcome message {user} {chat_title}`. Naye members ko surprise karte hain! 🥳")
@@ -859,7 +861,7 @@ async def set_welcome_command(client: Client, message: Message):
     await message.reply_text("Naya welcome message set kar diya gaya hai, Malik! Jab naya member aayega, toh main yahi pyaara message bhejoongi! 🥰")
     await store_message(message) 
 
-@app.on_message(filters.command("getwelcome") & filters.group & filters.create(group_admin_filter)) # Changed filter
+@app.on_message(filters.command("getwelcome") & filters.group & filters.create(group_admin_filter)) 
 async def get_welcome_command(client: Client, message: Message):
     config = None
     if group_configs_collection is not None:
@@ -871,7 +873,7 @@ async def get_welcome_command(client: Client, message: Message):
         await message.reply_text("Malik, is group ke liye koi custom welcome message set nahi hai. Kya set karna chahte ho? 🥺")
     await store_message(message) 
 
-@app.on_message(filters.command("clearwelcome") & filters.group & filters.create(group_admin_filter)) # Changed filter
+@app.on_message(filters.command("clearwelcome") & filters.group & filters.create(group_admin_filter)) 
 async def clear_welcome_command(client: Client, message: Message):
     if group_configs_collection is None:
         await message.reply_text("Maaf karna, welcome message clear nahi kar payi. Database (Commands/Settings DB) connect nahi ho paya hai. 🥺")
@@ -920,7 +922,6 @@ async def initiate_clone_payment(client: Client, message: Message):
         await store_message(message) 
         return
 
-    # Check if user is already approved for clone
     user_state = user_states_collection.find_one({"user_id": user_id, "status": "approved_for_clone"})
     if user_state:
         await message.reply_text(
@@ -932,7 +933,6 @@ async def initiate_clone_payment(client: Client, message: Message):
         await store_message(message) 
         return
 
-    # Check if there's a pending request
     pending_request = user_states_collection.find_one({"user_id": user_id, "status": "pending_approval"})
     if pending_request:
         await message.reply_text(
@@ -942,7 +942,6 @@ async def initiate_clone_payment(client: Client, message: Message):
         await store_message(message) 
         return
 
-    # User needs to pay
     payment_message = (
         f"Agar tum bhi mujhse milta julta ek cute sa bot banana chahte ho, toh bas ₹{PAYMENT_INFO['amount']} ka payment karna hoga. 💰"
         f"\n\n**Payment Details (Meri Secret Jaan!):**\n"
@@ -1005,65 +1004,57 @@ async def prompt_for_screenshot(client: Client, callback_query: CallbackQuery):
             user_states_collection.delete_one({"user_id": user_id})
         logger.warning(f"User {user_id} tried screenshot prompt from wrong state: {user_state.get('status') if user_state else 'None'}")
 
+
 # Step 3: Receive screenshot and send to owner for approval
-@app.on_message(filters.photo & filters.private)
+# Modified filter to be more specific for replies to ForceReply in private chats
+@app.on_message(
+    filters.photo & filters.private & 
+    filters.reply # Ensure it's a reply
+    & (lambda _, __, msg: msg.reply_to_message and msg.reply_to_message.from_user and msg.reply_to_message.from_user.is_self and
+                         msg.reply_to_message.reply_markup and isinstance(msg.reply_to_message.reply_markup, ForceReply))
+)
 async def receive_screenshot(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     if user_states_collection is None:
-        # If user_states_collection is None, we can't check cloning state,
-        # so pass to general message handler.
-        await handle_private_general_messages(client, message) # Changed to handle_private_general_messages
-        return 
+        return # Cannot process without database, let general handler (if any) or simply ignore
 
     user_state = user_states_collection.find_one({"user_id": user_id})
     logger.info(f"Received photo from user {user_id}. User state: {user_state.get('status') if user_state else 'None'}")
 
-    # Check if the message is a reply to the ForceReply from prompt_for_screenshot
-    is_reply_to_force_reply = False
-    if message.reply_to_message and \
-       message.reply_to_message.from_user and message.reply_to_message.from_user.is_self and \
-       message.reply_to_message.reply_markup and \
-       isinstance(message.reply_to_message.reply_markup, ForceReply): 
-        is_reply_to_force_reply = True
-
-    if is_reply_to_force_reply:
-        if user_state and user_state.get("status") == "expecting_screenshot":
-            await message.reply_text(
-                "Aapka pyaara screenshot mujhe mil gaya hai! ✅\n"
-                "Abhi woh mere Malik ke paas approval ke liye gaya hai. Malik jaise hi approve karenge, "
-                "tum phir se `/clonebot` command de kar apna clone bana sakoge! Thoda wait karo na! 😉"
-            )
-            
-            caption = f"💰 **Payment Proof (Malik, Dekho!):**\n" \
-                      f"User: {message.from_user.mention} (`{user_id}`)\n" \
-                      f"Amount: ₹{PAYMENT_INFO['amount']}"
-            
-            approve_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Clone Approve Karo Na! 🥰", callback_data=f"approve_clone_{user_id}")],
-                [InlineKeyboardButton("❌ Reject Karo! 😤", callback_data=f"reject_clone_{user_id}")]
-            ])
-            
-            await app.send_photo(
-                chat_id=int(OWNER_ID), # Ensure OWNER_ID is int
-                photo=message.photo.file_id,
-                caption=caption,
-                reply_markup=approve_keyboard
-            )
-            logger.info(f"Screenshot received from user {user_id}. Sent to owner for approval.")
-            
-            if user_states_collection is not None: 
-                user_states_collection.update_one(
-                    {"user_id": user_id},
-                    {"$set": {"status": "pending_approval", "screenshot_message_id": message.id}}
-                )
-        else:
-            await message.reply_text("Yeh screenshot abhi mujhe samajh nahi aaya. Kya tum /clonebot se dobara shuru karoge? 🤔")
-            logger.warning(f"Photo received from user {user_id} but not in expected state for screenshot: {user_state.get('status') if user_state else 'None'}")
-    else:
-        # Pass to general message handler if not part of clone flow
-        await handle_private_general_messages(client, message) # Changed to handle_private_general_messages
+    if user_state and user_state.get("status") == "expecting_screenshot":
+        await message.reply_text(
+            "Aapka pyaara screenshot mujhe mil gaya hai! ✅\n"
+            "Abhi woh mere Malik ke paas approval ke liye gaya hai. Malik jaise hi approve karenge, "
+            "tum phir se `/clonebot` command de kar apna clone bana sakoge! Thoda wait karo na! 😉"
+        )
         
+        caption = f"💰 **Payment Proof (Malik, Dekho!):**\n" \
+                  f"User: {message.from_user.mention} (`{user_id}`)\n" \
+                  f"Amount: ₹{PAYMENT_INFO['amount']}"
+        
+        approve_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Clone Approve Karo Na! 🥰", callback_data=f"approve_clone_{user_id}")],
+            [InlineKeyboardButton("❌ Reject Karo! 😤", callback_data=f"reject_clone_{user_id}")]
+        ])
+        
+        await app.send_photo(
+            chat_id=int(OWNER_ID), 
+            photo=message.photo.file_id,
+            caption=caption,
+            reply_markup=approve_keyboard
+        )
+        logger.info(f"Screenshot received from user {user_id}. Sent to owner for approval.")
+        
+        if user_states_collection is not None: 
+            user_states_collection.update_one(
+                {"user_id": user_id},
+                {"$set": {"status": "pending_approval", "screenshot_message_id": message.id}}
+            )
+    else:
+        # If not in the expected state, just ignore this specific photo (it will be handled by handle_private_general_messages later if it's a general photo)
+        logger.warning(f"Photo received from user {user_id} but not in expected state for screenshot: {user_state.get('status') if user_state else 'None'}. Not processing as screenshot.")
+    
     await store_message(message)
 
 
@@ -1071,7 +1062,7 @@ async def receive_screenshot(client: Client, message: Message):
 @app.on_callback_query(filters.regex(r"^(approve_clone|reject_clone)_(\d+)$") & filters.create(owner_only_filter))
 async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
     action, _, target_user_id_str = callback_query.data.split('_', 2)
-    target_user_id = str(target_user_id_str) # Keep as string for MongoDB
+    target_user_id = str(target_user_id_str) 
     
     if user_states_collection is None:
         await callback_query.answer("Maaf karna, service abhi available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺", show_alert=True)
@@ -1135,7 +1126,8 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     if user_states_collection is None:
-        await handle_private_general_messages(client, message) # Changed to handle_private_general_messages
+        await message.reply_text("Maaf karna, abhi bot cloning service available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺")
+        await store_message(message) 
         return
 
     user_state = user_states_collection.find_one({"user_id": user_id, "status": "approved_for_clone"})
@@ -1201,7 +1193,6 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
     await store_message(message) 
 
 # Step 6: Receive update channel link and finalize clone
-# Modified filter to be more specific for replies to ForceReply
 @app.on_message(
     filters.text & filters.private &
     filters.reply # Ensure it's a reply
@@ -1212,14 +1203,13 @@ async def finalize_clone_process(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     if user_states_collection is None:
-        await handle_private_general_messages(client, message) # Changed to handle_private_general_messages
         return 
 
     user_state = user_states_collection.find_one({"user_id": user_id, "status": "awaiting_channel"})
 
     if not user_state:
-        # If not in this state, let general private handler take over
-        await handle_private_general_messages(client, message) # Changed to handle_private_general_messages
+        # If not in this state, just ignore this specific text (it will be handled by handle_private_general_messages later if it's a general text)
+        logger.warning(f"Text received from user {user_id} but not in expected state for channel: {user_state.get('status') if user_state else 'None'}. Not processing as channel link.")
         return
 
     update_channel_input = message.text.strip()
@@ -1233,7 +1223,6 @@ async def finalize_clone_process(client: Client, message: Message):
                 final_update_channel = update_channel_input.replace('@', '')
             
             try:
-                # Verify if it's a valid channel and bot can access it (optional, but good practice)
                 chat = await client.get_chat(f"@{final_update_channel}")
                 if not chat.type == ChatType.CHANNEL:
                     await message.reply_text("Yeh ek valid channel username/link nahi lag raha, darling! Kripya sahi channel ka username (@channelname) ya link (t.me/channelname) dein, ya 'no' type karo. Mujhko samjho na! 🥺")
@@ -1259,7 +1248,7 @@ async def finalize_clone_process(client: Client, message: Message):
         "Ab tum is pyaare bot ko deploy kar sakte ho! Tumhara bot token aur update channel niche diye gaye hain:\n"
         f"**Bot Token:** `{user_state['bot_token']}`\n"
         f"**Bot Username:** `@{user_state['bot_username']}`\n"
-        f"**Meri Updates:** `https://t.me/{final_update_channel}`\n\n" # Use link for clarity
+        f"**Meri Updates:** `https://t.me/{final_update_channel}`\n\n" 
         "**Deployment ke liye easy steps:**\n"
         "1. Meri GitHub repository ko fork karo (agar nahi kiya hai toh).\n"
         "2. Apni `main.py` file mein `BOT_TOKEN`, `API_ID`, `API_HASH` aur `OWNER_ID` ko apne hisaab se Environment Variables mein set karo.\n"
@@ -1268,7 +1257,6 @@ async def finalize_clone_process(client: Client, message: Message):
         "Kisi bhi sawal ke liye @aschat_group channel par aana na bhoolna! Main wahin milungi! 😉" 
     )
     
-    # Clear the user state after successful clone finalization
     if user_states_collection is not None: 
         user_states_collection.delete_one({"user_id": user_id})
     logger.info(f"User {user_id} clone process finalized and state cleared.")
@@ -1276,25 +1264,25 @@ async def finalize_clone_process(client: Client, message: Message):
 
 
 # --- Private Chat General Message Handler (Fallback for non-commands/non-cloning) ---
-# Removed the old handle_private_non_command_messages and integrated its checks here.
-# This handler will act as the final fallback for private text messages.
-@app.on_message(filters.private & (filters.text | filters.sticker | filters.photo | filters.video | filters.document | filters.audio | filters.voice | filters.animation) & ~filters.via_bot & (lambda _, __, msg: not msg.text.startswith('/')))
+@app.on_message(
+    filters.private & 
+    (filters.text | filters.sticker | filters.photo | filters.video | filters.document | filters.audio | filters.voice | filters.animation) & 
+    ~filters.via_bot & 
+    (lambda _, __, msg: not msg.text.startswith('/')) &
+    ~filters.reply # IMPORTANT: This excludes replies, letting specific handlers like receive_screenshot handle them
+)
 async def handle_private_general_messages(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
-    # Store message ONLY IF it's not a bot's message
-    if not message.from_user.is_self: # Make sure this is a user's message
+    if not message.from_user.is_self: 
         await store_message(message, is_bot_sent=False)
     
     if user_states_collection is None:
         await message.reply_text("Maaf karna, bot abhi poori tarah se ready nahi hai. Kuch database issues hain (Clone/State DB connect nahi ho paya). 🥺")
-        return # Do not store bot's own error messages as user input
+        return 
 
     user_state = user_states_collection.find_one({"user_id": user_id})
 
-    # If user is in any cloning state, don't interfere, give specific prompt
-    # The `finalize_clone_process` and `receive_screenshot` filters are more specific and will run first.
-    # This block catches remaining text messages in cloning states that weren't specific replies.
     if user_state is not None:
         status = user_state.get("status")
         if status == "awaiting_screenshot" or status == "expecting_screenshot":
@@ -1310,11 +1298,9 @@ async def handle_private_general_messages(client: Client, message: Message):
             await message.reply_text("Tum toh pehle se hi meri permission le chuke ho, mere dost! ✅ Ab bas apna bot token bhejo: `/clonebot YOUR_BOT_TOKEN_HERE`")
             return
 
-    # If not in any cloning state, not a command, then process as general self-learning reply
     chat_id = message.chat.id
     current_time = time.time()
 
-    # Check cooldown *before* generating reply
     if chat_id in last_bot_reply_time:
         time_since_last_reply = current_time - last_bot_reply_time[chat_id]
         if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
@@ -1329,7 +1315,7 @@ async def handle_private_general_messages(client: Client, message: Message):
             sent_msg = None
             content_type = reply_doc.get("content_type")
             content_to_send = reply_doc.get("content")
-            file_to_send = reply_doc.get("file_id") # Get file_id if available
+            file_to_send = reply_doc.get("file_id") 
             
             if content_type == "text":
                 sent_msg = await message.reply_text(content_to_send)
@@ -1367,8 +1353,7 @@ async def handle_private_general_messages(client: Client, message: Message):
         logger.info(f"No suitable reply generated for private message {message.id}.")
 
 
-# --- Standard message handler (general text/sticker messages in groups, or bot replies in private) ---
-# This handler will now primarily focus on group chats.
+# --- Standard message handler (general text/sticker messages in groups) ---
 @app.on_message(filters.group & (filters.text | filters.sticker | filters.photo | filters.video | filters.document | filters.audio | filters.voice | filters.animation))
 async def handle_general_messages(client: Client, message: Message):
     global last_bot_reply_time
@@ -1376,17 +1361,14 @@ async def handle_general_messages(client: Client, message: Message):
     if message.from_user and message.from_user.is_bot:
         return 
     
-    # Ignore commands in groups here, they are handled by specific command handlers
     if message.text and message.text.startswith('/'):
         return
 
-    # Store all incoming messages (except those from bot itself or commands)
     await store_message(message, is_bot_sent=False)
     
     chat_id = message.chat.id
     current_time = time.time()
 
-    # Check cooldown *before* generating reply
     if chat_id in last_bot_reply_time:
         time_since_last_reply = current_time - last_bot_reply_time[chat_id]
         if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
@@ -1401,7 +1383,7 @@ async def handle_general_messages(client: Client, message: Message):
             sent_msg = None
             content_type = reply_doc.get("content_type")
             content_to_send = reply_doc.get("content")
-            file_to_send = reply_doc.get("file_id") # Get file_id if available
+            file_to_send = reply_doc.get("file_id") 
             
             if content_type == "text":
                 sent_msg = await message.reply_text(content_to_send)
@@ -1409,7 +1391,6 @@ async def handle_general_messages(client: Client, message: Message):
             elif content_type == "sticker" and file_to_send:
                 sent_msg = await message.reply_sticker(file_to_send)
                 logger.info(f"Replied with sticker: {file_to_send}")
-            # Add handling for other media types if you plan to store and reply with them
             elif content_type == "photo" and file_to_send:
                 sent_msg = await message.reply_photo(file_to_send, caption=content_to_send)
                 logger.info(f"Replied with photo: {file_to_send}")
@@ -1433,7 +1414,6 @@ async def handle_general_messages(client: Client, message: Message):
 
             if sent_msg:
                 last_bot_reply_time[chat_id] = time.time()
-                # Store bot's own reply
                 await store_message(sent_msg, is_bot_sent=True, sent_message_id=sent_msg.id)
         except Exception as e:
             logger.error(f"Error sending reply for message {message.id}: {e}", exc_info=True)
@@ -1452,13 +1432,9 @@ async def restart_bot_command(client: Client, message: Message):
     await message.reply_text("Malik, main ab khud ko restart kar rahi hoon. Thoda intezaar karo, main jaldi wapas aungi! 💖")
     logger.info(f"Owner {message.from_user.id} initiated bot restart.")
     
-    # Close Pyrogram client gracefully
     await app.stop()
     logger.info("Pyrogram client stopped. Restarting process...")
     
-    # Restart the script (this will work differently based on deployment environment)
-    # For a simple Python script, os.execv will replace the current process.
-    # In a Docker container, it will cause the container to exit, and the orchestrator will restart it.
     python = sys.executable
     os.execv(python, [python] + sys.argv)
 
@@ -1481,7 +1457,6 @@ async def reset_all_data_command(client: Client, message: Message):
     try:
         deleted_count = 0
         
-        # Main Learning DB
         if main_db:
             for collection_name in await main_db.list_collection_names():
                 await main_db[collection_name].drop()
@@ -1490,7 +1465,6 @@ async def reset_all_data_command(client: Client, message: Message):
         else:
             logger.warning("Main Learning DB not connected, skipping data deletion.")
         
-        # Clone/State DB
         if clone_state_db:
             for collection_name in await clone_state_db.list_collection_names():
                 await clone_state_db[collection_name].drop()
@@ -1499,7 +1473,6 @@ async def reset_all_data_command(client: Client, message: Message):
         else:
             logger.warning("Clone/State DB not connected, skipping data deletion.")
 
-        # Commands/Settings DB
         if commands_settings_db:
             for collection_name in await commands_settings_db.list_collection_names():
                 await commands_settings_db[collection_name].drop()
@@ -1530,7 +1503,6 @@ def health_check():
     mongo_status_clone_state = "Disconnected"
     mongo_status_commands_settings = "Disconnected"
     
-    # Pyrogram connection status
     pyrogram_connected = app.is_connected
     
     try:
@@ -1563,18 +1535,15 @@ def health_check():
 def run_flask_app():
     port = int(os.getenv('PORT', 8000))
     logger.info(f"Flask health check server starting on 0.0.0.0:{port}")
-    # Setting threaded=True is important for Flask to not block Pyrogram
     flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
 
 # --- Main entry point ---
 if __name__ == "__main__":
     logger.info("Cutie Pie bot running. ✨") 
     
-    # Start Flask app in a separate thread
     flask_thread = Thread(target=run_flask_app)
-    flask_thread.daemon = True # Allows the main program to exit even if thread is running
+    flask_thread.daemon = True 
     flask_thread.start()
 
-    # Start Pyrogram bot (blocking call)
     app.run()
 
