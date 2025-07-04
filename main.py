@@ -25,6 +25,25 @@ from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
 # Flask imports for web server
 from flask import Flask, jsonify
 
+# Import functions from new files
+from clone_bot_handler import (
+    handle_clone_bot_start_callback,
+    initiate_clone_payment,
+    prompt_for_screenshot,
+    receive_screenshot,
+    cancel_clone_request,
+    process_clone_bot_after_approval,
+    handle_buy_git_repo_callback
+)
+from group_admin_commands import (
+    group_admin_filter,
+    perform_chat_action,
+    set_welcome_command,
+    get_welcome_command,
+    clear_welcome_command,
+    new_member_welcome
+)
+
 # --- Logger Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -548,15 +567,7 @@ async def start_private_command(client: Client, message: Message):
         await store_message(message, is_bot_sent=False)
 
 # Handle callback from "Apna Khud Ka Bot Banayein!" button
-@app.on_callback_query(filters.regex("clone_bot_start"))
-async def handle_clone_bot_start_callback(client: Client, callback_query: CallbackQuery):
-    await callback_query.answer("Bot cloning process shuru ho raha hai! 😉", show_alert=True)
-    # Simulate /clonebot command for the user
-    # Use the actual client to send a message that the /clonebot handler will pick up
-    await client.send_message(
-        chat_id=callback_query.message.chat.id,
-        text="/clonebot"
-    )
+app.on_callback_query(filters.regex("clone_bot_start"))(handle_clone_bot_start_callback)
 
 # START COMMAND (GROUP CHAT)
 @app.on_message(filters.command("start") & filters.group)
@@ -680,30 +691,6 @@ async def owner_only_filter(_, __, message: Message):
     if message.from_user is not None and OWNER_ID is not None:
         return is_owner(message.from_user.id)
     return False
-
-# New decorator for group admins (including owner)
-async def group_admin_filter(_, client: Client, message: Message):
-    if not message.from_user:
-        return False
-
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-
-    if is_owner(user_id):
-        return True
-
-    if message.chat.type == ChatType.PRIVATE:
-        return False
-
-    try:
-        member = await client.get_chat_member(chat_id, user_id)
-        if member.status in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR]:
-            return True
-        else:
-            return False
-    except Exception as e:
-        logger.error(f"Error checking admin status for user {user_id} in chat {chat_id}: {e}")
-        return False
 
 # BROADCAST COMMAND
 @app.on_message(filters.command("broadcast") & filters.private & filters.create(owner_only_filter))
@@ -920,526 +907,55 @@ async def ready_clone_command(client: Client, message: Message):
 
 
 # GROUP ADMIN COMMANDS (BAN, UNBAN, KICK, PIN, UNPIN)
-async def perform_chat_action(client: Client, message: Message, action_type: str):
-    if not message.reply_to_message and len(message.command) < 2:
-        await message.reply_text(f"Malik, kripya us user ko reply karein jise {action_type} karna hai, ya user ID/username dein.\nUpyog: `/{action_type} <user_id_or_username>` ya message ko reply karein. Jaldi karo, mujhe masti karni hai! 💃")
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-
-    target_user_id = None
-    if message.reply_to_message and message.reply_to_message.from_user:
-        target_user_id = message.reply_to_message.from_user.id
-    elif len(message.command) >= 2:
-        try:
-            target_user_id = int(message.command[1])
-        except ValueError:
-            target_user_id = message.command[1]
-
-    if not target_user_id:
-        await message.reply_text("Malik, main us user ko dhundh nahi pa rahi hoon! Kya tumne sahi ID ya username diya? 🤔")
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-
-    try:
-        me_in_chat = await client.get_chat_member(message.chat.id, client.me.id)
-        if not me_in_chat.privileges or (
-            (not me_in_chat.privileges.can_restrict_members) and action_type in ["ban", "unban", "kick"]
-        ) or (
-            (not me_in_chat.privileges.can_pin_messages) and action_type in ["pin", "unpin"]
-        ):
-            await message.reply_text(f"Malik, mujhe {action_type} karne ke liye zaroori permissions ki zaroorat hai. Please de do na! 🙏")
-            if message.from_user:
-                await store_message(message, is_bot_sent=False)
-            return
-    except Exception as e:
-        logger.error(f"Error checking bot permissions in chat {message.chat.id}: {e}", exc_info=True)
-        await message.reply_text("Malik, permissions check karte samay error aaya. Kripya सुनिश्चित करें ki bot ko sahi permissions hain. 🥺")
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-
-    try:
-        if action_type == "ban":
-            await client.ban_chat_member(message.chat.id, target_user_id)
-            await message.reply_text(f"User {target_user_id} ko ban kar diya gaya, Malik! Ab koi shor nahi! 🤫")
-        elif action_type == "unban":
-            await client.unban_chat_member(message.chat.id, target_user_id)
-            await message.reply_text(f"User {target_user_id} ko unban kar diya gaya, Malik! Shayad usne sabak seekh liya hoga! 😉")
-        elif action_type == "kick":
-            await client.kick_chat_member(message.chat.id, target_user_id)
-            await message.reply_text(f"User {target_user_id} ko kick kar diya gaya, Malik! Tata bye bye! 👋")
-        elif action_type == "pin":
-            if not message.reply_to_message:
-                await message.reply_text("Malik, pin karne ke liye kripya ek message ko reply karein. Main confusion mein pad jaungi! 😵‍💫")
-                if message.from_user:
-                    await store_message(message, is_bot_sent=False)
-                return
-            await client.pin_chat_message(message.chat.id, message.reply_to_message.id)
-            await message.reply_text("Message pin kar diya gaya, Malik! Ab sabko dikhega! ✨")
-        elif action_type == "unpin":
-            await client.unpin_chat_messages(message.chat.id)
-            await message.reply_text("Sabhi pinned messages unpin kar diye gaye, Malik! Ab group free hai! 🥳")
-    except Exception as e:
-        await message.reply_text(f"Malik, {action_type} karte samay error aaya: {e}. Mujhse ho nahi pa raha! 😭")
-        logger.error(f"Error performing {action_type} by user {message.from_user.id if message.from_user else 'None'}: {e}", exc_info=True)
-    if message.from_user:
-        await store_message(message, is_bot_sent=False)
-
-@app.on_message(filters.command("ban") & filters.group & filters.create(group_admin_filter))
-async def ban_command(client: Client, message: Message):
-    await perform_chat_action(client, message, "ban")
-
-@app.on_message(filters.command("unban") & filters.group & filters.create(group_admin_filter))
-async def unban_command(client: Client, message: Message):
-    await perform_chat_action(client, message, "unban")
-
-@app.on_message(filters.command("kick") & filters.group & filters.create(group_admin_filter))
-async def kick_command(client: Client, message: Message):
-    await perform_chat_action(client, message, "kick")
-
-@app.on_message(filters.command("pin") & filters.group & filters.create(group_admin_filter))
-async def pin_command(client: Client, message: Message):
-    await perform_chat_action(client, message, "pin")
-
-@app.on_message(filters.command("unpin") & filters.group & filters.create(group_admin_filter))
-async def unpin_command(client: Client, message: Message):
-    await perform_chat_action(client, message, "unpin")
+app.on_message(filters.command("ban") & filters.group & filters.create(group_admin_filter))(lambda client, message: perform_chat_action(client, message, "ban"))
+app.on_message(filters.command("unban") & filters.group & filters.create(group_admin_filter))(lambda client, message: perform_chat_action(client, message, "unban"))
+app.on_message(filters.command("kick") & filters.group & filters.create(group_admin_filter))(lambda client, message: perform_chat_action(client, message, "kick"))
+app.on_message(filters.command("pin") & filters.group & filters.create(group_admin_filter))(lambda client, message: perform_chat_action(client, message, "pin"))
+app.on_message(filters.command("unpin") & filters.group & filters.create(group_admin_filter))(lambda client, message: perform_chat_action(client, message, "unpin"))
 
 # --- CUSTOM WELCOME MESSAGE ---
-@app.on_message(filters.command("setwelcome") & filters.group & filters.create(group_admin_filter))
-async def set_welcome_command(client: Client, message: Message):
-    if len(message.command) < 2:
-        await message.reply_text("Malik, kripya welcome message dein.\nUpyog: `/setwelcome Aapka naya welcome message {user} {chat_title}`. Naye members ko surprise karte hain! 🥳")
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-    welcome_msg_text = " ".join(message.command[1:])
-    if group_configs_collection is None:
-        await message.reply_text("Maaf karna, welcome message set nahi kar payi. Database (Commands/Settings DB) connect nahi ho paya hai. 🥺")
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-
-    group_configs_collection.update_one(
-        {"chat_id": message.chat.id},
-        {"$set": {"welcome_message": welcome_msg_text}},
-        upsert=True
-    )
-    await message.reply_text("Naya welcome message set kar diya gaya hai, Malik! Jab naya member aayega, toh main yahi pyaara message bhejoongi! 🥰")
-    if message.from_user:
-        await store_message(message, is_bot_sent=False)
-
-@app.on_message(filters.command("getwelcome") & filters.group & filters.create(group_admin_filter))
-async def get_welcome_command(client: Client, message: Message):
-    config = None
-    if group_configs_collection is not None:
-        config = group_configs_collection.find_one({"chat_id": message.chat.id})
-
-    if config and "welcome_message" in config:
-        await message.reply_text(f"Malik, current welcome message:\n`{config['welcome_message']}`. Pasand aaya? 😉")
-    else:
-        await message.reply_text("Malik, is group ke liye koi custom welcome message set nahi hai. Kya set karna chahte ho? 🥺")
-    if message.from_user:
-        await store_message(message, is_bot_sent=False)
-
-@app.on_message(filters.command("clearwelcome") & filters.group & filters.create(group_admin_filter))
-async def clear_welcome_command(client: Client, message: Message):
-    if group_configs_collection is None:
-        await message.reply_text("Maaf karna, welcome message clear nahi kar payi. Database (Commands/Settings DB) connect nahi ho paya hai. 🥺")
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-
-    group_configs_collection.update_one(
-        {"chat_id": message.chat.id},
-        {"$unset": {"welcome_message": ""}}
-    )
-    await message.reply_text("Malik, custom welcome message hata diya gaya hai. Ab main default welcome message bhejoongi. Kya main bori...ng ho gayi? 😔")
-    if message.from_user:
-        await store_message(message, is_bot_sent=False)
+app.on_message(filters.command("setwelcome") & filters.group & filters.create(group_admin_filter))(set_welcome_command)
+app.on_message(filters.command("getwelcome") & filters.group & filters.create(group_admin_filter))(get_welcome_command)
+app.on_message(filters.command("clearwelcome") & filters.group & filters.create(group_admin_filter))(clear_welcome_command)
 
 # Handle new chat members for welcome message
-@app.on_message(filters.new_chat_members & filters.group)
-async def new_member_welcome(client: Client, message: Message):
-    config = None
-    if group_configs_collection is not None:
-        config = group_configs_collection.find_one({"chat_id": message.chat.id})
-
-    welcome_text = "Hello {user}, welcome to {chat_title}! Main yahan aapka swagat karti hoon! 🥰"
-    if config and "welcome_message" in config:
-        welcome_text = config["welcome_message"]
-
-    for user in message.new_chat_members:
-        if user.is_self:
-            await start_group_command(client, message)
-            continue
-
-        final_welcome_text = welcome_text.replace("{user}", user.mention)
-        final_welcome_text = final_welcome_text.replace("{chat_title}", message.chat.title)
-
-        await client.send_message(message.chat.id, final_welcome_text)
-    if message.from_user:
-        await store_message(message, is_bot_sent=False)
+app.on_message(filters.new_chat_members & filters.group)(new_member_welcome)
 
 
 # --- PREMIUM CLONING LOGIC ---
-
-# New callback for "Buy Git Repo" button
-@app.on_callback_query(filters.regex("buy_git_repo"))
-async def handle_buy_git_repo_callback(client: Client, callback_query: CallbackQuery):
-    await callback_query.answer("Git Repo kharidne ki jaankari 😉", show_alert=False)
-    repo_info_message = (
-        "**Repository kharidne ke liye @asbhaibsr ko message kijiye. 📩**\n"
-        "Yehi bot jo aap abhi use kar rahe hain, iska poora code base aapko ₹2000 mein mil jayega.\n\n"
-        "**Kripya dhyan dein:** Sirf tabhi message karein jab aap sach mein ise kharidna chahte hon. Serious buyers hi sampark karein! 😊"
-    )
-    await callback_query.message.reply_text(repo_info_message)
-    if callback_query.from_user:
-        # We don't store button clicks as "messages" in the learning DB directly
-        # but if specific logging for this action is needed, it would go here.
-        pass
-
-
-# Step 1: Initial /clonebot command (requires payment)
-@app.on_message(filters.command("clonebot") & filters.private)
-async def initiate_clone_payment(client: Client, message: Message):
-    user_id = str(message.from_user.id)
-
-    # Check if the command includes a bot token (meaning user is trying to clone immediately)
-    if len(message.command) > 1:
-        # If a token is provided, defer to the specific handler for token processing after approval
-        # This prevents the payment flow from restarting if a token is given prematurely
-        logger.info(f"User {user_id} sent /clonebot with a token. Passing to process_clone_bot_after_approval.")
-        await process_clone_bot_after_approval(client, message)
-        return
-
-    if user_states_collection is None:
-        await message.reply_text("Maaf karna, abhi bot cloning service available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺")
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-
-    user_state = user_states_collection.find_one({"user_id": user_id})
-
-    if user_state and user_state.get("status") == "approved_for_clone":
-        await message.reply_text(
-            "Tum toh pehle se hi meri permission le chuke ho, mere dost! ✅\n"
-            "Ab bas apna bot token bhejo, main tumhare liye ek naya bot bana dungi:\n"
-            "**Kaise?** `/clonebot YOUR_BOT_TOKEN_HERE`\n"
-            "(Pura token ek hi line mein hona chahiye, theek hai? 😉)"
-        )
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-
-    pending_request = user_states_collection.find_one({"user_id": user_id, "status": "pending_approval"})
-    if pending_request:
-        await message.reply_text(
-            "Meri cute si request pehle se hi pending hai, darling! ⏳\n"
-            "Kripya admin ke approval ka intezaar karo. Agar payment aur screenshot bhej diya hai, toh thoda sabar karo na! 😊"
-        )
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-
-    # If no pending or approved state, start fresh
-    payment_message = (
-        f"Clone banane ke liye aapko ₹{PAYMENT_INFO['amount']} dene zaroori hai tabhi aap clone bana sakte hain. 💰"
-        f"\n\n**Payment Details (Meri Secret Jaan!):**\n"
-        f"UPI ID: `{PAYMENT_INFO['upi_id']}`\n\n"
-        f"{PAYMENT_INFO['instructions']}\n"
-        "Jaldi karo, main wait kar rahi hoon! 😉"
-    )
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Screenshot Bhejo Na! 🥰", callback_data="send_screenshot_prompt")],
-        [InlineKeyboardButton("🚫 Rehne Do, Nahi Banwana 😔", callback_data="cancel_clone_request")],
-        [InlineKeyboardButton("Git Repo Khareedein 💸", callback_data="buy_git_repo")] # Added new button here
-    ])
-
-    if PAYMENT_INFO['qr_code_url']:
-        try:
-            await message.reply_photo(
-                photo=PAYMENT_INFO['qr_code_url'],
-                caption=payment_message,
-                reply_markup=keyboard
-            )
-        except Exception as e:
-            logger.error(f"Error sending QR code image: {e}")
-            await message.reply_text(payment_message, reply_markup=keyboard)
-    else:
-        await message.reply_text(payment_message, reply_markup=keyboard)
-
-    user_states_collection.update_one(
-        {"user_id": user_id},
-        {"$set": {"status": "awaiting_screenshot", "timestamp": datetime.now()}},
-        upsert=True
-    )
-    logger.info(f"User {user_id} initiated clone, status set to awaiting_screenshot.")
-    if message.from_user:
-        await store_message(message, is_bot_sent=False)
-
-# Step 2: Handle 'Screenshot Bhejein' callback
-@app.on_callback_query(filters.regex("send_screenshot_prompt"))
-async def prompt_for_screenshot(client: Client, callback_query: CallbackQuery):
-    user_id = str(callback_query.from_user.id)
-
-    if user_states_collection is None:
-        await callback_query.answer("Maaf karna, abhi service available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺", show_alert=True)
-        return
-
-    user_state = user_states_collection.find_one({"user_id": user_id})
-
-    if user_state and user_state.get("status") == "awaiting_screenshot":
-        await callback_query.answer("Haan haan, kripya apna payment screenshot jaldi bhejo na! 🥰")
-        await callback_query.message.reply_text(
-            "Ab tum apna payment screenshot bhej sakte ho. Jaldi se bhej do, main dekhna chahti hoon! 👇",
-            reply_markup=ForceReply(True)
-        )
-        user_states_collection.update_one(
-            {"user_id": user_id},
-            {"$set": {"status": "expecting_screenshot"}}
-        )
-        logger.info(f"User {user_id} clicked screenshot prompt, status set to expecting_screenshot.")
-    else:
-        await callback_query.answer("Arre! Kuch gadbad ho gayi, kripya /clonebot se dobara shuru karo na! 🥺", show_alert=True)
-        # It's better to reset the state if it's not the expected "awaiting_screenshot"
-        if user_states_collection is not None:
-            user_states_collection.delete_one({"user_id": user_id})
-        logger.warning(f"User {user_id} tried screenshot prompt from wrong state: {user_state.get('status') if user_state else 'None'}")
-
-
-# Step 3: Receive screenshot and forward to owner
-@app.on_message(
+app.on_callback_query(filters.regex("buy_git_repo"))(handle_buy_git_repo_callback)
+app.on_message(filters.command("clonebot") & filters.private)(initiate_clone_payment)
+app.on_callback_query(filters.regex("send_screenshot_prompt"))(prompt_for_screenshot)
+app.on_message(
     filters.photo & filters.private &
-    (lambda client_obj, message: message.from_user and user_states_collection is not None and user_states_collection.find_one({"user_id": str(message.from_user.id), "status": "expecting_screenshot"})) # Corrected lambda and MongoDB check
-)
-async def receive_screenshot(client: Client, message: Message):
-    user_id = str(message.from_user.id)
-
-    if user_states_collection is None:
-        logger.error("user_states_collection is None. Cannot process screenshot. Please check MongoDB connection for CLONE_STATE_MONGO_DB_URI.")
-        await message.reply_text("Maaf karna, payment screenshot service abhi available nahi hai. Database mein kuch gadbad hai. 🥺")
-        return
-
-    user_state = user_states_collection.find_one({"user_id": user_id})
-    logger.info(f"Received photo from user {user_id}. User state: {user_state.get('status') if user_state else 'None'}")
-
-    if user_state and user_state.get("status") == "expecting_screenshot":
-        await message.reply_text(
-            "Aapka pyaara screenshot mujhe mil gaya hai! ✅\n"
-            "Abhi rukiye ye screenshot hamre owner ko check karne ke liye gaya hai. Wo ise check karenge aur aapko bot clone karne ki anumati denge. Saath hi, aapko is command ko dhyaan se istemal karna hoga: `/clonebot YOUR_BOT_TOKEN_HERE` tabhi aap bot bana payenge! 😉"
-        )
-
-        caption_to_owner = (
-            f"💰 **New Payment Proof (Malik, Dekho!):**\n"
-            f"User: {message.from_user.mention} (`{user_id}`)\n"
-            f"Amount: ₹{PAYMENT_INFO['amount']}\n\n"
-            f"Is user ko approve karne ke liye: `/readyclone {user_id}`"
-        )
-        try:
-            await client.send_photo(
-                chat_id=int(OWNER_ID),
-                photo=message.photo.file_id,
-                caption=caption_to_owner
-            )
-            logger.info(f"Screenshot received from user {user_id}. Forwarded to owner ({OWNER_ID}) for approval with user ID.")
-        except Exception as e:
-            logger.error(f"Error forwarding screenshot to owner {OWNER_ID}: {e}", exc_info=True)
-            await message.reply_text("Maaf karna, aapka screenshot owner tak pahunchane mein kuch error ho gaya. Kripya baad mein koshish karein. 🥺")
-
-
-        if user_states_collection is not None:
-            user_states_collection.update_one(
-                {"user_id": user_id},
-                {"$set": {"status": "pending_approval", "screenshot_message_id": message.id}}
-            )
-    else:
-        logger.warning(f"Photo received from user {user_id} but not in expected state for screenshot: {user_state.get('status') if user_state else 'None'}. Not processing as screenshot.")
-        # If photo is sent but not in the right state, give a hint
-        await message.reply_text("Arre, tumne galat samay par screenshot bhej diya! 😳 Kripya `/clonebot` se shuru karo aur phir jab main kahoon tab screenshot bhejo. 😉")
-
-
-    if message.from_user:
-        await store_message(message, is_bot_sent=False)
-
-# NEW: Handle cancel clone request
-@app.on_callback_query(filters.regex("cancel_clone_request"))
-async def cancel_clone_request(client: Client, callback_query: CallbackQuery):
-    user_id = str(callback_query.from_user.id)
-    if user_states_collection is None:
-        await callback_query.answer("Maaf karna, abhi service available nahi hai. Database mein kuch gadbad hai. 🥺", show_alert=True)
-        return
-
-    user_states_collection.delete_one({"user_id": user_id})
-    await callback_query.message.edit_text("Theek hai, agar aap abhi clone nahi banana chahte toh koi baat nahi. Jab man kare, `/clonebot` se dobara shuru kar sakte hain! 😉")
-    await callback_query.answer("Clone request cancel kar di gayi.", show_alert=True)
-    logger.info(f"User {user_id} cancelled clone request.")
-
-
-# Step 5: Process actual clonebot command after approval
-@app.on_message(filters.command("clonebot") & filters.private & filters.regex(r'/clonebot\s+([A-Za-z0-9:_-]+)'))
-async def process_clone_bot_after_approval(client: Client, message: Message):
-    user_id = str(message.from_user.id)
-
-    if user_states_collection is None:
-        await message.reply_text("Maaf karna, abhi bot cloning service available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺")
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-
-    user_state = user_states_collection.find_one({"user_id": user_id})
-
-    if not user_state or user_state.get("status") != "approved_for_clone":
-        # If user is not approved, or in a wrong state, tell them to start the /clonebot process first
-        await message.reply_text(
-            "Arre, tum bot clone karne ke liye approved nahi ho! 🥺\n"
-            "Clone banane ke liye aapko ₹200 dene zaroori hai. Kripya pehle payment process poora karo, "
-            "`/clonebot` command dekar. Main intzaar kar rahi hoon! 😉"
-        )
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-
-    bot_token = message.command[1].strip()
-    if not re.match(r'^\d+:[A-Za-z0-9_-]+$', bot_token):
-        await message.reply_text("Yeh bot token sahi nahi lag raha. Kripya ek valid token dein. Main confuse ho gayi! 😵‍💫")
-        if message.from_user:
-            await store_message(message, is_bot_sent=False)
-        return
-
-    await message.reply_text("Tumhare bot token ki jaanch kar rahi hoon, darling! Thoda wait karo... 💖")
-
-    try:
-        # Ensure API_ID is not None before converting
-        if API_ID is None:
-            await message.reply_text("API_ID environment variable set nahi hai, darling! Kripya bot owner se contact karein. 😭")
-            # Keep user in approved_for_clone state so they can try again if owner fixes API_ID
-            if user_states_collection is not None:
-                user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
-            return
-
-        test_client = Client(
-            f"cloned_bot_session_{user_id}",
-            api_id=int(API_ID),
-            api_hash=API_HASH,
-            bot_token=bot_token,
-            in_memory=True
-        )
-
-        await test_client.start()
-        bot_info = await test_client.get_me()
-        await test_client.stop()
-
-        await message.reply_text(
-            f"Wow! Tumhara bot **@{bot_info.username}** successfully connect ho gaya! ✅\n"
-            "Ab apne cute cloned bot ke liye update channel set karo. "
-            "\nKripya apne Update Channel ka Username/Link bhejien (jaise `@myupdates` ya `https://t.me/myupdates`)."
-            "\nAgar tum apna channel nahi lagana chahte, toh bas `no` type kar do. Mera default channel (@asbhai_bsr) set ho jayega. Jaldi karo na! 😉"
-            , reply_markup=ForceReply(True)
-        )
-        logger.info(f"Bot token valid for user {user_id}. Proceeding to channel setup.")
-        if user_states_collection is not None:
-            user_states_collection.update_one(
-                {"user_id": user_id},
-                {"$set": {"status": "awaiting_channel", "bot_token": bot_token, "bot_username": bot_info.username}}
-            )
-
-    except exceptions.unauthorized.BotTokenInvalid:
-        await message.reply_text("Arre! Yeh bot token invalid hai. Kripya sahi token dein na, please! 🥺")
-        logger.warning(f"Bot token invalid during cloning for user {user_id}.")
-        # Keep user in approved_for_clone state so they can try again with correct token
-        if user_states_collection is not None:
-            user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
-    except (exceptions.bad_request.ApiIdInvalid, exceptions.bad_request.ApiIdPublishedFlood):
-        await message.reply_text("Hamare API ID/HASH mein kuch problem hai, darling! 😭 Kripya bot owner se contact karein. Yeh toh sad ho gaya!")
-        logger.error(f"API ID/HASH issue during bot cloning attempt by user {user_id}.")
-        if user_states_collection is not None:
-            user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
-    except Exception as e:
-        await message.reply_text(f"Bot connect karne mein error aaya, darling: `{e}`\nKripya dobara koshish karein ya sahi token dein. Mujhse ho nahi raha! 😭")
-        logger.error(f"Error during bot cloning for user {user_id}: {e}", exc_info=True)
-        if user_states_collection is not None:
-            user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
-    finally:
-        pass
-
-    if message.from_user:
-        await store_message(message, is_bot_sent=False)
+    (lambda client_obj, message: message.from_user and user_states_collection is not None and user_states_collection.find_one({"user_id": str(message.from_user.id), "status": "expecting_screenshot"}))
+)(receive_screenshot)
+app.on_callback_query(filters.regex("cancel_clone_request"))(cancel_clone_request)
+app.on_message(filters.command("clonebot") & filters.private & filters.regex(r'/clonebot\s+([A-Za-z0-9:_-]+)'))(process_clone_bot_after_approval)
 
 # Step 6: Receive update channel link and finalize clone
-@app.on_message(
-    filters.text & filters.private # Removed filters.reply and the complex lambda for reply_to_message content
-)
-async def finalize_clone_process(client: Client, message: Message):
+@app.on_message(filters.text & filters.private) # This needs to be carefully filtered to only apply when user is in 'awaiting_channel' state
+async def finalize_clone_process_wrapper(client: Client, message: Message):
     user_id = str(message.from_user.id)
-
     if user_states_collection is None:
-        logger.error("user_states_collection is None. Cannot process channel link for clone flow. Please check MongoDB connection for CLONE_STATE_MONGO_DB_URI.")
-        return
+        return # Cannot proceed if collection is not available
 
     user_state = user_states_collection.find_one({"user_id": user_id, "status": "awaiting_channel"})
-
-    if not user_state:
-        logger.debug(f"User {user_id} is not in 'awaiting_channel' state. Skipping finalize_clone_process.")
-        return # Not in the correct state for this handler
-
-    update_channel_input = message.text.strip()
-    final_update_channel = DEFAULT_UPDATE_CHANNEL_USERNAME
-
-    if update_channel_input.lower() != "no":
-        if re.match(r'^(https?://t\.me/|@)?([a-zA-Z0-9_]+)$', update_channel_input):
-            if update_channel_input.startswith("http"):
-                final_update_channel = update_channel_input.split('/')[-1]
-            else:
-                final_update_channel = update_channel_input.replace('@', '')
-
-            try:
-                # Attempt to get chat to verify it's a valid channel
-                chat = await client.get_chat(f"@{final_update_channel}")
-                if not chat.type == ChatType.CHANNEL:
-                    await message.reply_text("Yeh ek valid channel username/link nahi lag raha, darling! Kripya sahi channel ka username (@channelname) ya link (t.me/channelname) dein, ya 'no' type karo. Mujhko samjho na! 🥺")
-                    if message.from_user:
-                        await store_message(message, is_bot_sent=False)
-                    return
-            except Exception as e:
-                logger.warning(f"Could not verify channel {final_update_channel}: {e}")
-                await message.reply_text("Channel ko verify nahi kar payi, darling! Kripya sahi channel ka username (@channelname) ya link (t.me/channelname) dein, ya 'no' type karo. Kya main galti kar rahi hoon? 😔")
-                if message.from_user:
-                    await store_message(message, is_bot_sent=False)
-                return
-
-            logger.info(f"User {user_id} set update channel to @{final_update_channel}")
-        else:
-            await message.reply_text("Invalid channel username/link, darling! Kripya sahi channel ka username (@channelname) ya link (t.me/channelname) dein, ya 'no' type karo. Main confusion mein hoon! 😵‍💫")
-            if message.from_user:
-                await store_message(message, is_bot_sent=False)
-            return
-
+    if user_state:
+        # Pass necessary global variables to the imported function
+        await finalize_clone_process(
+            client=client,
+            message=message,
+            user_states_collection=user_states_collection,
+            DEFAULT_UPDATE_CHANNEL_USERNAME=DEFAULT_UPDATE_CHANNEL_USERNAME,
+            API_ID=API_ID,
+            API_HASH=API_HASH,
+            logger=logger,
+            store_message=store_message # Pass store_message utility
+        )
     else:
-        logger.info(f"User {user_id} chose default update channel: @{DEFAULT_UPDATE_CHANNEL_USERNAME}")
-
-    await message.reply_text(
-        "Badhai ho, mere cute dost! 🎉 Tumhare bot ke liye saari settings complete ho gayi hain.\n\n"
-        "Ab tum is pyaare bot ko deploy kar sakte ho! Tumhara bot token aur update channel niche diye gaye hain:\n"
-        f"**Bot Token:** `{user_state['bot_token']}`\n"
-        f"**Bot Username:** `@{user_state['bot_username']}`\n"
-        f"**Updates Channel:** `https://t.me/{final_update_channel}`\n\n"
-        "**Deployment ke liye easy steps:**\n"
-        "1. Meri GitHub repository ko fork karo (agar nahi kiya hai toh).\n"
-        "2. Apni `main.py` file mein `BOT_TOKEN`, `API_ID`, `API_HASH` aur `OWNER_ID` ko apne hisaab se Environment Variables mein set karo.\n"
-        f"3. Aur haan, `main.py` mein `DEFAULT_UPDATE_CHANNEL_USERNAME` ko `'{final_update_channel}'` par set karna mat bhoolna! (Ya phir apne forked repo mein yeh value directly daal do)\n"
-        "4. Koyeb (ya kisi bhi hosting) par deploy karo, Environment Variables mein saari details dena. Fir dekho mera jaisa pyaara bot kaise kaam karta hai! 💖\n\n"
-        "Kisi bhi sawal ke liye @aschat_group channel par aana na bhoolna! Main wahin milungi! 😉"
-    )
-
-    if user_states_collection is not None:
-        user_states_collection.delete_one({"user_id": user_id})
-    logger.info(f"User {user_id} clone process finalized and state cleared.")
-    if message.from_user:
-        await store_message(message, is_bot_sent=False)
+        # If not in awaiting_channel state, let the general private message handler take over
+        await handle_private_general_messages(client, message)
 
 
 # --- Private Chat General Message Handler (Fallback for non-commands/non-cloning) ---
@@ -1447,7 +963,7 @@ async def finalize_clone_process(client: Client, message: Message):
     filters.private &
     (filters.text | filters.sticker | filters.photo | filters.video | filters.document | filters.audio | filters.voice | filters.animation) &
     ~filters.via_bot
-) # Removed ~filters.reply
+)
 async def handle_private_general_messages(client: Client, message: Message):
     user_id = str(message.from_user.id) if message.from_user else "N/A"
 
@@ -1469,9 +985,12 @@ async def handle_private_general_messages(client: Client, message: Message):
             await message.reply_text("Kripya apna payment screenshot bhej do, darling! Main uska intezaar kar rahi hoon. 👇")
             return
         elif status == "awaiting_channel":
-            # If user is in awaiting_channel state, try to process their message as a channel link
-            # Call the finalize_clone_process function directly
-            await finalize_clone_process(client, message)
+            # This case should now be handled by finalize_clone_process_wrapper
+            # if the user is in awaiting_channel state and sends a text message.
+            # If we reach here, it means finalize_clone_process_wrapper didn't handle it,
+            # perhaps because it's not a text message or some other filter.
+            # We can still give a hint.
+            await message.reply_text("Kripya apne Update Channel ka Username/Link bhejien (jaise `@myupdates` ya `https://t.me/myupdates`). Agar nahi lagana chahte, toh bas `no` type kar do. 😉")
             return
         elif status == "pending_approval":
             await message.reply_text("Meri cute si request pehle se hi pending hai, darling! ⏳ Admin ke approval ka intezaar karo. 😊")
