@@ -552,17 +552,11 @@ async def start_private_command(client: Client, message: Message):
 async def handle_clone_bot_start_callback(client: Client, callback_query: CallbackQuery):
     await callback_query.answer("Bot cloning process shuru ho raha hai! 😉", show_alert=True)
     # Simulate /clonebot command for the user
-    fake_message = Message(
-        id=0, # Dummy ID, not used for actual message processing, just for the handler
-        from_user=callback_query.from_user,
-        chat=callback_query.message.chat,
-        text="/clonebot",
-        date=datetime.now(),
-        command=["clonebot"]
+    # Use the actual client to send a message that the /clonebot handler will pick up
+    await client.send_message(
+        chat_id=callback_query.message.chat.id,
+        text="/clonebot"
     )
-    # Bind the fake_message to the client for proper method calls within initiate_clone_payment
-    fake_message._client = client
-    await initiate_clone_payment(client, fake_message)
 
 # START COMMAND (GROUP CHAT)
 @app.on_message(filters.command("start") & filters.group)
@@ -972,7 +966,7 @@ async def perform_chat_action(client: Client, message: Message, action_type: str
             await message.reply_text(f"User {target_user_id} ko ban kar diya gaya, Malik! Ab koi shor nahi! 🤫")
         elif action_type == "unban":
             await client.unban_chat_member(message.chat.id, target_user_id)
-            await message.reply_text(f"User {target_user_id} ko unban kar diya gaya, Malik! Shayad usne sabak seekh liya होगा! 😉")
+            await message.reply_text(f"User {target_user_id} ko unban kar diya gaya, Malik! Shayad usne sabak seekh liya hoga! 😉")
         elif action_type == "kick":
             await client.kick_chat_member(message.chat.id, target_user_id)
             await message.reply_text(f"User {target_user_id} ko kick kar diya gaya, Malik! Tata bye bye! 👋")
@@ -1112,6 +1106,14 @@ async def handle_buy_git_repo_callback(client: Client, callback_query: CallbackQ
 @app.on_message(filters.command("clonebot") & filters.private)
 async def initiate_clone_payment(client: Client, message: Message):
     user_id = str(message.from_user.id)
+
+    # Check if the command includes a bot token (meaning user is trying to clone immediately)
+    if len(message.command) > 1:
+        # If a token is provided, defer to the specific handler for token processing after approval
+        # This prevents the payment flow from restarting if a token is given prematurely
+        logger.info(f"User {user_id} sent /clonebot with a token. Passing to process_clone_bot_after_approval.")
+        await process_clone_bot_after_approval(client, message)
+        return
 
     if user_states_collection is None:
         await message.reply_text("Maaf karna, abhi bot cloning service available nahi hai. Database (Clone/State DB) connect nahi ho paya hai. 🥺")
@@ -1288,10 +1290,10 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
             await store_message(message, is_bot_sent=False)
         return
 
-    user_state = user_states_collection.find_one({"user_id": user_id, "status": "approved_for_clone"})
+    user_state = user_states_collection.find_one({"user_id": user_id})
 
-    if not user_state:
-        # Updated message for clarity on payment
+    if not user_state or user_state.get("status") != "approved_for_clone":
+        # If user is not approved, or in a wrong state, tell them to start the /clonebot process first
         await message.reply_text(
             "Arre, tum bot clone karne ke liye approved nahi ho! 🥺\n"
             "Clone banane ke liye aapko ₹200 dene zaroori hai. Kripya pehle payment process poora karo, "
@@ -1314,6 +1316,7 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
         # Ensure API_ID is not None before converting
         if API_ID is None:
             await message.reply_text("API_ID environment variable set nahi hai, darling! Kripya bot owner se contact karein. 😭")
+            # Keep user in approved_for_clone state so they can try again if owner fixes API_ID
             if user_states_collection is not None:
                 user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
             return
@@ -1523,6 +1526,32 @@ async def handle_general_messages(client: Client, message: Message):
             content_to_send = reply_doc.get("content")
             file_to_send = reply_doc.get("file_id")
 
+            # Store the bot's own reply for future learning
+            bot_reply_message_data = {
+                "chat_id": message.chat.id,
+                "message_id": -1, # Placeholder, will be updated after sending
+                "user_id": client.me.id,
+                "username": client.me.username,
+                "first_name": client.me.first_name,
+                "chat_type": message.chat.type.name,
+                "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
+                "timestamp": datetime.now(),
+                "is_bot_sent": True,
+                "content_type": content_type,
+                "content": content_to_send,
+                "file_id": file_to_send,
+                "keywords": extract_keywords(content_to_send),
+                "replied_to_message_id": message.id, # The message this bot replied to
+                "replied_to_user_id": message.from_user.id if message.from_user else None,
+                "replied_to_content": message.text, # The content of the message this bot replied to
+                "replied_to_content_type": message.media.value if message.media else ("text" if message.text else "unknown"),
+                "has_received_reply": False, # Will be set to True if a user replies to this bot's message
+                "replied_by_user_id": None,
+                "replied_message_content": None,
+                "is_bot_observed_pair": False, # This is a bot's reply, not a user's reply to a bot.
+            }
+
+
             if content_type == "text":
                 sent_msg = await message.reply_text(content_to_send)
                 logger.info(f"Replied with text: {content_to_send}")
@@ -1551,8 +1580,12 @@ async def handle_general_messages(client: Client, message: Message):
                 logger.warning(f"Reply document found but no recognized content type or file_id: {reply_doc}")
 
             if sent_msg:
+                bot_reply_message_data["message_id"] = sent_msg.id # Update with actual message ID
+                if messages_collection is not None:
+                    messages_collection.insert_one(bot_reply_message_data)
+                    logger.debug(f"Bot's reply stored: {sent_msg.id} to user message {message.id}")
                 last_bot_reply_time[chat_id] = time.time()
-                await store_message(sent_msg, is_bot_sent=True)
+                # await store_message(sent_msg, is_bot_sent=True) # This is now handled by the explicit insert_one above
         except Exception as e:
             logger.error(f"Error sending reply for message {message.id}: {e}", exc_info=True)
     else:
@@ -1698,4 +1731,3 @@ if __name__ == "__main__":
     flask_thread.start()
 
     app.run()
-
