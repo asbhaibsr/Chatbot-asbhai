@@ -235,10 +235,9 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
             if message.reply_to_message.from_user:
                 message_data["replied_to_user_id"] = message.reply_to_message.from_user.id
 
-            replied_to_content = message.reply_to_message.text
+            replied_to_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
             replied_to_content_type = "text"
             if message.reply_to_message.sticker:
-                replied_to_content = message.reply_to_message.sticker.emoji
                 replied_to_content_type = "sticker"
             elif message.reply_to_message.photo:
                 replied_to_content = message.reply_to_message.caption 
@@ -488,6 +487,8 @@ async def handle_clone_bot_start_callback(client: Client, callback_query: Callba
         date=datetime.now(),
         command=["clonebot"]
     )
+    # FIX 1: Bind the fake_message to the client
+    fake_message._client = client 
     await initiate_clone_payment(client, fake_message)
 
 # START COMMAND (GROUP CHAT)
@@ -1010,8 +1011,9 @@ async def prompt_for_screenshot(client: Client, callback_query: CallbackQuery):
 @app.on_message(
     filters.photo & filters.private & 
     filters.reply # Ensure it's a reply
-    & (lambda _, __, msg: msg.reply_to_message and msg.reply_to_message.from_user and msg.reply_to_message.from_user.is_self and
-                         msg.reply_to_message.reply_markup and isinstance(msg.reply_to_message.reply_markup, ForceReply))
+    # FIX 2: Correct lambda filter arguments from (_, __, msg) to (_, message)
+    & (lambda _, message: message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self and
+                         message.reply_to_message.reply_markup and isinstance(message.reply_to_message.reply_markup, ForceReply))
 )
 async def receive_screenshot(client: Client, message: Message):
     user_id = str(message.from_user.id)
@@ -1196,8 +1198,9 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
 @app.on_message(
     filters.text & filters.private &
     filters.reply # Ensure it's a reply
-    & (lambda _, __, msg: msg.reply_to_message and msg.reply_to_message.from_user and msg.reply_to_message.from_user.is_self and
-                         msg.reply_to_message.reply_markup and isinstance(msg.reply_to_message.reply_markup, ForceReply))
+    # FIX 2: Correct lambda filter arguments from (_, __, msg) to (_, message)
+    & (lambda _, message: message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self and
+                         message.reply_to_message.reply_markup and isinstance(message.reply_to_message.reply_markup, ForceReply))
 )
 async def finalize_clone_process(client: Client, message: Message):
     user_id = str(message.from_user.id)
@@ -1458,6 +1461,7 @@ async def reset_all_data_command(client: Client, message: Message):
         deleted_count = 0
         
         if main_db:
+            # Drop all collections in main_db
             for collection_name in await main_db.list_collection_names():
                 await main_db[collection_name].drop()
                 logger.info(f"Collection '{collection_name}' dropped from Main Learning DB.")
@@ -1466,6 +1470,7 @@ async def reset_all_data_command(client: Client, message: Message):
             logger.warning("Main Learning DB not connected, skipping data deletion.")
         
         if clone_state_db:
+            # Drop all collections in clone_state_db
             for collection_name in await clone_state_db.list_collection_names():
                 await clone_state_db[collection_name].drop()
                 logger.info(f"Collection '{collection_name}' dropped from Clone/State DB.")
@@ -1474,6 +1479,7 @@ async def reset_all_data_command(client: Client, message: Message):
             logger.warning("Clone/State DB not connected, skipping data deletion.")
 
         if commands_settings_db:
+            # Drop all collections in commands_settings_db
             for collection_name in await commands_settings_db.list_collection_names():
                 await commands_settings_db[collection_name].drop()
                 logger.info(f"Collection '{collection_name}' dropped from Commands/Settings DB.")
@@ -1546,4 +1552,3 @@ if __name__ == "__main__":
     flask_thread.start()
 
     app.run()
-
