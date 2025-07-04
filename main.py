@@ -1,6 +1,7 @@
 import os
 import asyncio
-import threading # Flask को अलग थ्रेड में चलाने के लिए
+import threading
+import time # Cool down ke liye time module import kiya hai
 
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -12,9 +13,10 @@ from datetime import datetime, timedelta
 import logging
 import re
 import random
+import sys # Restart ke liye sys module import kiya hai
 
 # Flask imports
-from flask import Flask, request, jsonify # Flask के लिए आवश्यक मॉड्यूल्स
+from flask import Flask, request, jsonify
 
 # --- Logger Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -36,6 +38,7 @@ API_HASH = os.getenv("API_HASH")
 MAX_MESSAGES_THRESHOLD = 100000
 PRUNE_PERCENTAGE = 0.30
 UPDATE_CHANNEL_USERNAME = "asbhai_bsr"
+ASBHAI_USERNAME = "asbhaibsr" # asbhaibsr ka username
 
 # --- MongoDB Setup ---
 try:
@@ -68,7 +71,6 @@ app = Client(
 )
 
 # --- Flask App Setup ---
-# Flask एप्लीकेशन को इनिशियलाइज़ करें
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -77,16 +79,25 @@ def home():
 
 @flask_app.route('/health')
 def health_check():
-    # यह एंडपॉइंट Koyeb के हेल्थ चेक के लिए है।
-    # यह सिर्फ़ 200 OK स्टेटस रिटर्न करेगा, यह दर्शाता है कि सर्वर चालू है।
     return jsonify({"status": "ok", "message": "Bot is alive and healthy!"}), 200
 
 def run_flask_app():
-    # Flask ऐप को पोर्ट 8000 पर चलाएँ। Koyeb डिफ़ॉल्ट रूप से पोर्ट 8000 पर सुनता है।
-    # debug=False रखें प्रोडक्शन के लिए।
     flask_app.run(host='0.0.0.0', port=os.environ.get('PORT', 8000), debug=False)
 
-# --- Utility Functions (Same as before) ---
+# --- Cooldown dictionary ---
+user_cooldowns = {}
+COOLDOWN_TIME = 3 # seconds
+
+def is_on_cooldown(user_id):
+    last_command_time = user_cooldowns.get(user_id)
+    if last_command_time is None:
+        return False
+    return (time.time() - last_command_time) < COOLDOWN_TIME
+
+def update_cooldown(user_id):
+    user_cooldowns[user_id] = time.time()
+
+# --- Utility Functions ---
 def extract_keywords(text):
     if not text:
         return []
@@ -115,7 +126,7 @@ async def prune_old_messages():
     else:
         logger.info("Message threshold not reached. No pruning needed.")
 
-# --- Message Storage Logic (Same as before) ---
+# --- Message Storage Logic ---
 async def store_message(message: Message):
     try:
         message_data = {
@@ -173,7 +184,7 @@ async def store_message(message: Message):
     except Exception as e:
         logger.error(f"Error storing message {message.id}: {e}")
 
-# --- Reply Generation Logic (Same as before) ---
+# --- Reply Generation Logic ---
 async def generate_reply(message: Message):
     await app.invoke(
         SetTyping(
@@ -244,7 +255,7 @@ async def generate_reply(message: Message):
     logger.info(f"No general keyword reply found for: '{query_content}'.")
     return None
 
-# --- Tracking Functions (Same as before) ---
+# --- Tracking Functions ---
 async def update_group_info(chat_id: int, chat_title: str):
     group_tracking_collection.update_one(
         {"_id": chat_id},
@@ -263,17 +274,19 @@ async def update_user_info(user_id: int, username: str, first_name: str):
     )
     logger.info(f"User info updated for {first_name} ({user_id})")
 
-# --- Pyrogram Event Handlers (Same as before) ---
+# --- Pyrogram Event Handlers ---
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_private_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    update_cooldown(message.from_user.id)
+
+    user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
     welcome_messages = [
-        "Hi there! 👋 Main aa gayi hoon aapki baaton ka hissa banne. Chalo, kuch mithaas bhari baatein karte hain!",
-        "Helloooo! 💖 Main sunne aur seekhne ke liye taiyar hoon. Aapki har baat mere liye khaas hai!",
-        "Namaste, pyaare dost! ✨ Main yahan aapke shabdon ko sametne aur unhe naya roop dene aayi hoon. Kaisi ho/ho tum?",
-        "Hey cutie! Main aa gayi hoon aapke sath baatein karne. Ready to chat? 😉",
-        "Koshish karne walon ki kabhi haar nahi hoti! Main bhi aapki baaton se seekhne ki koshish kar rahi hoon. Aao, baat karein!",
-        "Hello! Main ek bot hoon jo aapki baaton ko samajhta aur unse seekhta hai. Aao, baat karte hain, theek hai?"
+        f"Hi **{user_name}!** 👋 Main aa gayi hoon. Chalo, baatein karte hain! ✨",
+        f"Hellooo **{user_name}!** 💖 Main sunne aur seekhne ke liye taiyar hoon. 😊",
+        f"Namaste **{user_name}!** Koi kaam hai? 😉 Main yahan hoon!"
     ]
     
     keyboard = InlineKeyboardMarkup(
@@ -283,6 +296,9 @@ async def start_private_command(client: Client, message: Message):
             ],
             [
                 InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}")
+            ],
+            [
+                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo") # Button text updated
             ]
         ]
     )
@@ -294,18 +310,24 @@ async def start_private_command(client: Client, message: Message):
 
 @app.on_message(filters.command("start") & filters.group)
 async def start_group_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    update_cooldown(message.from_user.id)
+
+    user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
     welcome_messages = [
-        "Hello, my lovely group! 👋 Main aa gayi hoon aapki conversations mein shamil hone. Kya chal raha hai sabke beech?",
-        "Hey everyone! 💖 Main sun rahi hoon aap sab ki baatein. Chalo, kuch interesting discussions karte hain!",
-        "Is group ki conversations ko samajhne aayi hoon! ✨ Aap sab ki baaton se seekhna kitna mazedaar hai. Shuru ho jao!",
-        "Namaste to all the amazing people here! Let's create some beautiful memories (aur data) together. 😄",
-        "Duniya gol hai, aur baatein anmol! Main bhi yahan aapki anmol baaton ko store karne aayi hoon. Sunane ko taiyar hoon! 📚"
+        f"Hello **{user_name}!** 👋 Main aa gayi hoon. Group ki baatein sunne ko taiyar hoon! ✨",
+        f"Hey **{user_name}!** 💖 Main yahan aapki conversations se seekhne aayi hoon. 😊",
+        f"Namaste **{user_name}!** Is group mein main hoon aapki apni bot. 😄"
     ]
 
     keyboard = InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}")
+            ],
+            [
+                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo") # Button text updated
             ]
         ]
     )
@@ -317,14 +339,35 @@ async def start_group_command(client: Client, message: Message):
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+@app.on_callback_query()
+async def callback_handler(client, callback_query):
+    if callback_query.data == "buy_git_repo":
+        await callback_query.message.reply_text(
+            f"🤩 Agar aapko mere jaisa khud ka bot banwana hai, toh aapko ₹500 dene honge. Iske liye **@{ASBHAI_USERNAME}** se contact karein aur unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸",
+            quote=True
+        )
+        await callback_query.answer("Details mil gayi na? Ab jao, deal final karo! 😉", show_alert=False) # Alert message updated
+        # Store button interaction
+        buttons_collection.insert_one({
+            "user_id": callback_query.from_user.id,
+            "username": callback_query.from_user.username,
+            "first_name": callback_query.from_user.first_name,
+            "button_data": callback_query.data,
+            "timestamp": datetime.now()
+        })
+
 @app.on_message(filters.command("broadcast") & filters.private)
 async def broadcast_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    update_cooldown(message.from_user.id)
+
     if str(message.from_user.id) != OWNER_ID:
-        await message.reply_text("Sorry, aapko yeh command use karne ki anumati nahi hai.")
+        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Kripya broadcast karne ke liye ek message dein. Upyog: `/broadcast Aapka message yahan`")
+        await message.reply_text("Hey, broadcast karne ke liye kuch likho toh sahi! 🙄 Jaise: `/broadcast Aapka message yahan`")
         return
 
     broadcast_text = " ".join(message.command[1:])
@@ -345,13 +388,17 @@ async def broadcast_command(client: Client, message: Message):
             logger.error(f"Failed to send broadcast to chat {chat_id}: {e}")
             failed_count += 1
     
-    await message.reply_text(f"Broadcast poora hua! {sent_count} chats ko bheja, {failed_count} chats ke liye asafal raha.")
+    await message.reply_text(f"Broadcast ho gaya, darling! ✨ **{sent_count}** chats tak pahunchi, aur **{failed_count}** tak nahi. Koi nahi, next time! 😉")
     await store_message(message)
 
 @app.on_message(filters.command("stats") & filters.private)
 async def stats_private_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    update_cooldown(message.from_user.id)
+
     if len(message.command) < 2 or message.command[1].lower() != "check":
-        await message.reply_text("Upyog: `/stats check`")
+        await message.reply_text("Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊")
         return
 
     total_messages = messages_collection.count_documents({})
@@ -360,9 +407,9 @@ async def stats_private_command(client: Client, message: Message):
 
     stats_text = (
         "📊 **Bot Statistics** 📊\n"
-        f"• Jitne groups mein main hoon: **{unique_group_ids}**\n"
-        f"• Total users jo maine observe kiye: **{num_users}**\n"
-        f"• Total messages jo maine store kiye: **{total_messages}**"
+        f"• Jitne groups mein main hoon: **{unique_group_ids}** lovely groups!\n"
+        f"• Total users jo maine observe kiye: **{num_users}** pyaare users!\n"
+        f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩"
     )
     await message.reply_text(stats_text)
     await store_message(message)
@@ -371,8 +418,12 @@ async def stats_private_command(client: Client, message: Message):
 
 @app.on_message(filters.command("stats") & filters.group)
 async def stats_group_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    update_cooldown(message.from_user.id)
+
     if len(message.command) < 2 or message.command[1].lower() != "check":
-        await message.reply_text("Upyog: `/stats check`")
+        await message.reply_text("Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊")
         return
 
     total_messages = messages_collection.count_documents({})
@@ -381,9 +432,9 @@ async def stats_group_command(client: Client, message: Message):
 
     stats_text = (
         "📊 **Bot Statistics** 📊\n"
-        f"• Jitne groups mein main hoon: **{unique_group_ids}**\n"
-        f"• Total users jo maine observe kiye: **{num_users}**\n"
-        f"• Total messages jo maine store kiye: **{total_messages}**"
+        f"• Jitne groups mein main hoon: **{unique_group_ids}** lovely groups!\n"
+        f"• Total users jo maine observe kiye: **{num_users}** pyaare users!\n"
+        f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩"
     )
     await message.reply_text(stats_text)
     await store_message(message)
@@ -396,13 +447,17 @@ async def stats_group_command(client: Client, message: Message):
 
 @app.on_message(filters.command("groups") & filters.private)
 async def list_groups_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    update_cooldown(message.from_user.id)
+
     if str(message.from_user.id) != OWNER_ID:
-        await message.reply_text("Sorry, aapko yeh command use karne ki anumati nahi hai.")
+        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️")
         return
 
     groups = list(group_tracking_collection.find({}))
     if not groups:
-        await message.reply_text("Main abhi kisi group mein nahi hoon.")
+        await message.reply_text("Main abhi kisi group mein nahi hoon. Akeli hoon, koi add kar lo na! 🥺")
         return
 
     group_list_text = "📚 **Groups Jahan Main Hoon** 📚\n\n"
@@ -414,25 +469,29 @@ async def list_groups_command(client: Client, message: Message):
         group_list_text += f"{i+1}. **{title}** (`{group_id}`)\n"
         group_list_text += f"   • Joined: {added_on}\n"
         
-    group_list_text += "\n_Yeh data tracking database se hai._"
+    group_list_text += "\n_Yeh data tracking database se hai, bilkul secret!_ 🤫"
     await message.reply_text(group_list_text)
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("leavegroup") & filters.private)
 async def leave_group_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    update_cooldown(message.from_user.id)
+
     if str(message.from_user.id) != OWNER_ID:
-        await message.reply_text("Sorry, aapko yeh command use karne ki anumati nahi hai.")
+        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Kripya group ID dein jisse aap mujhe hatana chahte hain. Upyog: `/leavegroup -1001234567890`")
+        await message.reply_text("Kripya group ID dein jisse aap mujhe hatana chahte hain. Upyog: `/leavegroup -1001234567890` (aise, darling!)")
         return
 
     try:
         group_id_str = message.command[1]
         if not group_id_str.startswith('-100'):
-            await message.reply_text("Aapne galat Group ID format diya hai. Group ID `-100...` se shuru hoti hai.")
+            await message.reply_text("Aapne galat Group ID format diya hai. Group ID `-100...` se shuru hoti hai. Thoda dhyaan se! 😊")
             return
 
         group_id = int(group_id_str)
@@ -442,26 +501,141 @@ async def leave_group_command(client: Client, message: Message):
         group_tracking_collection.delete_one({"_id": group_id})
         messages_collection.delete_many({"chat_id": group_id})
         
-        await message.reply_text(f"Safaltapoorvak group `{group_id}` se bahar aa gaya aur uska data clear kar diya.")
+        await message.reply_text(f"Safaltapoorvak group `{group_id}` se bahar aa gayi, aur uska sara data bhi clean kar diya! Bye-bye! 👋")
         logger.info(f"Left group {group_id} and cleared its data.")
 
     except ValueError:
-        await message.reply_text("Invalid group ID format. Kripya ek valid numeric ID dein.")
+        await message.reply_text("Invalid group ID format. Kripya ek valid numeric ID dein. Thoda number check kar lo! 😉")
     except Exception as e:
-        await message.reply_text(f"Group se bahar nikalte samay galti hui: {e}")
+        await message.reply_text(f"Group se bahar nikalte samay galti ho gayi: {e}. Oh no! 😢")
         logger.error(f"Error leaving group {group_id_str}: {e}")
     
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+# --- New Commands ---
+
+@app.on_message(filters.command("cleardata") & filters.private)
+async def clear_data_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    update_cooldown(message.from_user.id)
+
+    if str(message.from_user.id) != OWNER_ID:
+        await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🤫")
+        return
+
+    if len(message.command) < 2:
+        await message.reply_text("Kitna data clean karna hai? Percentage batao na, jaise: `/cleardata 10%` ya `/cleardata 100%`! 🧹")
+        return
+
+    percentage_str = message.command[1].strip('%')
+    try:
+        percentage = int(percentage_str)
+        if not (1 <= percentage <= 100):
+            await message.reply_text("Percentage 1 se 100 ke beech mein hona chahiye. Thoda dhyan se! 🤔")
+            return
+    except ValueError:
+        await message.reply_text("Invalid percentage format. Percentage number mein hona chahiye, jaise `10` ya `50`. Fir se try karo! 💖")
+        return
+
+    total_messages = messages_collection.count_documents({})
+    if total_messages == 0:
+        await message.reply_text("Mere paas abhi koi data nahi hai delete karne ke liye. Sab clean-clean hai! ✨")
+        return
+
+    messages_to_delete_count = int(total_messages * (percentage / 100))
+    if messages_to_delete_count == 0 and percentage > 0:
+        await message.reply_text(f"Itna kam data hai ki {percentage}% delete karne se kuch fark nahi padega! 😂")
+        return
+    elif messages_to_delete_count == 0 and percentage == 0:
+        await message.reply_text("Zero percent? That means no deletion! 😉")
+        return
+
+
+    oldest_message_ids = []
+    for msg in messages_collection.find({}) \
+                                        .sort("timestamp", 1) \
+                                        .limit(messages_to_delete_count):
+        oldest_message_ids.append(msg['_id'])
+
+    if oldest_message_ids:
+        delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
+        await message.reply_text(f"Wow! 🤩 Maine aapka **{percentage}%** data, yaani **{delete_result.deleted_count}** messages, successfully delete kar diye! Ab main thodi light feel kar rahi hoon. ✨")
+        logger.info(f"Cleared {delete_result.deleted_count} messages based on {percentage}% request.")
+    else:
+        await message.reply_text("Umm, kuch delete karne ke liye mila hi nahi. Lagta hai tumne pehle hi sab clean kar diya hai! 🤷‍♀️")
+    
+    await store_message(message)
+    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
+@app.on_message(filters.command("deletemessage") & filters.private)
+async def delete_specific_message_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    update_cooldown(message.from_user.id)
+
+    if str(message.from_user.id) != OWNER_ID:
+        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️")
+        return
+
+    if len(message.command) < 2:
+        await message.reply_text("Kaun sa message delete karna hai, batao toh sahi! Jaise: `/deletemessage hello` ya `/deletemessage 'kya haal hai'` 👻")
+        return
+
+    search_query = " ".join(message.command[1:])
+    
+    # Try to find message in current chat first
+    message_to_delete = messages_collection.find_one({"chat_id": message.chat.id, "content": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
+
+    if not message_to_delete:
+        # If not found in current chat, search globally
+        message_to_delete = messages_collection.find_one({"content": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
+
+    if message_to_delete:
+        delete_result = messages_collection.delete_one({"_id": message_to_delete["_id"]})
+        if delete_result.deleted_count > 0:
+            await message.reply_text(f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' wale message ko dhoondh ke delete kar diya. Ab woh history ka hissa nahi raha! ✨")
+            logger.info(f"Deleted message with content: '{search_query}'")
+        else:
+            await message.reply_text("Aww, yeh message to mujhe mila hi nahi. Shayad usne apni location badal di hai! 🕵️‍♀️")
+    else:
+        await message.reply_text("Umm, mujhe tumhara yeh message to mila hi nahi apne database mein. Spelling check kar lo? 🤔")
+    
+    await store_message(message)
+    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
+@app.on_message(filters.command("restart") & filters.private)
+async def restart_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    update_cooldown(message.from_user.id)
+
+    if str(message.from_user.id) != OWNER_ID:
+        await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🚫")
+        return
+
+    await message.reply_text("Okay, darling! Main abhi ek chhota sa nap le rahi hoon aur phir wapas aa jaungi, bilkul fresh aur energetic! Thoda wait karna, theek hai? ✨")
+    logger.info("Bot is restarting...")
+    # Give some time for the message to be sent
+    await asyncio.sleep(0.5) 
+    os.execl(sys.executable, sys.executable, *sys.argv) # This will restart the script
+
+# --- New chat members and left chat members (Cool down bhi lagaya) ---
 @app.on_message(filters.new_chat_members)
 async def new_member_handler(client: Client, message: Message):
+    if message.from_user and is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    if message.from_user:
+        update_cooldown(message.from_user.id)
+
     for member in message.new_chat_members:
         if member.id == client.me.id:
             if message.chat.type in ["group", "supergroup"]:
                 await update_group_info(message.chat.id, message.chat.title)
                 logger.info(f"Bot joined new group: {message.chat.title} ({message.chat.id})")
-                await message.reply_text(f"Hello everyone! 🎉 Thank you for adding me to **{message.chat.title}**! I'm here to learn from your conversations. Type /start to know more.")
+                user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
+                await message.reply_text(f"Hello **{user_name}!** 🎉 Thank you for adding me to **{message.chat.title}**! Main yahan aapki conversations se seekhne aayi hoon. Type /start to know more. Let's have some fun! 😄") # Personalized welcome
             break
     await store_message(message)
     if message.from_user:
@@ -469,17 +643,25 @@ async def new_member_handler(client: Client, message: Message):
 
 @app.on_message(filters.left_chat_member)
 async def left_member_handler(client: Client, message: Message):
+    # Cooldown check yahan relevant nahi hai, bot khud group chhod raha hai.
+    # Lekin agar kisi aur user ke command se leave ho raha hai, toh unka cooldown update ho chuka hoga.
     if message.left_chat_member and message.left_chat_member.id == client.me.id:
         if message.chat.type in ["group", "supergroup"]:
             group_tracking_collection.delete_one({"_id": message.chat.id})
             messages_collection.delete_many({"chat_id": message.chat.id})
             logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared.")
+            # No reply here as the bot is leaving
     await store_message(message)
 
 @app.on_message(filters.text | filters.sticker)
 async def handle_message_and_reply(client: Client, message: Message):
     if message.from_user and message.from_user.is_bot:
         return
+
+    if message.from_user and is_on_cooldown(message.from_user.id):
+        return # Cooldown par koi message nahi
+    if message.from_user:
+        update_cooldown(message.from_user.id)
 
     if message.chat.type in ["group", "supergroup"]:
         await update_group_info(message.chat.id, message.chat.title)
@@ -506,12 +688,12 @@ async def handle_message_and_reply(client: Client, message: Message):
     else:
         logger.info("No suitable reply found.")
 
+
 # --- Main entry point ---
 if __name__ == "__main__":
-    # Flask ऐप को एक अलग थ्रेड में चलाएँ
     logger.info("Starting Flask health check server in a separate thread...")
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.start()
 
     logger.info("Starting Pyrogram bot...")
-    app.run() # Pyrogram bot को चलाएँ
+    app.run()
