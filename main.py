@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timedelta
 from threading import Thread
 import time 
+import sys # Added for sys.executable
 
 # Pyrogram imports
 from pyrogram import Client, filters
@@ -181,6 +182,26 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
         if message.from_user and message.from_user.is_bot and not is_bot_sent:
             return
 
+        # Determine content_type based on Pyrogram message object
+        content_type = "text"
+        if message.sticker:
+            content_type = "sticker"
+        elif message.photo:
+            content_type = "photo"
+        elif message.video:
+            content_type = "video"
+        elif message.document:
+            content_type = "document"
+        elif message.audio:
+            content_type = "audio"
+        elif message.voice:
+            content_type = "voice"
+        elif message.animation:
+            content_type = "animation"
+        else:
+            content_type = "other" # Fallback for unknown types
+
+
         message_data = {
             "message_id": message.id,
             "user_id": message.from_user.id if message.from_user else None,
@@ -191,7 +212,7 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
             "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
             "timestamp": datetime.now(),
             "is_bot_sent": is_bot_sent,
-            "content_type": "text" if message.text else ("sticker" if message.sticker else "other"),
+            "content_type": content_type, # Use the determined content_type
             "content": message.text if message.text else (message.sticker.emoji if message.sticker else ""),
             "sticker_id": message.sticker.file_id if message.sticker else None,
             "keywords": extract_keywords(message.text) if message.text else extract_keywords(message.sticker.emoji if message.sticker else ""),
@@ -236,6 +257,26 @@ async def generate_reply(message: Message):
     if messages_collection is None:
         logger.warning("messages_collection is None. Cannot generate reply.")
         return None
+
+    # --- Determine the actual content type of the incoming message ---
+    message_actual_content_type = "text" # Default
+    if message.sticker:
+        message_actual_content_type = "sticker"
+    elif message.photo:
+        message_actual_content_type = "photo"
+    elif message.video:
+        message_actual_content_type = "video"
+    elif message.document:
+        message_actual_content_type = "document"
+    elif message.audio:
+        message_actual_content_type = "audio"
+    elif message.voice:
+        message_actual_content_type = "voice"
+    elif message.animation:
+        message_actual_content_type = "animation"
+    # Add more conditions for other content types as needed
+    # Ensure these string values match what you store in 'content_type' in your MongoDB documents
+
 
     # --- Strategy 1: Direct observed reply (User-to-User, or Bot-to-User) ---
     if message.reply_to_message:
@@ -282,9 +323,12 @@ async def generate_reply(message: Message):
     if potential_replies:
         logger.info(f"Found {len(potential_replies)} general keyword-based replies.")
         if len(potential_replies) > 1:
+            # ***************************************************************
+            # HERE IS THE FIX: Using message_actual_content_type
+            # ***************************************************************
             filtered_replies = [
                 doc for doc in potential_replies
-                if not (doc.get("content", "").lower() == query_content.lower() and doc.get("content_type") == message.content_type)
+                if not (doc.get("content", "").lower() == query_content.lower() and doc.get("content_type") == message_actual_content_type)
             ]
             if filtered_replies:
                 return random.choice(filtered_replies)
@@ -311,7 +355,7 @@ async def start_private_command(client: Client, message: Message):
     user_name = message.from_user.first_name if message.from_user else "mere pyare dost"
     welcome_message = (
         f"Hey, **{user_name}**! 👋 Main aa gayi hoon aapki baaton ka hissa banne. "
-        "Mera naam hai **⎯᪵⎯꯭̽🤍꯭᪳ ⃪𝗖𝘂꯭𝘁𝗶𝗲꯭ 𝗣𝗶𝗲꯭ ⃪🌸͎᪳᪳𝆺꯭𝅥⎯꯭̽⎯꯭**! 💖"
+        "Mera naam hai **⎯᪵⎯꯭̽🤍꯭᪳ ⃪𝗖𝘂꯭𝘁𝗶𝗲꯭ 𝗣𝗶𝗲꯭ ⃪🌸͎᪳᪳𝆺꯭𝅥⎯꯭̽⎯꯭**!💖"
         "\n\nAgar aap mujhe apne **group mein add karte hain**, toh main wahan ki conversations se seekh kar sabko aur bhi mazedaar jawab de paungi. "
         "Jaise, aapki har baat par main apni cute si ray dungi! 😉"
         "\n\nGroup mein add karke aapko milenge: "
@@ -404,6 +448,8 @@ async def help_command(client: Client, message: Message):
         "\n• `/setwelcome <message>` - Group mein naye guests ka swagat, mere style mein! 💖"
         "\n• `/getwelcome` - Dekho maine kya welcome message set kiya hai!"
         "\n• `/clearwelcome` - Agar welcome message pasand nahi, toh hata do! 🤷‍♀️"
+        "\n• `/restart bot` - Mujhe dubara se shuru karo aur deploy kar do! (Danger zone, Malik! 🚨)" # Added
+        "\n• `/resetall` - Saara data delete kar do, sab kuch! (Extremely Dangerous, Malik! 🚨🚨)" # Added
         "\n\n**Note:** Admin commands ke liye, mujhe group mein zaroori permissions dena mat bhoolna, warna main kuch nahi kar paungi! 🥺"
     )
     keyboard = InlineKeyboardMarkup([
@@ -513,7 +559,7 @@ async def reset_data_command(client: Client, message: Message):
 
         if oldest_message_ids:
             delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
-            await message.reply_text(f"Successfully {delete_result.deleted_count} messages database se delete ho gaye, Malik! Ab main aur smart banungi! 💖")
+            await message.reply_text(f"Successfully {delete_result.deleted_count} messages database se delete ho gaye, Malik! Ab main aur smart banungi!💖")
             logger.info(f"Owner {message.from_user.id} deleted {delete_result.deleted_count} messages ({percentage}%).")
         else:
             await message.reply_text("Malik, koi message delete nahi ho paya. Shayad database khaali hai ya koi problem hai. 🥺")
@@ -1111,7 +1157,7 @@ async def handle_private_non_command_messages(client: Client, message: Message):
 
 
 # --- Standard message handler (general text/sticker messages in groups, or bot replies in private) ---
-@app.on_message(filters.text | filters.sticker)
+@app.on_message(filters.text | filters.sticker | filters.photo | filters.video | filters.document | filters.audio | filters.voice | filters.animation)
 async def handle_general_messages(client: Client, message: Message):
     global last_bot_reply_time
 
@@ -1121,13 +1167,14 @@ async def handle_general_messages(client: Client, message: Message):
     # Store all incoming messages (except those from bot itself or those handled by specific clone stages)
     # The clone-related handlers specifically store messages when they process them.
     # We should avoid double-storing.
-    # The `handle_private_non_command_messages` is a fallback for private text messages.
     # For group messages, we store directly here.
     if message.chat.type != ChatType.PRIVATE:
         await store_message(message, is_bot_sent=False)
     
     # Only generate replies in groups for non-command messages
-    if message.chat.type != ChatType.PRIVATE and message.text and not message.text.startswith('/'): 
+    # Also, we added filters for other media types so it's not just text/sticker in groups.
+    if message.chat.type != ChatType.PRIVATE and (message.text and not message.text.startswith('/')) or \
+       message.sticker or message.photo or message.video or message.document or message.audio or message.voice or message.animation: 
         chat_id = message.chat.id
         current_time = time.time()
 
@@ -1144,14 +1191,26 @@ async def handle_general_messages(client: Client, message: Message):
         if reply_doc: 
             try:
                 sent_msg = None
-                if reply_doc.get("content_type") == "text":
+                content_type = reply_doc.get("content_type")
+                
+                if content_type == "text":
                     sent_msg = await message.reply_text(reply_doc["content"])
                     logger.info(f"Replied with text: {reply_doc['content']}")
-                elif reply_doc.get("content_type") == "sticker" and reply_doc.get("sticker_id"):
+                elif content_type == "sticker" and reply_doc.get("sticker_id"):
                     sent_msg = await message.reply_sticker(reply_doc["sticker_id"])
                     logger.info(f"Replied with sticker: {reply_doc['sticker_id']}")
+                # Add handling for other media types if you plan to store and reply with them
+                # Example:
+                # elif content_type == "photo" and reply_doc.get("file_id"):
+                #     sent_msg = await message.reply_photo(reply_doc["file_id"])
+                #     logger.info(f"Replied with photo: {reply_doc['file_id']}")
+                # elif content_type == "video" and reply_doc.get("file_id"):
+                #     sent_msg = await message.reply_video(reply_doc["file_id"])
+                #     logger.info(f"Replied with video: {reply_doc['file_id']}")
+                # ... and so on for other types
+
                 else:
-                    logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}")
+                    logger.warning(f"Reply document found but no recognized content type or file_id: {reply_doc}")
 
                 if sent_msg:
                     last_bot_reply_time[chat_id] = time.time()
@@ -1162,6 +1221,85 @@ async def handle_general_messages(client: Client, message: Message):
         else:
             logger.info(f"No suitable reply generated for message {message.id}.")
 
+# --- New Admin Commands ---
+
+@app.on_message(filters.command("restart") & filters.private & filters.create(owner_only_filter))
+async def restart_bot_command(client: Client, message: Message):
+    if len(message.command) < 2 or message.command[1].lower() != "bot":
+        await message.reply_text("Malik, agar mujhe restart karna hai toh aise bolo: `/restart bot`. Main sab samajh jaungi! 😉")
+        return
+
+    await message.reply_text("Malik, main ab khud ko restart kar rahi hoon. Thoda intezaar karo, main jaldi wapas aungi! 💖")
+    logger.info(f"Owner {message.from_user.id} initiated bot restart.")
+    
+    # Close Pyrogram client gracefully
+    await app.stop()
+    logger.info("Pyrogram client stopped. Restarting process...")
+    
+    # Restart the script (this will work differently based on deployment environment)
+    # For a simple Python script, os.execv will replace the current process.
+    # In a Docker container, it will cause the container to exit, and the orchestrator will restart it.
+    python = sys.executable
+    os.execv(python, [python] + sys.argv)
+
+
+@app.on_message(filters.command("resetall") & filters.private & filters.create(owner_only_filter))
+async def reset_all_data_command(client: Client, message: Message):
+    confirm_text = "YES_DELETE_ALL_DATA"
+    if len(message.command) < 2 or message.command[1] != confirm_text:
+        await message.reply_text(
+            f"**🚨 WARNING, MALIK! Yeh command saara database data delete kar dega!** 🚨\n"
+            "Kya aap pakka sure hain? Agar haan, toh kripya yeh type karein:\n"
+            f"`/resetall {confirm_text}`\n"
+            "Main galti nahi karna chahti, Malik! 😥"
+        )
+        return
+
+    await message.reply_text("Malik, aapne mujhe saara data delete karne ka bol diya! Main ab sab kuch mita rahi hoon. 🗑️✨\n"
+                             "Kripya intezaar karein, yeh thoda samay le sakta hai...")
+    
+    try:
+        deleted_count = 0
+        
+        # Main Learning DB
+        if main_db:
+            for collection_name in await main_db.list_collection_names():
+                await main_db[collection_name].drop()
+                logger.info(f"Collection '{collection_name}' dropped from Main Learning DB.")
+                deleted_count += 1
+        else:
+            logger.warning("Main Learning DB not connected, skipping data deletion.")
+        
+        # Clone/State DB
+        if clone_state_db:
+            for collection_name in await clone_state_db.list_collection_names():
+                await clone_state_db[collection_name].drop()
+                logger.info(f"Collection '{collection_name}' dropped from Clone/State DB.")
+                deleted_count += 1
+        else:
+            logger.warning("Clone/State DB not connected, skipping data deletion.")
+
+        # Commands/Settings DB
+        if commands_settings_db:
+            for collection_name in await commands_settings_db.list_collection_names():
+                await commands_settings_db[collection_name].drop()
+                logger.info(f"Collection '{collection_name}' dropped from Commands/Settings DB.")
+                deleted_count += 1
+        else:
+            logger.warning("Commands/Settings DB not connected, skipping data deletion.")
+
+        await message.reply_text(
+            f"Malik, saara data delete ho gaya! Total **{deleted_count}** collections saaf kar diye. "
+            "Ab main bilkul nayi ho gayi hoon! 🥰\n"
+            "Mujhe dobara train karna padega! "
+            "Agar aap chahen toh ab bot ko restart kar sakte hain: `/restart bot`"
+        )
+        logger.info(f"Owner {message.from_user.id} successfully reset all MongoDB data.")
+
+    except Exception as e:
+        await message.reply_text(f"Malik, data delete karte samay error aaya: {e}. Mujhse ho nahi pa raha! 😭")
+        logger.error(f"Error resetting all data by owner {message.from_user.id}: {e}", exc_info=True)
+    await store_message(message) 
 
 # --- Flask Web Server for Health Check ---
 flask_app = Flask(__name__)
@@ -1219,4 +1357,3 @@ if __name__ == "__main__":
 
     # Start Pyrogram bot (blocking call)
     app.run()
-
