@@ -294,7 +294,7 @@ async def store_message(message: Message, is_bot_sent: bool = False):
         logger.error(f"Error storing message {message.id}: {e}", exc_info=True)
 
 
-async def generate_reply(message: Message):
+async def generate_reply(client: Client, message: Message): # Added client parameter
     # Only generate replies in groups where learning is active
     if message.chat.type == ChatType.PRIVATE:
         # Private chat replies are handled by specific handlers (commands, cloning flow)
@@ -972,7 +972,7 @@ async def perform_chat_action(client: Client, message: Message, action_type: str
             await message.reply_text(f"User {target_user_id} ko ban kar diya gaya, Malik! Ab koi shor nahi! 🤫")
         elif action_type == "unban":
             await client.unban_chat_member(message.chat.id, target_user_id)
-            await message.reply_text(f"User {target_user_id} ko unban kar diya gaya, Malik! Shayad usne sabak seekh liya hoga! 😉")
+            await message.reply_text(f"User {target_user_id} ko unban kar diya gaya, Malik! Shayad usne sabak seekh liya होगा! 😉")
         elif action_type == "kick":
             await client.kick_chat_member(message.chat.id, target_user_id)
             await message.reply_text(f"User {target_user_id} ko kick kar diya gaya, Malik! Tata bye bye! 👋")
@@ -1212,13 +1212,14 @@ async def prompt_for_screenshot(client: Client, callback_query: CallbackQuery):
 # Step 3: Receive screenshot and forward to owner
 @app.on_message(
     filters.photo & filters.private &
-    (lambda _, message: message.from_user and user_states_collection and user_states_collection.find_one({"user_id": str(message.from_user.id), "status": "expecting_screenshot"}))
+    (lambda client_obj, message: message.from_user and user_states_collection is not None and user_states_collection.find_one({"user_id": str(message.from_user.id), "status": "expecting_screenshot"})) # Corrected lambda and MongoDB check
 )
 async def receive_screenshot(client: Client, message: Message):
     user_id = str(message.from_user.id)
 
     if user_states_collection is None:
         logger.error("user_states_collection is None. Cannot process screenshot. Please check MongoDB connection for CLONE_STATE_MONGO_DB_URI.")
+        await message.reply_text("Maaf karna, payment screenshot service abhi available nahi hai. Database mein kuch gadbad hai. 🥺")
         return
 
     user_state = user_states_collection.find_one({"user_id": user_id})
@@ -1236,13 +1237,17 @@ async def receive_screenshot(client: Client, message: Message):
             f"Amount: ₹{PAYMENT_INFO['amount']}\n\n"
             f"Is user ko approve karne ke liye: `/readyclone {user_id}`"
         )
+        try:
+            await client.send_photo(
+                chat_id=int(OWNER_ID),
+                photo=message.photo.file_id,
+                caption=caption_to_owner
+            )
+            logger.info(f"Screenshot received from user {user_id}. Forwarded to owner ({OWNER_ID}) for approval with user ID.")
+        except Exception as e:
+            logger.error(f"Error forwarding screenshot to owner {OWNER_ID}: {e}", exc_info=True)
+            await message.reply_text("Maaf karna, aapka screenshot owner tak pahunchane mein kuch error ho gaya. Kripya baad mein koshish karein. 🥺")
 
-        await client.send_photo(
-            chat_id=int(OWNER_ID),
-            photo=message.photo.file_id,
-            caption=caption_to_owner
-        )
-        logger.info(f"Screenshot received from user {user_id}. Forwarded to owner for approval with user ID.")
 
         if user_states_collection is not None:
             user_states_collection.update_one(
@@ -1251,6 +1256,9 @@ async def receive_screenshot(client: Client, message: Message):
             )
     else:
         logger.warning(f"Photo received from user {user_id} but not in expected state for screenshot: {user_state.get('status') if user_state else 'None'}. Not processing as screenshot.")
+        # If photo is sent but not in the right state, give a hint
+        await message.reply_text("Arre, tumne galat samay par screenshot bhej diya! 😳 Kripya `/clonebot` se shuru karo aur phir jab main kahoon tab screenshot bhejo. 😉")
+
 
     if message.from_user:
         await store_message(message, is_bot_sent=False)
@@ -1362,7 +1370,7 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
 @app.on_message(
     filters.text & filters.private &
     filters.reply & # Ensure it's a reply
-    (lambda _, message: message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self and
+    (lambda client_obj, message: message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self and
                          message.reply_to_message.reply_markup and isinstance(message.reply_to_message.reply_markup, ForceReply) and
                          "update channel" in message.reply_to_message.text.lower())
 )
@@ -1442,7 +1450,7 @@ async def finalize_clone_process(client: Client, message: Message):
     filters.private &
     (filters.text | filters.sticker | filters.photo | filters.video | filters.document | filters.audio | filters.voice | filters.animation) &
     ~filters.via_bot &
-    (lambda _, __, msg: not msg.text or not msg.text.startswith('/')) & # Ensure it's not a command
+    (lambda client_obj, msg: not msg.text or not msg.text.startswith('/')) & # Ensure it's not a command
     ~filters.reply # IMPORTANT: This excludes replies, letting specific handlers like receive_screenshot handle them for cloning
 )
 async def handle_private_general_messages(client: Client, message: Message):
@@ -1506,7 +1514,7 @@ async def handle_general_messages(client: Client, message: Message):
             return
 
     logger.info(f"Attempting to generate reply for group chat {message.chat.id}")
-    reply_doc = await generate_reply(message)
+    reply_doc = await generate_reply(client, message) # Passed client here
 
     if reply_doc:
         try:
@@ -1690,3 +1698,4 @@ if __name__ == "__main__":
     flask_thread.start()
 
     app.run()
+
