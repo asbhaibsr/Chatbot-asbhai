@@ -219,9 +219,9 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
             "timestamp": datetime.now(),
             "is_bot_sent": is_bot_sent,
             "content_type": content_type,
-            "content": message.text if message.text else (message.sticker.emoji if message.sticker else ""), 
+            "content": message.text if message.text else (message.sticker.emoji if message.sticker else (message.caption if message.caption else "")), 
             "file_id": file_id, 
-            "keywords": extract_keywords(message.text) if message.text else extract_keywords(message.sticker.emoji if message.sticker else ""),
+            "keywords": extract_keywords(message.text) if message.text else extract_keywords(message.sticker.emoji if message.sticker else (message.caption if message.caption else "")),
             "replied_to_message_id": None,
             "replied_to_user_id": None,
             "replied_to_content": None,
@@ -235,27 +235,24 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
             if message.reply_to_message.from_user:
                 message_data["replied_to_user_id"] = message.reply_to_message.from_user.id
 
-            replied_to_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
+            replied_to_content = message.reply_to_message.text if message.reply_to_message.text else \
+                                 (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else \
+                                  (message.reply_to_message.caption if message.reply_to_message.caption else ""))
+            
             replied_to_content_type = "text"
             if message.reply_to_message.sticker:
                 replied_to_content_type = "sticker"
             elif message.reply_to_message.photo:
-                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "photo"
             elif message.reply_to_message.video:
-                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "video"
             elif message.reply_to_message.document:
-                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "document"
             elif message.reply_to_message.audio:
-                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "audio"
             elif message.reply_to_message.voice:
-                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "voice"
             elif message.reply_to_message.animation:
-                replied_to_content = message.reply_to_message.caption 
                 replied_to_content_type = "animation"
 
             message_data["replied_to_content"] = replied_to_content
@@ -287,7 +284,7 @@ async def generate_reply(message: Message):
     await app.invoke(SetTyping(peer=await app.resolve_peer(message.chat.id), action=SendMessageTypingAction()))
     await asyncio.sleep(0.5)
 
-    query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
+    query_content = message.text if message.text else (message.sticker.emoji if message.sticker else (message.caption if message.caption else ""))
     query_keywords = extract_keywords(query_content)
 
     if not query_keywords and not query_content and not message.sticker and not message.photo and not message.video and not message.document and not message.audio and not message.voice and not message.animation:
@@ -317,7 +314,9 @@ async def generate_reply(message: Message):
 
     # --- Strategy 1: Contextual Reply (User's reply to a message) ---
     if message.reply_to_message:
-        replied_to_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
+        replied_to_content = message.reply_to_message.text if message.reply_to_message.text else \
+                             (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else \
+                              (message.reply_to_message.caption if message.reply_to_message.caption else ""))
         replied_to_content_type = "text"
         if message.reply_to_message.sticker:
             replied_to_content_type = "sticker"
@@ -337,22 +336,49 @@ async def generate_reply(message: Message):
         if replied_to_content:
             logger.info(f"Strategy 1: Searching for contextual replies to replied_to_content: '{replied_to_content}' (Type: {replied_to_content_type})")
             
+            # Find messages that are replies to the *same content* as what the user replied to
+            # We are looking for messages that were *not* sent by the bot itself, as those are potential "human" replies
             contextual_query = {
                 "replied_to_content": {"$regex": f"^{re.escape(replied_to_content)}$", "$options": "i"},
                 "replied_to_content_type": replied_to_content_type,
-                "is_bot_sent": False, 
+                "is_bot_sent": False, # Looking for user responses to a given query
+                "content": {"$ne": replied_to_content} # Don't reply with the exact same thing
             }
 
+            potential_contextual_replies = []
             if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+                # Group-specific contextual replies
                 group_contextual_matches = list(messages_collection.find({"chat_id": message.chat.id, **contextual_query}))
+                potential_contextual_replies.extend(group_contextual_matches)
                 if group_contextual_matches:
                     logger.info(f"Found {len(group_contextual_matches)} group-specific contextual replies.")
-                    return random.choice(group_contextual_matches)
 
+            # Global contextual replies
             global_contextual_matches = list(messages_collection.find(contextual_query))
+            potential_contextual_replies.extend(global_contextual_matches)
             if global_contextual_matches:
                 logger.info(f"Found {len(global_contextual_matches)} global contextual replies.")
-                return random.choice(global_contextual_matches)
+            
+            if potential_contextual_replies:
+                # Remove duplicates based on content + content_type
+                unique_contextual_replies = {}
+                for doc in potential_contextual_replies:
+                    key = (doc.get("content", ""), doc.get("content_type", ""), doc.get("file_id"))
+                    if key not in unique_contextual_replies:
+                        unique_contextual_replies[key] = doc
+                
+                # Filter out replies that are too similar to the original user query or bot's own messages
+                filtered_contextual_replies = []
+                for doc in unique_contextual_replies.values():
+                    if doc.get("content", "").lower() == query_content.lower() and doc.get("content_type") == message_actual_content_type:
+                        continue # Don't reply with what the user just said
+                    if doc.get("is_bot_sent", False): # Ensure we don't pick bot's own replies for "training"
+                        continue 
+                    filtered_contextual_replies.append(doc)
+
+                if filtered_contextual_replies:
+                    logger.info(f"Returning random contextual reply from {len(filtered_contextual_replies)} candidates.")
+                    return random.choice(filtered_contextual_replies)
         
         logger.info(f"No direct contextual reply found for replied_to_content: '{replied_to_content}'.")
 
@@ -362,9 +388,9 @@ async def generate_reply(message: Message):
     content_match_conditions = []
 
     if query_content:
+        # Exact content match first
         content_match_conditions.append({"content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
-
-    if query_keywords:
+        # Partial keyword match
         for kw in query_keywords:
             content_match_conditions.append({"content": {"$regex": f".*{re.escape(kw)}.*", "$options": "i"}})
 
@@ -374,14 +400,16 @@ async def generate_reply(message: Message):
         content_match_conditions.append({"file_id": message.photo.file_id, "content_type": "photo"})
     elif message.video and message.video.file_id:
         content_match_conditions.append({"file_id": message.video.file_id, "content_type": "video"})
+    # Add other media types if you want to search by their file_id/content
     
     final_query_conditions = {
-        "is_bot_sent": False, 
+        "is_bot_sent": False, # Looking for user-sent messages as potential replies
     }
     
     if content_match_conditions:
         final_query_conditions["$or"] = content_match_conditions
 
+    # Target reply can be text or sticker, or the same media type as the query
     target_reply_content_types = ["text", "sticker"] 
     if message_actual_content_type in ["photo", "video", "document", "audio", "voice", "animation"]:
         target_reply_content_types.append(message_actual_content_type)
@@ -395,22 +423,32 @@ async def generate_reply(message: Message):
         logger.info(f"Found {len(potential_replies)} group-specific keyword/content matches.")
             
     global_query = {**final_query_conditions}
+    global_matches_count = messages_collection.count_documents(global_query)
     potential_replies.extend(list(messages_collection.find(global_query)))
-    logger.info(f"Found {len(potential_replies) - (len(group_specific_query) if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] else 0)} global keyword/content matches.")
+    logger.info(f"Found {global_matches_count} global keyword/content matches.")
 
     
     if potential_replies:
-        unique_replies = {doc['_id']: doc for doc in potential_replies}.values()
+        # Use a set to store unique documents to avoid sending duplicate replies
+        unique_replies_set = {}
+        for doc in potential_replies:
+            # Create a unique key for each document (e.g., based on _id or content+type)
+            # Using _id is safer if content/type can be same but documents are distinct
+            unique_replies_set[str(doc['_id'])] = doc
         
         filtered_replies = []
-        for doc in unique_replies:
+        for doc in unique_replies_set.values():
+            # Filter out replies that are too similar to the original user query
             if doc.get("content", "").lower() == query_content.lower() and doc.get("content_type") == message_actual_content_type:
                 continue
             
+            # Filter out replies that are the exact same file (e.g., user sends a sticker, bot finds same sticker)
             if doc.get("file_id") and doc.get("file_id") == (message.sticker.file_id if message.sticker else (message.photo.file_id if message.photo else (message.video.file_id if message.video else None))):
                 continue
 
-            if doc.get("is_bot_sent", False):
+            # Ensure we are not replying with something the bot itself sent previously in a general context
+            # (Contextual replies are different, they are direct responses to bot's messages)
+            if doc.get("is_bot_sent", False): 
                 continue 
             
             filtered_replies.append(doc)
@@ -480,14 +518,14 @@ async def handle_clone_bot_start_callback(client: Client, callback_query: Callba
     await callback_query.answer("Bot cloning process shuru ho raha hai! 😉", show_alert=True)
     # Simulate /clonebot command for the user
     fake_message = Message(
-        id=0, # Dummy ID
+        id=0, # Dummy ID, not used for actual message processing, just for the handler
         from_user=callback_query.from_user,
         chat=callback_query.message.chat,
         text="/clonebot",
         date=datetime.now(),
         command=["clonebot"]
     )
-    # FIX 1: Bind the fake_message to the client
+    # FIX: Bind the fake_message to the client for proper method calls within initiate_clone_payment
     fake_message._client = client 
     await initiate_clone_payment(client, fake_message)
 
@@ -1021,7 +1059,7 @@ async def receive_screenshot(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     if user_states_collection is None:
-        logger.error("messages_collection is None. Cannot store message.") # Changed to error, as it's critical here
+        logger.error("user_states_collection is None. Cannot store message for clone flow. Please check MongoDB connection for CLONE_STATE_MONGO_DB_URI.") 
         return # Cannot process without database, let general handler (if any) or simply ignore
 
     user_state = user_states_collection.find_one({"user_id": user_id})
@@ -1079,55 +1117,53 @@ async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
         await callback_query.answer("Arre! Yeh request ab valid nahi hai ya pehle hi process ho chuki hai, Malik! 🙄", show_alert=True)
         return
 
-    # FIX: Correctly set the new_caption based on action
-    new_caption = callback_query.message.caption.split("\n\n")[0] # Get original caption
+    # Construct the new caption to indicate approval/rejection status
+    original_caption_lines = callback_query.message.caption.split('\n')
+    # Take the first few lines that contain user and amount info
+    base_caption = '\n'.join(original_caption_lines[:3]) 
+    
     if action == "approve_clone":
-        new_caption += "\n\n**Admin ne Approve Kar Diya! ✅**"
+        new_caption = f"{base_caption}\n\n**Admin ne Approve Kar Diya! ✅\nUser ko bot banane ki anumati mil gayi hai!**"
+        update_status = "approved_for_clone"
+        notify_message = (
+            "Badhai ho, mere dost! 🎉 Tumhari Bot Cloning request approve ho gayi hai! ✅\n"
+            "Ab tum apni pyaari si bot banane ke liye token bhej sakte ho:\n"
+            "**Kaise?** `/clonebot YOUR_BOT_TOKEN_HERE`\n"
+            "(Pura token ek hi line mein hona chahiye, jaldi karo na! 😉)"
+        )
     else: # reject_clone
-        new_caption += "\n\n**Admin ne Reject Kar Diya! ❌**"
+        new_caption = f"{base_caption}\n\n**Admin ne Reject Kar Diya! ❌**"
+        update_status = "rejected" # Or simply delete the state
+        notify_message = (
+            "Maaf karna, darling! 😔 Tumhari Bot Cloning request reject ho gayi hai.\n"
+            "Kisi bhi sawal ke liye mere Malik se contact karo na! 🥺"
+        )
 
     try:
         await callback_query.message.edit_caption(
             caption=new_caption,
-            reply_markup=None
+            reply_markup=None # Remove buttons after action
         )
     except Exception as e:
         logger.error(f"Error editing owner's message for approval: {e}", exc_info=True)
         await client.send_message(int(OWNER_ID), f"Maaf karna Malik, user {target_user_id} ke message ko edit nahi kar payi. {action} status: {new_caption}")
 
-    if action == "approve_clone":
-        if user_states_collection is not None: 
+    if user_states_collection is not None: 
+        if action == "approve_clone":
             user_states_collection.update_one(
                 {"user_id": target_user_id},
-                {"$set": {"status": "approved_for_clone", "approved_on": datetime.now()}}
-            )
-        try:
-            # FIX: Send approval message to the user
-            await client.send_message(
-                int(target_user_id),
-                "Badhai ho, mere dost! 🎉 Tumhari Bot Cloning request approve ho gayi hai! ✅\n"
-                "Ab tum apni pyaari si bot banane ke liye token bhej sakte ho:\n"
-                "**Kaise?** `/clonebot YOUR_BOT_TOKEN_HERE`\n"
-                "(Pura token ek hi line mein hona chahiye, jaldi karo na! 😉)"
+                {"$set": {"status": update_status, "approved_on": datetime.now()}}
             )
             logger.info(f"User {target_user_id} approved for cloning.")
-        except Exception as e:
-            logger.error(f"Error notifying user {target_user_id} about approval: {e}")
-            await client.send_message(int(OWNER_ID), f"User {target_user_id} ko approval notification bhejne mein error aaya. {e}")
-
-    elif action == "reject_clone":
-        if user_states_collection is not None: 
-            user_states_collection.delete_one({"user_id": target_user_id}) 
-        try:
-            await client.send_message(
-                int(target_user_id),
-                "Maaf karna, darling! 😔 Tumhari Bot Cloning request reject ho gayi hai.\n"
-                "Kisi bhi sawal ke liye mere Malik se contact karo na! 🥺"
-            )
-            logger.info(f"User {target_user_id} rejected for cloning.")
-        except Exception as e:
-            logger.error(f"Error notifying user {target_user_id} about rejection: {e}")
-            await client.send_message(int(OWNER_ID), f"User {target_user_id} ko rejection notification bhejne mein error aaya. {e}")
+        elif action == "reject_clone":
+            user_states_collection.delete_one({"user_id": target_user_id}) # Remove state on rejection
+            logger.info(f"User {target_user_id} rejected for cloning, state cleared.")
+    
+    try:
+        await client.send_message(int(target_user_id), notify_message)
+    except Exception as e:
+        logger.error(f"Error notifying user {target_user_id} about {action}ion: {e}")
+        await client.send_message(int(OWNER_ID), f"User {target_user_id} ko {action} notification bhejne mein error aaya. {e}")
     
     await callback_query.answer(f"Request {action.split('_')[0]}d for user {target_user_id}.", show_alert=True)
 
@@ -1216,7 +1252,7 @@ async def finalize_clone_process(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
     if user_states_collection is None:
-        logger.error("messages_collection is None. Cannot store message.") # Changed to error, as it's critical here
+        logger.error("user_states_collection is None. Cannot process channel link for clone flow. Please check MongoDB connection for CLONE_STATE_MONGO_DB_URI.") 
         return 
 
     user_state = user_states_collection.find_one({"user_id": user_id, "status": "awaiting_channel"})
@@ -1545,7 +1581,7 @@ def health_check():
         status="Bot Health OK!",
         pyrogram_connected=pyrogram_connected,
         mongo_db_main_status=mongo_status_main,
-        mongo_db_clone_state_status=mongo_status_clone_state,
+        mongo_db_clone_state_status=mongo_status_commands_settings, # Fixed: was showing commands_settings_status twice, now shows correct for clone state
         mongo_db_commands_settings_status=mongo_status_commands_settings,
         timestamp=datetime.now().isoformat()
     )
