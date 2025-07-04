@@ -758,7 +758,7 @@ async def reset_data_command(client: Client, message: Message):
 
         if oldest_message_ids:
             delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
-            await message.reply_text(f"Successfully {delete_result.deleted_count} messages database se delete ho gaye, Malik! Ab main aur smart banungi!💖")
+            await message.reply_text(f"Successfully {delete_result.deleted_count} messages database se delete ho गए, Malik! Ab main aur smart banungi!💖")
             logger.info(f"Owner {message.from_user.id} deleted {delete_result.deleted_count} messages ({percentage}%).")
         else:
             await message.reply_text("Malik, koi message delete nahi ho paya. Shayad database khaali hai ya koi problem hai. 🥺")
@@ -1058,6 +1058,22 @@ async def new_member_welcome(client: Client, message: Message):
 
 # --- PREMIUM CLONING LOGIC ---
 
+# New callback for "Buy Git Repo" button
+@app.on_callback_query(filters.regex("buy_git_repo"))
+async def handle_buy_git_repo_callback(client: Client, callback_query: CallbackQuery):
+    await callback_query.answer("Git Repo kharidne ki jaankari 😉", show_alert=False)
+    repo_info_message = (
+        "**Repository kharidne ke liye @asbhaibsr ko message kijiye. 📩**\n"
+        "Yehi bot jo aap abhi use kar rahe hain, iska poora code base aapko ₹2000 mein mil jayega.\n\n"
+        "**Kripya dhyan dein:** Sirf tabhi message karein jab aap sach mein ise kharidna chahte hon. Serious buyers hi sampark karein! 😊"
+    )
+    await callback_query.message.reply_text(repo_info_message)
+    if callback_query.from_user:
+        # We don't store button clicks as "messages" in the learning DB directly
+        # but if specific logging for this action is needed, it would go here.
+        pass
+
+
 # Step 1: Initial /clonebot command (requires payment)
 @app.on_message(filters.command("clonebot") & filters.private)
 async def initiate_clone_payment(client: Client, message: Message):
@@ -1094,7 +1110,7 @@ async def initiate_clone_payment(client: Client, message: Message):
 
     # If no pending or approved state, start fresh
     payment_message = (
-        f"Agar tum bhi mujhse milta julta ek cute sa bot banana chahte ho, toh bas ₹{PAYMENT_INFO['amount']} ka payment karna hoga. 💰"
+        f"Clone banane ke liye aapko ₹{PAYMENT_INFO['amount']} dene zaroori hai tabhi aap clone bana sakte hain. 💰"
         f"\n\n**Payment Details (Meri Secret Jaan!):**\n"
         f"UPI ID: `{PAYMENT_INFO['upi_id']}`\n\n"
         f"{PAYMENT_INFO['instructions']}\n"
@@ -1103,7 +1119,8 @@ async def initiate_clone_payment(client: Client, message: Message):
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Screenshot Bhejo Na! 🥰", callback_data="send_screenshot_prompt")],
-        [InlineKeyboardButton("🚫 Rehne Do, Nahi Banwana 😔", callback_data="cancel_clone_request")]
+        [InlineKeyboardButton("🚫 Rehne Do, Nahi Banwana 😔", callback_data="cancel_clone_request")],
+        [InlineKeyboardButton("Git Repo Khareedein 💸", callback_data="buy_git_repo")] # Added new button here
     ])
 
     if PAYMENT_INFO['qr_code_url']:
@@ -1176,8 +1193,7 @@ async def receive_screenshot(client: Client, message: Message):
     if user_state and user_state.get("status") == "expecting_screenshot":
         await message.reply_text(
             "Aapka pyaara screenshot mujhe mil gaya hai! ✅\n"
-            "Abhi woh mere Malik ke paas approval ke liye gaya hai. Malik jaise hi approve karenge, "
-            "tum phir se `/clonebot` command de kar apna clone bana sakoge! Thoda wait karo na! 😉"
+            "Abhi rukiye ye screenshot hamre owner ko chak agay wo ise chek karege or aapko bot clone karne ki anumati do sayji fir aap is command ko dyanrq deker bot bana paynge!"
         )
 
         caption_to_owner = (
@@ -1185,6 +1201,7 @@ async def receive_screenshot(client: Client, message: Message):
             f"User: {message.from_user.mention} (`{user_id}`)\n"
             f"Amount: ₹{PAYMENT_INFO['amount']}\n\n"
             f"Is user ko approve karne ke liye: `/readyclone {user_id}`"
+            # Removed direct approval/reject buttons from here as per new flow
         )
 
         # Screenshot owner ko forward kiya jayega, buttons ab nahi honge
@@ -1206,6 +1223,19 @@ async def receive_screenshot(client: Client, message: Message):
     if message.from_user:
         await store_message(message, is_bot_sent=False)
 
+# NEW: Handle cancel clone request
+@app.on_callback_query(filters.regex("cancel_clone_request"))
+async def cancel_clone_request(client: Client, callback_query: CallbackQuery):
+    user_id = str(callback_query.from_user.id)
+    if user_states_collection is None:
+        await callback_query.answer("Maaf karna, abhi service available nahi hai. Database mein kuch gadbad hai. 🥺", show_alert=True)
+        return
+
+    user_states_collection.delete_one({"user_id": user_id})
+    await callback_query.message.edit_text("Theek hai, agar aap abhi clone nahi banana chahte toh koi baat nahi. Jab man kare, `/clonebot` se dobara shuru kar sakte hain! 😉")
+    await callback_query.answer("Clone request cancel kar di gayi.", show_alert=True)
+    logger.info(f"User {user_id} cancelled clone request.")
+
 
 # Step 5: Process actual clonebot command after approval
 @app.on_message(filters.command("clonebot") & filters.private & filters.regex(r'/clonebot\s+([A-Za-z0-9:_-]+)'))
@@ -1221,7 +1251,12 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
     user_state = user_states_collection.find_one({"user_id": user_id, "status": "approved_for_clone"})
 
     if not user_state:
-        await message.reply_text("Arre, tum bot clone karne ke liye approved nahi ho! 🥺 Kripya pehle payment process poora karo na! 😉")
+        # Updated message for clarity on payment
+        await message.reply_text(
+            "Arre, tum bot clone karne ke liye approved nahi ho! 🥺\n"
+            "Clone banane ke liye aapko ₹200 dene zaroori hai. Kripya pehle payment process poora karo, "
+            "`/clonebot` command dekar. Main intzaar kar rahi hoon! 😉"
+        )
         if message.from_user:
             await store_message(message, is_bot_sent=False)
         return
@@ -1272,6 +1307,7 @@ async def process_clone_bot_after_approval(client: Client, message: Message):
     except exceptions.unauthorized.BotTokenInvalid:
         await message.reply_text("Arre! Yeh bot token invalid hai. Kripya sahi token dein na, please! 🥺")
         logger.warning(f"Bot token invalid during cloning for user {user_id}.")
+        # Keep user in approved_for_clone state so they can try again with correct token
         if user_states_collection is not None:
             user_states_collection.update_one({"user_id": user_id}, {"$set": {"status": "approved_for_clone"}})
     except (exceptions.bad_request.ApiIdInvalid, exceptions.bad_request.ApiIdPublishedFlood):
