@@ -146,6 +146,7 @@ last_bot_reply_time = {}
 
 def extract_keywords(text):
     if not text: return []
+    # Using more robust word extraction, lowercasing, and unique words
     words = re.findall(r'\b\w+\b', text.lower())
     return list(set(words))
 
@@ -160,6 +161,7 @@ async def prune_old_messages():
             messages_to_delete_count = int(total_messages * PRUNE_PERCENTAGE)
             logger.info(f"Threshold reached. Deleting {messages_to_delete_count} oldest messages.")
             oldest_message_ids = []
+            # Find _id of messages to delete, sorted by timestamp
             for msg in messages_collection.find({}).sort("timestamp", 1).limit(messages_to_delete_count):
                 oldest_message_ids.append(msg['_id'])
             if oldest_message_ids:
@@ -179,28 +181,35 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
         return
 
     try:
+        # Ignore messages sent by other bots
         if message.from_user and message.from_user.is_bot and not is_bot_sent:
+            logger.debug(f"Ignoring message from another bot: {message.from_user.id}")
             return
 
-        # Determine content_type based on Pyrogram message object
         content_type = "text"
+        file_id = None
         if message.sticker:
             content_type = "sticker"
+            file_id = message.sticker.file_id
         elif message.photo:
             content_type = "photo"
+            file_id = message.photo.file_id
         elif message.video:
             content_type = "video"
+            file_id = message.video.file_id
         elif message.document:
             content_type = "document"
+            file_id = message.document.file_id
         elif message.audio:
             content_type = "audio"
+            file_id = message.audio.file_id
         elif message.voice:
             content_type = "voice"
+            file_id = message.voice.file_id
         elif message.animation:
             content_type = "animation"
-        else:
-            content_type = "other" # Fallback for unknown types
-
+            file_id = message.animation.file_id
+        # Add more content types if needed for learning and replying with them
 
         message_data = {
             "message_id": message.id,
@@ -212,28 +221,65 @@ async def store_message(message: Message, is_bot_sent: bool = False, sent_messag
             "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
             "timestamp": datetime.now(),
             "is_bot_sent": is_bot_sent,
-            "content_type": content_type, # Use the determined content_type
-            "content": message.text if message.text else (message.sticker.emoji if message.sticker else ""),
-            "sticker_id": message.sticker.file_id if message.sticker else None,
+            "content_type": content_type,
+            "content": message.text if message.text else (message.sticker.emoji if message.sticker else ""), # Store emoji for stickers
+            "file_id": file_id, # Store file_id for media types
             "keywords": extract_keywords(message.text) if message.text else extract_keywords(message.sticker.emoji if message.sticker else ""),
-            "replied_to_message_id": message.reply_to_message.id if message.reply_to_message else None,
-            "replied_to_user_id": message.reply_to_message.from_user.id if message.reply_to_message and message.reply_to_message.from_user else None,
-            "replied_to_content": message.reply_to_message.text if message.reply_to_message and message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message and message.reply_to_message.sticker else None),
-            "is_bot_observed_pair": False,
+            "replied_to_message_id": None,
+            "replied_to_user_id": None,
+            "replied_to_content": None,
+            "replied_to_content_type": None,
+            "is_bot_observed_pair": False, # Is this message a direct reply to bot's message?
         }
 
-        if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
-            message_data["is_bot_observed_pair"] = True
-            logger.debug(f"Observed user reply to bot's message: {message.reply_to_message.id}")
-            if messages_collection is not None:
-                messages_collection.update_one(
-                    {"chat_id": message.chat.id, "message_id": message.reply_to_message.id, "is_bot_sent": True},
-                    {"$set": {"is_bot_observed_pair": True}}
-                )
+        # Store reply-to information
+        if message.reply_to_message:
+            message_data["replied_to_message_id"] = message.reply_to_message.id
+            if message.reply_to_message.from_user:
+                message_data["replied_to_user_id"] = message.reply_to_message.from_user.id
+
+            replied_to_content = message.reply_to_message.text
+            replied_to_content_type = "text"
+            if message.reply_to_message.sticker:
+                replied_to_content = message.reply_to_message.sticker.emoji
+                replied_to_content_type = "sticker"
+            elif message.reply_to_message.photo:
+                replied_to_content = message.reply_to_message.caption # If photo has caption
+                replied_to_content_type = "photo"
+            elif message.reply_to_message.video:
+                replied_to_content = message.reply_to_message.caption # If video has caption
+                replied_to_content_type = "video"
+            elif message.reply_to_message.document:
+                replied_to_content = message.reply_to_message.caption # If document has caption
+                replied_to_content_type = "document"
+            elif message.reply_to_message.audio:
+                replied_to_content = message.reply_to_message.caption # If audio has caption
+                replied_to_content_type = "audio"
+            elif message.reply_to_message.voice:
+                replied_to_content = message.reply_to_message.caption # If voice has caption
+                replied_to_content_type = "voice"
+            elif message.reply_to_message.animation:
+                replied_to_content = message.reply_to_message.caption # If animation has caption
+                replied_to_content_type = "animation"
+            # Add more replied_to_content_type logic for other media types if needed
+
+            message_data["replied_to_content"] = replied_to_content
+            message_data["replied_to_content_type"] = replied_to_content_type
+
+            # Check if this message is a user's reply to the bot's own message
+            if message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
+                message_data["is_bot_observed_pair"] = True
+                logger.debug(f"Observed user reply to bot's message ({message.reply_to_message.id}). Marking this as observed pair.")
+                # Also, update the bot's sent message in DB to mark it as part of an observed pair
+                if messages_collection is not None:
+                    messages_collection.update_one(
+                        {"chat_id": message.chat.id, "message_id": message.reply_to_message.id, "is_bot_sent": True},
+                        {"$set": {"has_received_reply": True, "replied_by_user_id": message.from_user.id}}
+                    )
 
         if messages_collection is not None:
             messages_collection.insert_one(message_data)
-            logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. Bot sent: {is_bot_sent}")
+            logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. Bot sent: {is_bot_sent}. Content Type: {content_type}")
             await prune_old_messages()
         else:
             logger.error("messages_collection is STILL None after initial check. This should not happen here.")
@@ -250,16 +296,16 @@ async def generate_reply(message: Message):
     query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
     query_keywords = extract_keywords(query_content)
 
-    if not query_keywords and not query_content:
-        logger.debug("No content or keywords extracted for reply generation.")
+    if not query_keywords and not query_content and not message.sticker and not message.photo and not message.video and not message.document and not message.audio and not message.voice and not message.animation:
+        logger.debug("No meaningful content extracted for reply generation.")
         return None
 
     if messages_collection is None:
         logger.warning("messages_collection is None. Cannot generate reply.")
         return None
 
-    # --- Determine the actual content type of the incoming message ---
-    message_actual_content_type = "text" # Default
+    # Determine the content type of the incoming message for better matching
+    message_actual_content_type = "text"
     if message.sticker:
         message_actual_content_type = "sticker"
     elif message.photo:
@@ -274,67 +320,139 @@ async def generate_reply(message: Message):
         message_actual_content_type = "voice"
     elif message.animation:
         message_actual_content_type = "animation"
-    # Add more conditions for other content types as needed
-    # Ensure these string values match what you store in 'content_type' in your MongoDB documents
 
 
-    # --- Strategy 1: Direct observed reply (User-to-User, or Bot-to-User) ---
+    # --- Strategy 1: Contextual Reply (User's reply to a message) ---
+    # This is for "Hello" -> "Han ji bolo" type learning when the bot is the "Hello" part.
+    # OR, if user replies to another user's "Hello" and the bot observes this.
     if message.reply_to_message:
         replied_to_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
+        replied_to_content_type = "text"
+        if message.reply_to_message.sticker:
+            replied_to_content_type = "sticker"
+        elif message.reply_to_message.photo:
+            replied_to_content_type = "photo"
+        elif message.reply_to_message.video:
+            replied_to_content_type = "video"
+        elif message.reply_to_message.document:
+            replied_to_content_type = "document"
+        elif message.reply_to_message.audio:
+            replied_to_content_type = "audio"
+        elif message.reply_to_message.voice:
+            replied_to_content_type = "voice"
+        elif message.reply_to_message.animation:
+            replied_to_content_type = "animation"
+
         if replied_to_content:
-            logger.info(f"Searching for observed replies to: '{replied_to_content}'")
-            observed_replies_cursor = messages_collection.find({
+            logger.info(f"Strategy 1: Searching for contextual replies to replied_to_content: '{replied_to_content}' (Type: {replied_to_content_type})")
+            
+            # Find messages that *are replies* to content similar to `replied_to_content`
+            # and prefer those that were *not* sent by the bot (human-like interactions).
+            contextual_query = {
                 "replied_to_content": {"$regex": f"^{re.escape(replied_to_content)}$", "$options": "i"},
-                "is_bot_observed_pair": True,
-                "chat_id": message.chat.id
-            })
-            potential_replies = list(observed_replies_cursor)
-            if potential_replies:
-                logger.info(f"Found {len(potential_replies)} contextual replies based on direct reply.")
-                return random.choice(potential_replies)
-            else:
-                observed_replies_cursor = messages_collection.find({
-                    "replied_to_content": {"$regex": f"^{re.escape(replied_to_content)}$", "$options": "i"},
-                    "is_bot_observed_pair": True
-                })
-                potential_replies = list(observed_replies_cursor)
-                if potential_replies:
-                    logger.info(f"Found {len(potential_replies)} global contextual replies based on direct reply.")
-                    return random.choice(potential_replies)
+                "replied_to_content_type": replied_to_content_type,
+                "is_bot_sent": False, # Prioritize human-observed replies
+            }
 
-    # --- Strategy 2: Keyword-based general reply ---
-    logger.info(f"No direct contextual reply. Falling back to keyword search for: '{query_content}'")
-    keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
+            # If in a group, prioritize replies observed within that group first
+            if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+                group_contextual_matches = list(messages_collection.find({"chat_id": message.chat.id, **contextual_query}))
+                if group_contextual_matches:
+                    logger.info(f"Found {len(group_contextual_matches)} group-specific contextual replies.")
+                    return random.choice(group_contextual_matches)
 
-    general_replies_group_cursor = messages_collection.find({
-        "chat_id": message.chat.id,
-        "content_type": {"$in": ["text", "sticker"]},
-        "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
-    })
-    potential_replies = list(general_replies_group_cursor)
+            # Fallback to global contextual matches
+            global_contextual_matches = list(messages_collection.find(contextual_query))
+            if global_contextual_matches:
+                logger.info(f"Found {len(global_contextual_matches)} global contextual replies.")
+                return random.choice(global_contextual_matches)
+        
+        logger.info(f"No direct contextual reply found for replied_to_content: '{replied_to_content}'.")
 
-    if not potential_replies:
-        general_replies_global_cursor = messages_collection.find({
-            "content_type": {"$in": ["text", "sticker"]},
-            "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
-        })
-        potential_replies = list(general_replies_global_cursor)
+    # --- Strategy 2: Keyword-based General Reply (including partial match and content type) ---
+    logger.info(f"Strategy 2: Falling back to keyword/content search for: '{query_content}' (Type: {message_actual_content_type}) with keywords {query_keywords}")
 
+    # Build the query for keyword matching and content type matching
+    content_match_conditions = []
+
+    # Add exact content match if it's text or sticker emoji
+    if query_content:
+        content_match_conditions.append({"content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
+
+    # Add keyword-based fuzzy search for text content
+    if query_keywords:
+        for kw in query_keywords:
+            content_match_conditions.append({"content": {"$regex": f".*{re.escape(kw)}.*", "$options": "i"}})
+
+    # Add file_id match for media if the incoming message is media
+    if message.sticker and message.sticker.file_id:
+        content_match_conditions.append({"file_id": message.sticker.file_id, "content_type": "sticker"})
+    elif message.photo and message.photo.file_id:
+        content_match_conditions.append({"file_id": message.photo.file_id, "content_type": "photo"})
+    elif message.video and message.video.file_id:
+        content_match_conditions.append({"file_id": message.video.file_id, "content_type": "video"})
+    # Add conditions for other media types if you want to match them specifically
+
+    final_query_conditions = {
+        "is_bot_sent": False, # Prefer replies learned from human messages
+    }
+    
+    if content_match_conditions:
+        final_query_conditions["$or"] = content_match_conditions
+
+    # Prefer content of same type as query, or text/sticker if query is media
+    # This helps in responding to a sticker with a sticker, or text with text
+    target_reply_content_types = ["text", "sticker"] # Default for now
+    if message_actual_content_type in ["photo", "video", "document", "audio", "voice", "animation"]:
+        target_reply_content_types.append(message_actual_content_type)
+    
+    final_query_conditions["content_type"] = {"$in": target_reply_content_types}
+
+    potential_replies = []
+    # Prioritize group-specific content for group chats
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        group_specific_query = {"chat_id": message.chat.id, **final_query_conditions}
+        potential_replies.extend(list(messages_collection.find(group_specific_query)))
+        logger.info(f"Found {len(potential_replies)} group-specific keyword/content matches.")
+            
+    # Always perform a global search as a fallback or for private chats
+    global_query = {**final_query_conditions}
+    potential_replies.extend(list(messages_collection.find(global_query)))
+    logger.info(f"Found {len(potential_replies) - (len(group_specific_query) if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] else 0)} global keyword/content matches.")
+
+
+    # Filter out replies that are identical to the query message (to avoid loops or boring replies)
+    # Also ensure the chosen reply is not the *same instance* of the message just received
+    # and not a message sent by the bot itself in response previously (unless it's part of an observed pattern).
+    
     if potential_replies:
-        logger.info(f"Found {len(potential_replies)} general keyword-based replies.")
-        if len(potential_replies) > 1:
-            # ***************************************************************
-            # HERE IS THE FIX: Using message_actual_content_type
-            # ***************************************************************
-            filtered_replies = [
-                doc for doc in potential_replies
-                if not (doc.get("content", "").lower() == query_content.lower() and doc.get("content_type") == message_actual_content_type)
-            ]
-            if filtered_replies:
-                return random.choice(filtered_replies)
-        return random.choice(potential_replies)
+        # Deduplicate, as a message might be found via both group and global search
+        unique_replies = {doc['_id']: doc for doc in potential_replies}.values()
+        
+        filtered_replies = []
+        for doc in unique_replies:
+            # Avoid replying with the exact same text/emoji content to the user's query
+            if doc.get("content", "").lower() == query_content.lower() and doc.get("content_type") == message_actual_content_type:
+                continue
+            
+            # Avoid replying with the exact same media file_id
+            if doc.get("file_id") and doc.get("file_id") == (message.sticker.file_id if message.sticker else (message.photo.file_id if message.photo else (message.video.file_id if message.video else None))):
+                continue
 
-    logger.info(f"No general keyword reply found for: '{query_content}'.")
+            # Ensure the reply isn't the bot's own previous response that wasn't part of a learning pair
+            # Or, if it was a bot's reply, ensure it was to a different query
+            if doc.get("is_bot_sent", False):
+                continue # For now, strictly prefer human-generated content to reply from
+            
+            filtered_replies.append(doc)
+        
+        if filtered_replies:
+            logger.info(f"After filtering, {len(filtered_replies)} suitable replies remain.")
+            return random.choice(filtered_replies)
+        else:
+            logger.info("All potential replies were filtered out.")
+
+    logger.info(f"No suitable keyword/content reply found for: '{query_content}'.")
 
     # --- Strategy 3: Fallback generic replies ---
     fallback_messages = [
@@ -342,14 +460,24 @@ async def generate_reply(message: Message):
         "Interesting! Aur kuch?",
         "Main sun rahi hoon... 👋",
         "Aapki baat sunkar acha laga!",
-        "Kya haal-chal?"
+        "Kya haal-chal?",
+        "Aapki baat sunkar main bhi kuch kehna chahti hoon! 😉",
+        "Mujhe samajh nahi aaya, phir se batao na! 💖",
+        "Achha, theek hai! 🤔",
+        "Aur sunao, kya chal raha hai? 😊",
+        "Kya mast baat boli! 🥰",
+        "Main bhi yahi soch rahi thi! 💭",
+        "Kya baat hai! Aur kya naya hai? ✨",
+        "Tumhari baatein toh kamaal hain! 😄",
+        "Mere paas toh shabd hi nahi hain! 😶",
+        "Main sikhti rahungi, tum bas bolte raho! 📚"
     ]
     # Add a random chance to not send a fallback message in private chats
     if message.chat.type == ChatType.PRIVATE and random.random() < 0.2: # 20% chance to not send a fallback in private
         logger.info("Randomly decided not to send a fallback reply in private chat.")
         return None
         
-    return {"type": "text", "content": random.choice(fallback_messages)}
+    return {"content_type": "text", "content": random.choice(fallback_messages)}
 
 
 # --- Pyrogram Event Handlers ---
@@ -671,7 +799,7 @@ async def perform_chat_action(client: Client, message: Message, action_type: str
             await message.reply_text(f"User {target_user_id} ko ban kar diya gaya, Malik! Ab koi shor nahi! 🤫")
         elif action_type == "unban":
             await client.unban_chat_member(message.chat.id, target_user_id)
-            await message.reply_text(f"User {target_user_id} ko unban kar diya gaya, Malik! Shayad usne sabak seekh liya होगा! 😉")
+            await message.reply_text(f"User {target_user_id} ko unban kar diya gaya, Malik! Shayad usne sabak seekh liya hoga! 😉")
         elif action_type == "kick":
             await client.kick_chat_member(message.chat.id, target_user_id)
             await message.reply_text(f"User {target_user_id} ko kick kar diya gaya, Malik! Tata bye bye! 👋")
@@ -1150,14 +1278,17 @@ async def finalize_clone_process(client: Client, message: Message):
 # --- Private Chat General Message Handler (Fallback for non-commands/non-cloning) ---
 # Removed the old handle_private_non_command_messages and integrated its checks here.
 # This handler will act as the final fallback for private text messages.
-@app.on_message(filters.private & filters.text & ~filters.via_bot & (lambda _, __, msg: not msg.text.startswith('/')))
+@app.on_message(filters.private & (filters.text | filters.sticker | filters.photo | filters.video | filters.document | filters.audio | filters.voice | filters.animation) & ~filters.via_bot & (lambda _, __, msg: not msg.text.startswith('/')))
 async def handle_private_general_messages(client: Client, message: Message):
     user_id = str(message.from_user.id)
     
+    # Store message ONLY IF it's not a bot's message
+    if not message.from_user.is_self: # Make sure this is a user's message
+        await store_message(message, is_bot_sent=False)
+    
     if user_states_collection is None:
         await message.reply_text("Maaf karna, bot abhi poori tarah se ready nahi hai. Kuch database issues hain (Clone/State DB connect nahi ho paya). 🥺")
-        await store_message(message) 
-        return
+        return # Do not store bot's own error messages as user input
 
     user_state = user_states_collection.find_one({"user_id": user_id})
 
@@ -1168,25 +1299,18 @@ async def handle_private_general_messages(client: Client, message: Message):
         status = user_state.get("status")
         if status == "awaiting_screenshot" or status == "expecting_screenshot":
             await message.reply_text("Kripya apna payment screenshot bhej do, darling! Main uska intezaar kar rahi hoon. 👇")
-            await store_message(message)
             return
         elif status == "awaiting_channel":
             await message.reply_text("Hehe, darling! Main abhi bas channel link ka intezaar kar rahi hoon. Ya toh apna channel link bhej do, ya 'no' type kar do. 😉")
-            await store_message(message)
             return
         elif status == "pending_approval":
             await message.reply_text("Meri cute si request pehle se hi pending hai, darling! ⏳ Admin ke approval ka intezaar karo. 😊")
-            await store_message(message)
             return
         elif status == "approved_for_clone":
             await message.reply_text("Tum toh pehle se hi meri permission le chuke ho, mere dost! ✅ Ab bas apna bot token bhejo: `/clonebot YOUR_BOT_TOKEN_HERE`")
-            await store_message(message)
             return
 
     # If not in any cloning state, not a command, then process as general self-learning reply
-    # Store message for learning
-    await store_message(message, is_bot_sent=False)
-
     chat_id = message.chat.id
     current_time = time.time()
 
@@ -1204,13 +1328,33 @@ async def handle_private_general_messages(client: Client, message: Message):
         try:
             sent_msg = None
             content_type = reply_doc.get("content_type")
+            content_to_send = reply_doc.get("content")
+            file_to_send = reply_doc.get("file_id") # Get file_id if available
             
             if content_type == "text":
-                sent_msg = await message.reply_text(reply_doc["content"])
-                logger.info(f"Replied with text: {reply_doc['content']}")
-            elif content_type == "sticker" and reply_doc.get("sticker_id"):
-                sent_msg = await message.reply_sticker(reply_doc["sticker_id"])
-                logger.info(f"Replied with sticker: {reply_doc['sticker_id']}")
+                sent_msg = await message.reply_text(content_to_send)
+                logger.info(f"Replied with text: {content_to_send}")
+            elif content_type == "sticker" and file_to_send:
+                sent_msg = await message.reply_sticker(file_to_send)
+                logger.info(f"Replied with sticker: {file_to_send}")
+            elif content_type == "photo" and file_to_send:
+                sent_msg = await message.reply_photo(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with photo: {file_to_send}")
+            elif content_type == "video" and file_to_send:
+                sent_msg = await message.reply_video(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with video: {file_to_send}")
+            elif content_type == "document" and file_to_send:
+                sent_msg = await message.reply_document(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with document: {file_to_send}")
+            elif content_type == "audio" and file_to_send:
+                sent_msg = await message.reply_audio(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with audio: {file_to_send}")
+            elif content_type == "voice" and file_to_send:
+                sent_msg = await message.reply_voice(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with voice: {file_to_send}")
+            elif content_type == "animation" and file_to_send:
+                sent_msg = await message.reply_animation(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with animation: {file_to_send}")
             else:
                 logger.warning(f"Reply document found but no recognized content type or file_id for private chat: {reply_doc}")
 
@@ -1256,23 +1400,34 @@ async def handle_general_messages(client: Client, message: Message):
         try:
             sent_msg = None
             content_type = reply_doc.get("content_type")
+            content_to_send = reply_doc.get("content")
+            file_to_send = reply_doc.get("file_id") # Get file_id if available
             
             if content_type == "text":
-                sent_msg = await message.reply_text(reply_doc["content"])
-                logger.info(f"Replied with text: {reply_doc['content']}")
-            elif content_type == "sticker" and reply_doc.get("sticker_id"):
-                sent_msg = await message.reply_sticker(reply_doc["sticker_id"])
-                logger.info(f"Replied with sticker: {reply_doc['sticker_id']}")
+                sent_msg = await message.reply_text(content_to_send)
+                logger.info(f"Replied with text: {content_to_send}")
+            elif content_type == "sticker" and file_to_send:
+                sent_msg = await message.reply_sticker(file_to_send)
+                logger.info(f"Replied with sticker: {file_to_send}")
             # Add handling for other media types if you plan to store and reply with them
-            # Example:
-            # elif content_type == "photo" and reply_doc.get("file_id"):
-            #     sent_msg = await message.reply_photo(reply_doc["file_id"])
-            #     logger.info(f"Replied with photo: {reply_doc['file_id']}")
-            # elif content_type == "video" and reply_doc.get("file_id"):
-            #     sent_msg = await message.reply_video(reply_doc["file_id"])
-            #     logger.info(f"Replied with video: {reply_doc['file_id']}")
-            # ... and so on for other types
-
+            elif content_type == "photo" and file_to_send:
+                sent_msg = await message.reply_photo(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with photo: {file_to_send}")
+            elif content_type == "video" and file_to_send:
+                sent_msg = await message.reply_video(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with video: {file_to_send}")
+            elif content_type == "document" and file_to_send:
+                sent_msg = await message.reply_document(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with document: {file_to_send}")
+            elif content_type == "audio" and file_to_send:
+                sent_msg = await message.reply_audio(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with audio: {file_to_send}")
+            elif content_type == "voice" and file_to_send:
+                sent_msg = await message.reply_voice(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with voice: {file_to_send}")
+            elif content_type == "animation" and file_to_send:
+                sent_msg = await message.reply_animation(file_to_send, caption=content_to_send)
+                logger.info(f"Replied with animation: {file_to_send}")
             else:
                 logger.warning(f"Reply document found but no recognized content type or file_id: {reply_doc}")
 
@@ -1422,3 +1577,4 @@ if __name__ == "__main__":
 
     # Start Pyrogram bot (blocking call)
     app.run()
+
