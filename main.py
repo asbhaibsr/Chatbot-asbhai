@@ -551,7 +551,7 @@ async def stats_command(client: Client, message: Message):
         return
 
     if messages_collection is None:
-        await message.reply_text("Maaf karna, statistics abhi available nahi hain. Database mein kuch gadbad hai. 🥺 (Main Learning DB connect nahi ho paya)")
+        await message.reply_text("Maaf karna, statistics abhi available nahi hain. Database mein kuch gadbad hai.🥺 (Main Learning DB connect nahi ho paya)")
         await store_message(message) 
         return
 
@@ -1122,6 +1122,7 @@ async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
     # Take the first few lines that contain user and amount info
     base_caption = '\n'.join(original_caption_lines[:3]) 
     
+    # --- IMPORTANT FIX START ---
     if action == "approve_clone":
         new_caption = f"{base_caption}\n\n**Admin ne Approve Kar Diya! ✅\nUser ko bot banane ki anumati mil gayi hai!**"
         update_status = "approved_for_clone"
@@ -1131,13 +1132,18 @@ async def handle_clone_approval(client: Client, callback_query: CallbackQuery):
             "**Kaise?** `/clonebot YOUR_BOT_TOKEN_HERE`\n"
             "(Pura token ek hi line mein hona chahiye, jaldi karo na! 😉)"
         )
-    else: # reject_clone
+    elif action == "reject_clone": # Added elif for reject_clone
         new_caption = f"{base_caption}\n\n**Admin ne Reject Kar Diya! ❌**"
         update_status = "rejected" # Or simply delete the state
         notify_message = (
             "Maaf karna, darling! 😔 Tumhari Bot Cloning request reject ho gayi hai.\n"
             "Kisi bhi sawal ke liye mere Malik se contact karo na! 🥺"
         )
+    else: # Fallback for unexpected actions (should not happen with current regex)
+        await callback_query.answer("Kuch anap-shanap ho gaya, Malik! 🤷‍♀️", show_alert=True)
+        logger.warning(f"Unexpected action received: {action} for user {target_user_id}")
+        return
+    # --- IMPORTANT FIX END ---
 
     try:
         await callback_query.message.edit_caption(
