@@ -150,7 +150,7 @@ async def store_message(message: Message):
             "chat_type": message.chat.type.name,
             "chat_title": message.chat.title if message.chat.type != "private" else None,
             "timestamp": datetime.now(),
-            "is_bot_observed_pair": False,
+            "is_bot_observed_pair": False, # Default to False, will be updated if it's a reply to bot
             "credits": "Code by @asbhaibsr, Support: @aschat_group" # Hidden Credit
         }
 
@@ -168,11 +168,13 @@ async def store_message(message: Message):
             logger.debug(f"Unsupported message type for storage: {message.id}. (Code by @asbhaibsr)") # Credit added
             return
 
+        # Check if this message is a reply to a bot's message
         if message.reply_to_message:
             message_data["is_reply"] = True
             message_data["replied_to_message_id"] = message.reply_to_message.id
             message_data["replied_to_user_id"] = message.reply_to_message.from_user.id if message.reply_to_message.from_user else None
             
+            # Extract content of the message being replied to
             replied_content = None
             if message.reply_to_message.text:
                 replied_content = message.reply_to_message.text
@@ -181,13 +183,18 @@ async def store_message(message: Message):
             
             message_data["replied_to_content"] = replied_content
 
-            original_msg_in_db = messages_collection.find_one({"chat_id": message.chat.id, "message_id": message.reply_to_message.id})
-            if original_msg_in_db:
-                messages_collection.update_one(
-                    {"_id": original_msg_in_db["_id"]},
-                    {"$set": {"is_bot_observed_pair": True}}
-                )
+            # Check if the reply was to the bot itself
+            if message.reply_to_message.from_user and message.reply_to_message.from_user.id == app.me.id:
                 message_data["is_bot_observed_pair"] = True
+                # If this message is a reply to the bot, mark the *original bot message* as part of an observed pair
+                # This helps in linking the bot's output to a user's response
+                original_bot_message_in_db = messages_collection.find_one({"chat_id": message.chat.id, "message_id": message.reply_to_message.id})
+                if original_bot_message_in_db:
+                    messages_collection.update_one(
+                        {"_id": original_bot_message_in_db["_id"]},
+                        {"$set": {"is_bot_observed_pair": True}}
+                    )
+                    logger.debug(f"Marked bot's original message {message.reply_to_message.id} as observed pair. (System by @asbhaibsr)") # Credit added
 
         messages_collection.insert_one(message_data)
         logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)") # Credit added
@@ -218,30 +225,41 @@ async def generate_reply(message: Message):
         logger.debug("No content or keywords extracted for reply generation. (Code by @asbhaibsr)") # Credit added
         return
 
-    learned_replies_group_cursor = messages_collection.find({
-        "chat_id": message.chat.id,
-        "is_bot_observed_pair": True,
-        "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}
-    })
+    # --- Step 1: Prioritize replies from bot's observed pairs (contextual learning) ---
+    # Search for messages where the bot has previously replied to the current query_content
+    # (i.e., user's message is the 'replied_to_content' of a bot's observed pair)
     
+    # First, try to find replies specific to the current chat
     potential_replies = []
-    for doc in learned_replies_group_cursor:
+    
+    # Find replies where the bot responded to exactly this content in this chat
+    observed_replies_chat_cursor = messages_collection.find({
+        "chat_id": message.chat.id,
+        "is_bot_observed_pair": True, # Means the message itself was part of an observed pair
+        "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"},
+        "user_id": app.me.id # The message to pick as a reply must be from the bot itself
+    })
+    for doc in observed_replies_chat_cursor:
         potential_replies.append(doc)
 
     if not potential_replies:
-        learned_replies_global_cursor = messages_collection.find({
-            "is_bot_observed_pair": True,
-            "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}
+        # If no chat-specific observed replies, try global observed replies
+        observed_replies_global_cursor = messages_collection.find({
+            "is_bot_observed_pair": True, # Means the message itself was part of an observed pair
+            "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"},
+            "user_id": app.me.id # The message to pick as a reply must be from the bot itself
         })
-        for doc in learned_replies_global_cursor:
+        for doc in observed_replies_global_cursor:
             potential_replies.append(doc)
 
     if potential_replies:
         chosen_reply = random.choice(potential_replies)
+        logger.info(f"Contextual reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}. (Logic by @asbhaibsr)")
         return chosen_reply
 
     logger.info(f"No direct observed reply for: '{query_content}'. Falling back to keyword search. (Logic by @asbhaibsr)") # Credit added
 
+    # --- Step 2: Fallback to general keyword matching (less contextual) ---
     keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
     
     general_replies_group_cursor = messages_collection.find({
@@ -264,9 +282,10 @@ async def generate_reply(message: Message):
 
     if potential_replies:
         chosen_reply = random.choice(potential_replies)
+        logger.info(f"Keyword-based reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}. (Logic by @asbhaibsr)")
         return chosen_reply
     
-    logger.info(f"No general keyword reply found for: '{query_content}'. (Logic by @asbhaibsr)") # Credit added
+    logger.info(f"No suitable reply found for: '{query_content}'. (Logic by @asbhaibsr)") # Credit added
     return None
 
 # --- Tracking Functions ---
@@ -710,8 +729,12 @@ async def new_member_handler(client: Client, message: Message):
         # Check if a new user joined a private chat with the bot (i.e., started the bot)
         # Or if a new user joined a group where the bot is present
         if not member.is_bot: # Only for actual users, not other bots
-            if message.chat.type == "private" and member.id == message.from_user.id:
-                # Naya user ne bot ko private mein start kiya
+            # Check if this is the first time the user is interacting with the bot in private chat
+            # This logic needs to check if the user exists in user_tracking_collection
+            user_exists = user_tracking_collection.find_one({"_id": member.id})
+            
+            if message.chat.type == "private" and member.id == message.from_user.id and not user_exists:
+                # Naya user ne bot ko private mein start kiya aur pehli baar hai
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
                 notification_message = (
@@ -729,8 +752,8 @@ async def new_member_handler(client: Client, message: Message):
                 except Exception as e:
                     logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)") # Credit added
                 
-            elif message.chat.type in ["group", "supergroup"]:
-                # Naya user group mein add hua hai
+            elif message.chat.type in ["group", "supergroup"] and not user_exists:
+                # Naya user group mein add hua hai aur pehli baar hai
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
                 group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
