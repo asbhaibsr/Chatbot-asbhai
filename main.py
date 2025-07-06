@@ -971,34 +971,40 @@ if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.start()
 
-    logger.info("Starting Pyrogram bot... (Code by @asbhaibsr)")
+    logger.info("Starting Pyrogram bot and scheduler... (Code by @asbhaibsr)")
     
-    # Pyrogram client को कनेक्ट करें सबसे पहले
-    app.start() # <-- ये लाइन सबसे पहले बॉट को स्टार्ट करेगी और इवेंट लूप शुरू करेगी
+    # APScheduler को Pyrogram के asyncio लूप में चलाने के लिए एक async फंक्शन बनाएं
+    async def start_bot_and_scheduler():
+        await app.start() # Pyrogram bot को शुरू करें
+        logger.info("Pyrogram bot connected and running! (Code by @asbhaibsr)")
 
-    # अब जब Pyrogram का इवेंट लूप चल रहा है, तब Scheduler को शुरू करें
-    logger.info("Scheduler setup for monthly earnings reset (Delhi, India timezone). (Code by @asbhaibsr)")
-    scheduler = AsyncIOScheduler(timezone=pytz.timezone('Asia/Kolkata'))
-    # Schedule the reset function to run on the 1st day of every month at 00:00 (midnight IST)
-    @scheduler.scheduled_job(CronTrigger(day='1', hour='0', minute='0'), id='reset_monthly_earnings_job')
-    async def monthly_reset_job_wrapper():
-        logger.info("Executing monthly earnings reset job (Delhi Time)...")
-        await reset_monthly_earnings()
+        logger.info("Scheduler setup for monthly earnings reset (Delhi, India timezone). (Code by @asbhaibsr)")
+        scheduler = AsyncIOScheduler(timezone=pytz.timezone('Asia/Kolkata'))
+        
+        # Schedule the reset function to run on the 1st day of every month at 00:00 (midnight IST)
+        @scheduler.scheduled_job(CronTrigger(day='1', hour='0', minute='0'), id='reset_monthly_earnings_job')
+        async def monthly_reset_job_wrapper():
+            logger.info("Executing monthly earnings reset job (Delhi Time)...")
+            await reset_monthly_earnings()
 
-    # Start the scheduler
-    scheduler.start() # <-- अब इसे Pyrogram.start() के बाद कॉल करें
-    logger.info("Scheduler started for monthly earning reset (Delhi Time). (Code by @asbhaibsr)")
+        # Start the scheduler
+        scheduler.start() 
+        logger.info("Scheduler started for monthly earning reset (Delhi Time). (Code by @asbhaibsr)")
 
-    # Pyrogram को इवेंट लूप में idle रखें, ताकि APScheduler भी इसी में चले
-    logger.info("Pyrogram bot is now idle, listening for messages... (Code by @asbhaibsr)")
-    app.idle()
+        # Pyrogram को इवेंट लूप में idle रखें, ताकि APScheduler भी इसी में चले
+        logger.info("Pyrogram bot is now idle, listening for messages... (Code by @asbhaibsr)")
+        await app.idle() # app.idle() भी awaitable है
 
-    # जब बॉट बंद हो, तो APScheduler को भी बंद कर दें
-    scheduler.shutdown()
-    logger.info("Scheduler shut down. (Code by @asbhaibsr)")
+        # जब बॉट बंद हो, तो APScheduler को भी बंद कर दें
+        scheduler.shutdown()
+        logger.info("Scheduler shut down. (Code by @asbhaibsr)")
 
-    # Pyrogram client को बंद करें
-    app.stop()
-    logger.info("Pyrogram bot stopped. (Code by @asbhaibsr)")
+        # Pyrogram client को बंद करें
+        await app.stop() # app.stop() भी awaitable है
+        logger.info("Pyrogram bot stopped. (Code by @asbhaibsr)")
+
+    # asyncio.run() का उपयोग करके async फंक्शन को चलाएं
+    # यह एक नया इवेंट लूप बनाता है और फिर उसमें start_bot_and_scheduler को चलाता है
+    asyncio.run(start_bot_and_scheduler())
 
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
