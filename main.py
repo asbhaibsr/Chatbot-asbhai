@@ -327,23 +327,30 @@ async def generate_reply(message: Message):
 # --- Tracking Functions ---
 async def update_group_info(chat_id: int, chat_title: str):
     # Group tracking logic by @asbhaibsr
-    group_tracking_collection.update_one(
-        {"_id": chat_id},
-        {"$set": {"title": chat_title, "last_updated": datetime.now()},
-         "$setOnInsert": {"added_on": datetime.now(), "member_count": 0, "credit": "by @asbhaibsr"}}, # Hidden Credit
-        upsert=True
-    )
-    logger.info(f"Group info updated for {chat_title} ({chat_id}). (Tracking by @asbhaibsr)")
+    try:
+        group_tracking_collection.update_one(
+            {"_id": chat_id},
+            {"$set": {"title": chat_title, "last_updated": datetime.now()},
+             "$setOnInsert": {"added_on": datetime.now(), "member_count": 0, "credit": "by @asbhaibsr"}}, # Hidden Credit
+            upsert=True
+        )
+        logger.info(f"Group info updated/inserted successfully for {chat_title} ({chat_id}). (Tracking by @asbhaibsr)")
+    except Exception as e:
+        logger.error(f"Error updating group info for {chat_title} ({chat_id}): {e}. (Tracking by @asbhaibsr)")
+
 
 async def update_user_info(user_id: int, username: str, first_name: str):
     # User tracking logic by @asbhaibsr
-    user_tracking_collection.update_one(
-        {"_id": user_id},
-        {"$set": {"username": username, "first_name": first_name, "last_active": datetime.now()},
-         "$setOnInsert": {"joined_on": datetime.now(), "credit": "by @asbhaibsr"}}, # Hidden Credit
-        upsert=True
-    )
-    logger.info(f"User info updated for {first_name} ({user_id}). (Tracking by @asbhaibsr)")
+    try:
+        user_tracking_collection.update_one(
+            {"_id": user_id},
+            {"$set": {"username": username, "first_name": first_name, "last_active": datetime.now()},
+             "$setOnInsert": {"joined_on": datetime.now(), "credit": "by @asbhaibsr"}}, # Hidden Credit
+            upsert=True
+        )
+        logger.info(f"User info updated/inserted successfully for {first_name} ({user_id}). (Tracking by @asbhaibsr)")
+    except Exception as e:
+        logger.error(f"Error updating user info for {first_name} ({user_id}): {e}. (Tracking by @asbhaibsr)")
 
 # --- Earning System Functions ---
 async def get_top_earning_users():
@@ -358,6 +365,7 @@ async def get_top_earning_users():
     ]
 
     top_users_data = list(earning_tracking_collection.aggregate(pipeline))
+    logger.info(f"Fetched top earning users: {len(top_users_data)} results. (Earning system by @asbhaibsr)")
 
     top_users_details = []
     for user_data in top_users_data:
@@ -433,7 +441,7 @@ async def start_private_command(client: Client, message: Message):
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Private start command processed. (Code by @asbhaibsr)")
+    logger.info(f"Private start command processed for user {message.from_user.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("start") & filters.group)
 async def start_group_command(client: Client, message: Message):
@@ -469,10 +477,12 @@ async def start_group_command(client: Client, message: Message):
     )
     await store_message(message)
     if message.chat.type in ["group", "supergroup"]:
+        # Ensure group info is updated when /start is called in a group
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Group start command processed. (Code by @asbhaibsr)")
+    logger.info(f"Group start command processed in chat {message.chat.id}. (Code by @asbhaibsr)")
+
 
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
@@ -500,7 +510,7 @@ async def callback_handler(client, callback_query):
         await top_users_command(client, callback_query.message)
         await callback_query.answer("Earning Leaderboard dikha raha hoon! 💰", show_alert=False)
 
-    logger.info(f"Callback query processed. (Code by @asbhaibsr)")
+    logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("topusers") & (filters.private | filters.group)) # Allow in both private and group
 async def top_users_command(client: Client, message: Message):
@@ -556,7 +566,7 @@ async def top_users_command(client: Client, message: Message):
     await store_message(message) # Store the command message itself
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Top users command processed. (Code by @asbhaibsr)")
+    logger.info(f"Top users command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("broadcast") & filters.private)
 async def broadcast_command(client: Client, message: Message):
@@ -565,7 +575,8 @@ async def broadcast_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != OWNER_ID:
+    # Convert OWNER_ID to int for comparison
+    if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
@@ -575,10 +586,11 @@ async def broadcast_command(client: Client, message: Message):
 
     broadcast_text = " ".join(message.command[1:])
     
-    unique_chat_ids = messages_collection.distinct("chat_id")
-
+    unique_chat_ids = group_tracking_collection.distinct("_id") # Changed to use group_tracking_collection for groups
+    
     sent_count = 0
     failed_count = 0
+    logger.info(f"Starting broadcast to {len(unique_chat_ids)} chats. (Broadcast by @asbhaibsr)")
     for chat_id in unique_chat_ids:
         try:
             # Avoid sending broadcast to the private chat where the command was issued
@@ -587,14 +599,14 @@ async def broadcast_command(client: Client, message: Message):
             
             await client.send_message(chat_id, broadcast_text)
             sent_count += 1
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.1) # Small delay to avoid FloodWait
         except Exception as e:
             logger.error(f"Failed to send broadcast to chat {chat_id}: {e}. (Broadcast by @asbhaibsr)")
             failed_count += 1
     
     await message.reply_text(f"Broadcast ho gaya, darling! ✨ **{sent_count}** chats tak pahunchi, aur **{failed_count}** tak nahi. Koi nahi, next time! 😉 (System by @asbhaibsr)")
     await store_message(message)
-    logger.info(f"Broadcast command processed. (Code by @asbhaibsr)")
+    logger.info(f"Broadcast command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("stats") & filters.private)
 async def stats_private_command(client: Client, message: Message):
@@ -622,7 +634,7 @@ async def stats_private_command(client: Client, message: Message):
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Private stats command processed. (Code by @asbhaibsr)")
+    logger.info(f"Private stats command processed for user {message.from_user.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("stats") & filters.group)
 async def stats_group_command(client: Client, message: Message):
@@ -652,7 +664,7 @@ async def stats_group_command(client: Client, message: Message):
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Group stats command processed. (Code by @asbhaibsr)")
+    logger.info(f"Group stats command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
 
 # --- Group Management Commands ---
 
@@ -663,7 +675,8 @@ async def list_groups_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != OWNER_ID:
+    # Convert OWNER_ID to int for comparison
+    if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
@@ -685,7 +698,7 @@ async def list_groups_command(client: Client, message: Message):
     await message.reply_text(group_list_text)
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Groups list command processed. (Code by @asbhaibsr)")
+    logger.info(f"Groups list command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("leavegroup") & filters.private)
 async def leave_group_command(client: Client, message: Message):
@@ -694,7 +707,8 @@ async def leave_group_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != OWNER_ID:
+    # Convert OWNER_ID to int for comparison
+    if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
@@ -743,7 +757,8 @@ async def clear_data_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != OWNER_ID:
+    # Convert OWNER_ID to int for comparison
+    if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🤫 (Code by @asbhaibsr)")
         return
 
@@ -798,7 +813,8 @@ async def delete_specific_message_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != OWNER_ID:
+    # Convert OWNER_ID to int for comparison
+    if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
@@ -838,7 +854,8 @@ async def clear_earning_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != OWNER_ID:
+    # Convert OWNER_ID to int for comparison
+    if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Sorry darling! Yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🚫 (Code by @asbhaibsr)")
         return
 
@@ -856,7 +873,8 @@ async def restart_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != OWNER_ID:
+    # Convert OWNER_ID to int for comparison
+    if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)")
         return
 
@@ -870,8 +888,10 @@ async def restart_command(client: Client, message: Message):
 @app.on_message(filters.new_chat_members)
 async def new_member_handler(client: Client, message: Message):
     # Handler for new members. Notifications by @asbhaibsr.
+    logger.info(f"New chat members detected in chat {message.chat.id}. Bot ID: {client.me.id}. (Event handled by @asbhaibsr)")
 
     for member in message.new_chat_members:
+        logger.info(f"Processing new member: {member.id} ({member.first_name}) in chat {message.chat.id}. Is bot: {member.is_bot}. (Event handled by @asbhaibsr)")
         # Check if the bot itself was added to a group
         if member.id == client.me.id:
             if message.chat.type in ["group", "supergroup"]:
@@ -895,7 +915,8 @@ async def new_member_handler(client: Client, message: Message):
                     logger.info(f"Owner notified about new group: {group_title}. (Notification by @asbhaibsr)")
                 except Exception as e:
                     logger.error(f"Could not notify owner about new group {group_title}: {e}. (Notification error by @asbhaibsr)")
-            break # Bot ko add kiya gaya, to aage check karne ki zaroorat nahi
+            # If the bot itself was added, no need to process other members in this specific event
+            return 
 
         # Check if a new user joined a private chat with the bot (i.e., started the bot)
         # Or if a new user joined a group where the bot is present
@@ -903,6 +924,10 @@ async def new_member_handler(client: Client, message: Message):
             user_exists = user_tracking_collection.find_one({"_id": member.id})
             
             # Condition for new user starting bot in private chat
+            # This logic needs to be careful: new_chat_members in private chat usually means the user themselves.
+            # However, the primary "start bot in private" is handled by the /start private command.
+            # This part primarily catches if someone *else* adds a user to a *private* bot chat (rare/edge case)
+            # or if a new user is added to a group.
             if message.chat.type == "private" and member.id == message.from_user.id and not user_exists:
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
@@ -942,21 +967,55 @@ async def new_member_handler(client: Client, message: Message):
                     logger.info(f"Owner notified about new group member: {user_name} in {group_title}. (Notification by @asbhaibsr)")
                 except Exception as e:
                     logger.error(f"Could not notify owner about new group member {user_name} in {group_title}: {e}. (Notification error by @asbhaibsr)")
-
+    
+    # Store the new_chat_members event message itself (optional, but consistent with other message storage)
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+
 @app.on_message(filters.left_chat_member)
 async def left_member_handler(client: Client, message: Message):
     # Left member handler. Logic by @asbhaibsr.
+    logger.info(f"Left chat member detected in chat {message.chat.id}. Left member ID: {message.left_chat_member.id}. Bot ID: {client.me.id}. (Event handled by @asbhaibsr)")
+
     if message.left_chat_member and message.left_chat_member.id == client.me.id:
         if message.chat.type in ["group", "supergroup"]:
             group_tracking_collection.delete_one({"_id": message.chat.id})
             messages_collection.delete_many({"chat_id": message.chat.id})
+            earning_tracking_collection.update_many(
+                {"_id": {"$in": [user["_id"] for user in earning_tracking_collection.find({})]}}, # All users
+                {"$pull": {"groups": message.chat.id}} # Remove this group from user's group list (if you store one)
+            )
+            # More direct approach to reset counts for users specifically from this group if needed,
+            # but current earnings logic is global per user, not per group.
+            # So, general cleanup is enough.
+
             logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared. (Code by @asbhaibsr)")
-            # No reply here as the bot is leaving
+            # Send notification to OWNER
+            group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
+            left_by_user = message.from_user.first_name if message.from_user else "Unknown User"
+            notification_message = (
+                f"💔 **Group Left Alert!**\n"
+                f"Bot ko ek group se remove kiya gaya hai ya woh khud leave kar gaya.\n\n"
+                f"**Group Name:** {group_title}\n"
+                f"**Group ID:** `{message.chat.id}`\n"
+                f"**Action By:** {left_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
+                f"**Left On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+            )
+            try:
+                await client.send_message(chat_id=OWNER_ID, text=notification_message)
+                logger.info(f"Owner notified about bot leaving group: {group_title}. (Notification by @asbhaibsr)")
+            except Exception as e:
+                logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}. (Notification error by @asbhaibsr)")
+            return # No need to store message if bot left
+
+    # Store the left_chat_member event message itself
     await store_message(message)
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
 
 @app.on_message(filters.text | filters.sticker)
 async def handle_message_and_reply(client: Client, message: Message):
@@ -964,13 +1023,17 @@ async def handle_message_and_reply(client: Client, message: Message):
     if message.from_user and message.from_user.is_bot:
         # Important: Bots' messages should not count towards earning,
         # and generally, the bot should not learn from other bots' messages.
+        logger.debug(f"Skipping message from bot user: {message.from_user.id}. (Handle message by @asbhaibsr)")
         return
 
     # Apply cooldown before processing message
     if message.from_user and is_on_cooldown(message.from_user.id):
+        logger.debug(f"User {message.from_user.id} is on cooldown. Skipping message. (Cooldown by @asbhaibsr)")
         return
     if message.from_user:
         update_cooldown(message.from_user.id)
+
+    logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}). (Handle message by @asbhaibsr)")
 
     # Update group and user info regardless of whether it's a command or regular message
     if message.chat.type in ["group", "supergroup"]:
