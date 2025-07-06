@@ -26,9 +26,9 @@ import sys
 # Flask imports
 from flask import Flask, request, jsonify
 
-# APScheduler imports for monthly reset
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+# APScheduler imports (Removed for manual reset)
+# from apscheduler.schedulers.asyncio import AsyncIOScheduler
+# from apscheduler.triggers.cron import CronTrigger
 import pytz
 
 # --- Logger Setup ---
@@ -72,7 +72,7 @@ try:
     user_tracking_collection = db_tracking.users_data
     # New: Earning Tracking Collection within the same tracking DB
     earning_tracking_collection = db_tracking.monthly_earnings_data
-    # New: Collection to track last reset date
+    # New: Collection to track last reset date (Still useful for logging/tracking last manual reset)
     reset_status_collection = db_tracking.reset_status
     logger.info("MongoDB (Tracking & Earning) connection successful. Credit: @asbhaibsr")
 
@@ -354,36 +354,30 @@ async def get_top_earning_users():
         })
     return top_users_details
 
-async def reset_monthly_earnings():
-    logger.info("Checking for monthly earnings reset...")
+async def reset_monthly_earnings_manual():
+    # This function resets earnings manually when called by the owner.
+    logger.info("Manually resetting monthly earnings...")
     now = datetime.now(pytz.timezone('Asia/Kolkata')) # Current time in Delhi timezone
     current_month_year = now.strftime("%Y-%m") # e.g., "2025-07"
 
-    # Check if this month's reset has already happened
-    reset_status = reset_status_collection.find_one({"_id": "last_reset_date"})
-    
-    # If it's the first time resetting or the month has changed since the last reset
-    if not reset_status or reset_status.get("last_reset_month_year") != current_month_year:
-        try:
-            # Set all users' group_message_count to 0
-            earning_tracking_collection.update_many(
-                {}, # All documents
-                {"$set": {"group_message_count": 0}}
-            )
-            logger.info("Monthly earning message counts reset successfully. (Earning system by @asbhaibsr)")
+    try:
+        # Set all users' group_message_count to 0
+        earning_tracking_collection.update_many(
+            {}, # All documents
+            {"$set": {"group_message_count": 0}}
+        )
+        logger.info("Monthly earning message counts reset successfully by manual command. (Earning system by @asbhaibsr)")
 
-            # Update the reset date and month/year
-            reset_status_collection.update_one(
-                {"_id": "last_reset_date"},
-                {"$set": {"last_reset_month_year": current_month_year, "last_reset_timestamp": now}},
-                upsert=True
-            )
-            logger.info(f"Reset status updated to {current_month_year}. (Earning system by @asbhaibsr)")
+        # Update the reset date and month/year
+        reset_status_collection.update_one(
+            {"_id": "last_manual_reset_date"}, # Use a different _id for manual reset tracking
+            {"$set": {"last_reset_month_year": current_month_year, "last_reset_timestamp": now}},
+            upsert=True
+        )
+        logger.info(f"Manual reset status updated to {current_month_year}. (Earning system by @asbhaibsr)")
 
-        except Exception as e:
-            logger.error(f"Error resetting monthly earnings: {e}. (Earning system by @asbhaibsr)")
-    else:
-        logger.info(f"Monthly earnings already reset for {current_month_year}. Skipping. (Earning system by @asbhaibsr)")
+    except Exception as e:
+        logger.error(f"Error resetting monthly earnings manually: {e}. (Earning system by @asbhaibsr)")
 
 # --- Pyrogram Event Handlers ---
 
@@ -538,7 +532,7 @@ async def top_users_command(client: Client, message: Message):
         "• Earning will be based solely on **conversation (messages) within group chats.**\n"
         "• **Spamming or sending a high volume of messages in quick succession will not be counted.** Only genuine, relevant conversation will be considered.\n"
         "• Please ensure your conversations are **meaningful and engaging.**\n"
-        "• This leaderboard will be **reset on the 1st of every month at midnight (00:00 IST) Delhi, India time.**\n\n"
+        "• This leaderboard can be **reset manually by the owner using /clearearning command.**\n\n" # Updated info
         "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
 
@@ -818,6 +812,24 @@ async def delete_specific_message_command(client: Client, message: Message):
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+@app.on_message(filters.command("clearearning") & filters.private)
+async def clear_earning_command(client: Client, message: Message):
+    # New command to manually clear earning data. Only for owner.
+    if is_on_cooldown(message.from_user.id):
+        return
+    update_cooldown(message.from_user.id)
+
+    if str(message.from_user.id) != OWNER_ID:
+        await message.reply_text("Sorry darling! Yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🚫 (Code by @asbhaibsr)")
+        return
+
+    await reset_monthly_earnings_manual()
+    await message.reply_text("💰 **Earning data successfully cleared!** Ab sab phir se zero se shuru karenge! 😉 (Code by @asbhaibsr)")
+    logger.info(f"Owner {message.from_user.id} manually triggered earning data reset. (Code by @asbhaibsr)")
+    
+    await store_message(message)
+    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
 @app.on_message(filters.command("restart") & filters.private)
 async def restart_command(client: Client, message: Message):
     # Restart command. Admin only. Code by @asbhaibsr.
@@ -971,40 +983,19 @@ if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.start()
 
-    logger.info("Starting Pyrogram bot and scheduler... (Code by @asbhaibsr)")
+    logger.info("Starting Pyrogram bot... (Code by @asbhaibsr)")
     
-    # APScheduler को Pyrogram के asyncio लूप में चलाने के लिए एक async फंक्शन बनाएं
-    async def start_bot_and_scheduler():
+    async def start_bot():
         await app.start() # Pyrogram bot को शुरू करें
         logger.info("Pyrogram bot connected and running! (Code by @asbhaibsr)")
-
-        logger.info("Scheduler setup for monthly earnings reset (Delhi, India timezone). (Code by @asbhaibsr)")
-        scheduler = AsyncIOScheduler(timezone=pytz.timezone('Asia/Kolkata'))
         
-        # Schedule the reset function to run on the 1st day of every month at 00:00 (midnight IST)
-        @scheduler.scheduled_job(CronTrigger(day='1', hour='0', minute='0'), id='reset_monthly_earnings_job')
-        async def monthly_reset_job_wrapper():
-            logger.info("Executing monthly earnings reset job (Delhi Time)...")
-            await reset_monthly_earnings()
-
-        # Start the scheduler
-        scheduler.start() 
-        logger.info("Scheduler started for monthly earning reset (Delhi Time). (Code by @asbhaibsr)")
-
         logger.info("Pyrogram bot is now idle, listening for messages... (Code by @asbhaibsr)")
-        
-        # बॉट को चालू रखने के लिए idle() को await करें
-        await app.idle()
+        await app.idle() # Bot को चालू रखने के लिए idle() को await करें
 
-        # जब बॉट बंद हो (जैसे, जब सर्वर शटडाउन हो रहा हो), तभी ये लाइनें चलेंगी
-        scheduler.shutdown()
-        logger.info("Scheduler shut down. (Code by @asbhaibsr)")
-
-        await app.stop() # app.stop() भी awaitable है
+        await app.stop() # जब बॉट बंद हो, तभी ये लाइनें चलेंगी
         logger.info("Pyrogram bot stopped. (Code by @asbhaibsr)")
 
     # Pyrogram app.run() मेथड को सीधे कॉल करें और उसे async फंक्शन दें
-    # यह Pyrogram को अपना खुद का इवेंट लूप शुरू करने और उसे चलाने की अनुमति देगा
-    app.run(start_bot_and_scheduler())
+    app.run(start_bot())
     
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
