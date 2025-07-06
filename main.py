@@ -992,10 +992,11 @@ if __name__ == "__main__":
         logger.info("Scheduler started for monthly earning reset (Delhi Time). (Code by @asbhaibsr)")
 
         # Pyrogram को इवेंट लूप में idle रखें, ताकि APScheduler भी इसी में चले
-        await app.run()  # <-- यह है वह बदलाव! Pyrogram 2.0.x के लिए सही तरीका
+        # app.run() को सीधे main ब्लॉक में कॉल किया जाएगा
         logger.info("Pyrogram bot is now idle, listening for messages... (Code by @asbhaibsr)")
 
         # जब बॉट बंद हो, तो APScheduler को भी बंद कर दें
+        # नोट: app.run() ब्लॉक होने के कारण, ये लाइनें app.run() के बाद ही चलेंगी जब बॉट बंद हो जाएगा.
         scheduler.shutdown()
         logger.info("Scheduler shut down. (Code by @asbhaibsr)")
 
@@ -1003,8 +1004,8 @@ if __name__ == "__main__":
         await app.stop() # app.stop() भी awaitable है
         logger.info("Pyrogram bot stopped. (Code by @asbhaibsr)")
 
-    # asyncio.run() का उपयोग करके async फंक्शन को चलाएं
-    # यह एक नया इवेंट लूप बनाता है और फिर उसमें start_bot_and_scheduler को चलाता है
-    asyncio.run(start_bot_and_scheduler())
-
+    # Pyrogram app.run() मेथड को सीधे कॉल करें और उसे async फंक्शन दें
+    # यह Pyrogram को अपना खुद का इवेंट लूप शुरू करने और उसे चलाने की अनुमति देगा
+    app.run(start_bot_and_scheduler()) # <-- यह है वह सही बदलाव!
+    
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
