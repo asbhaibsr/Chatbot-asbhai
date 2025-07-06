@@ -992,8 +992,8 @@ if __name__ == "__main__":
         logger.info("Scheduler started for monthly earning reset (Delhi Time). (Code by @asbhaibsr)")
 
         # Pyrogram को इवेंट लूप में idle रखें, ताकि APScheduler भी इसी में चले
+        await app.run()  # <-- यह है वह बदलाव! Pyrogram 2.0.x के लिए सही तरीका
         logger.info("Pyrogram bot is now idle, listening for messages... (Code by @asbhaibsr)")
-        await app.idle() # app.idle() भी awaitable है
 
         # जब बॉट बंद हो, तो APScheduler को भी बंद कर दें
         scheduler.shutdown()
