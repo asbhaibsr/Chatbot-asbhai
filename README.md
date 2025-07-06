@@ -1,86 +1,133 @@
-# 🤖 Chatbot-asbhai — Self-Learning Telegram Bot
+# 🤖 Self-Learning Telegram AI Bot — Powered by @asbhaibsr
 
-A smart, auto-learning Telegram bot built using **Pyrogram**, **MongoDB**, and **Flask**.  
-It behaves like a human-style AI girl — remembers conversations, responds with fun or romantic chat, and supports private + group chats with complete control features.
+Welcome to the **most advanced, self-learning Telegram bot** built for chat groups, fun interactions, earning systems, and full admin control. Perfect for Telegram kings & queens who want their group chat 🔥 always on fire!
 
----
-
-## 📌 Features
-
-- 🧠 Self-Learning Chat: Stores and reuses replies (text/sticker) from group & private chats.
-- 🎯 Auto-replies based on message context or keyword.
-- 💬 Sticker support, smart message memory, and fallback system.
-- 📊 Group/User/message tracking system.
-- 🧹 Auto message prune + manual clean commands.
-- 👑 Owner-only control for broadcasts, stats, restart, leave group, etc.
-- ⚙️ Flask Health Check for Koyeb/Render hosting.
-- 🔘 Button Click Tracker (MongoDB-based)
-- 🕒 Cooldown system to prevent spam.
+> **⚠️ Note:** Yeh bot aapke chats se *khud seekhta hai* aur har message ko smart banata hai. Use karo, sikhao, aur chat ka mazaa uthao!
 
 ---
 
-## 🚀 Deploy Now to Koyeb
+## 👑 Developed & Managed By:
 
-[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?name=chatbot-asbhai&repository=asbhaibsr%2FChatbot-asbhai&branch=main&run_command=python3+main.py&instance_type=free&regions=was&instances_min=0&autoscaling_sleep_idle_delay=300&env%5BAPI_HASH%5D=918e2aa94075a7d04717b371a21fb689&env%5BAPI_ID%5D=28762030&env%5BBOT_TOKEN%5D=8098449556%3AAAED8oT7U3lsPFwJxdxS-k0m27H3v9XC7EY&env%5BMONGO_URI_BUTTONS%5D=mongodb%2Bsrv%3A%2F%2Fed69yyr92n%3AkaY09k4z8zCjDSR3%40cluster0.6uhfmud.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BMONGO_URI_MESSAGES%5D=mongodb%2Bsrv%3A%2F%2Fjeriwo3420%3AsDz0ZevArtOnjpR0%40cluster0.yrfv26n.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BMONGO_URI_TRACKING%5D=mongodb%2Bsrv%3A%2F%2Fmockingbird07317%3ArTgIMbRuwlW7qMLq%40cluster0.4vlhect.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BOWNER_ID%5D=8019381468&ports=8080%3Bhttp%3B%2F&hc_protocol%5B8080%5D=tcp&hc_grace_period%5B8080%5D=5&hc_interval%5B8080%5D=30&hc_restart_limit%5B8080%5D=3&hc_timeout%5B8080%5D=5&hc_path%5B8080%5D=%2F&hc_method%5B8080%5D=get)
-
----
-
-## 🔧 Environment Variables
-
-Make sure to set the following variables:
-
-| Variable              | Required | Description                          |
-|----------------------|----------|--------------------------------------|
-| `API_ID`             | ✅        | From https://my.telegram.org         |
-| `API_HASH`           | ✅        | From https://my.telegram.org         |
-| `BOT_TOKEN`          | ✅        | Get from BotFather                   |
-| `OWNER_ID`           | ✅        | Your Telegram numeric ID             |
-| `MONGO_URI_MESSAGES` | ✅        | MongoDB URI for storing messages     |
-| `MONGO_URI_BUTTONS`  | ✅        | MongoDB URI for storing button logs  |
-| `MONGO_URI_TRACKING` | ✅        | MongoDB URI for tracking groups/users|
+* 👨‍💻 **Owner:** [@asbhaibsr](https://t.me/asbhaibsr)
+* 📢 **Update Channel:** [@asbhai\_bsr](https://t.me/asbhai_bsr)
+* 💬 **Support / Chat Group:** [@aschat\_group](https://t.me/aschat_group)
+* 👼 **Live Demo Bot:** [@askiangelbot](https://t.me/askiangelbot) — *Check how it works in real-time!*
 
 ---
 
-## 💬 Available Commands
+## 🚀 Features
 
-| Command         | Access       | Description                                      |
-|-----------------|--------------|--------------------------------------------------|
-| `/start`        | All Users    | Start the bot and get a welcome message.         |
-| `/broadcast`    | Owner Only   | Send message to all users/groups.                |
-| `/stats check`  | All Users    | View total users, groups, messages.              |
-| `/groups`       | Owner Only   | List all groups the bot is in.                   |
-| `/leavegroup`   | Owner Only   | Make the bot leave a specific group.             |
-| `/cleardata`    | Owner Only   | Clear a percentage of stored messages.           |
-| `/deletemessage`| Owner Only   | Delete message from DB by content match.         |
-| `/restart`      | Owner Only   | Restart the bot.                                 |
+* 🤖 **Self-Learning AI Chatting**
+* 🧠 **Smart, Contextual Replies**
+* 💬 **Stores Every Chat Message (Text + Stickers)**
+* 📊 **Group & User Activity Tracking**
+* 💸 **Earning System for Active Members**
+* 📦 **MongoDB Storage for Scale & Speed**
+* 📣 **Broadcast, Stats, Cleanup, Restart & Admin Tools**
+* 🩺 **24/7 Health Check via Flask (Koyeb Compatible)**
 
 ---
 
-## 📲 Start Now
+## 🛠 Setup Instructions
 
-Join our official update channel for support, help, and updates!
+### 1. Environment Variables (.env)
 
-[🌸 Join Channel @asbhai_bsr](https://t.me/asbhai_bsr)
+```env
+API_ID=your_api_id
+API_HASH=your_api_hash
+BOT_TOKEN=your_bot_token
+OWNER_ID=your_telegram_user_id
+MONGO_URI_MESSAGES=your_mongo_uri_1
+MONGO_URI_BUTTONS=your_mongo_uri_2
+MONGO_URI_TRACKING=your_mongo_uri_3
+PORT=8000
+```
+
+### 2. Deployment (Replit / Koyeb / VPS)
+
+* Upload this bot.
+* Set env variables.
+* Health check URL for uptime.
+* Deploy and enjoy unlimited chat fun!
 
 ---
 
-## 🧠 How It Works
+## 💻 Owner-Only Commands
 
-- Learns from replied messages in chats (text/sticker).
-- Detects message content or keyword match to auto-respond.
-- Stores each chat globally (multi-group support).
-- Deletes old messages automatically when limit is reached.
+```bash
+/broadcast your message        # Send to all groups
+/stats check                   # Show total stats
+/topusers                      # Show earning leaderboard
+/cleardata 10%                 # Delete % of old messages
+/deletemessage hello bro       # Delete specific message
+/clearearning                  # Reset earning counts
+/groups                        # List all joined groups
+/leavegroup -100xxxxxxxxx      # Force bot leave
+/restart                       # Restart the bot
+```
 
 ---
 
-## 🛠 Developer Info
+## 👥 For All Group Users
 
-**Repo:** [Chatbot-asbhai GitHub](https://github.com/asbhaibsr/Chatbot-asbhai)  
-**Author:** [@asbhaibsr on Telegram](https://t.me/asbhaibsr)
+* Just chat normally.
+* Bot will reply based on past conversations.
+* Reply to bot messages to teach it.
+* Use `/topusers` to see most active users & earners.
 
 ---
 
-## 📜 License
+## 🧠 MongoDB Collections Used
 
-This project is licensed for personal use. Do not sell or reupload without permission.
+| Collection              | Purpose                           |
+| ----------------------- | --------------------------------- |
+| `messages`              | Stores text/stickers of all users |
+| `button_interactions`   | Tracks inline button clicks       |
+| `groups_data`           | All groups where bot is added     |
+| `users_data`            | Tracks each user info             |
+| `monthly_earnings_data` | Monthly activity stats            |
 
+---
+
+## ✅ Health Check (Koyeb / UptimeRobot)
+
+Used to keep the bot always awake.
+
+```
+GET /health
+```
+
+Returns:
+
+```json
+{"status": "ok", "message": "Bot is alive and healthy!"}
+```
+
+---
+
+## 💎 Start Menu with Inline Buttons
+
+When someone sends /start:
+
+* ➕ **Add Me to Group**
+* 📢 **Updates Channel**  → [@asbhai\_bsr](https://t.me/asbhai_bsr)
+* ❓ **Support Group**    → [@aschat\_group](https://t.me/aschat_group)
+* 🛒 **Buy My Code**      → Contact [@asbhaibsr](https://t.me/asbhaibsr)
+* 💰 **Earning Leaderboard** → Shows top chatters
+
+---
+
+## 👑 Credits & Licensing
+
+* 🔥 Bot Developer: [@asbhaibsr](https://t.me/asbhaibsr)
+* ❌ Re-uploading or selling this code without permission is **strictly prohibited**.
+* 📢 Stay updated: [@asbhai\_bsr](https://t.me/asbhai_bsr)
+* 💬 Chat or Help: [@aschat\_group](https://t.me/aschat_group)
+* 👼 Demo this bot live: [@askiangelbot](https://t.me/askiangelbot)
+
+---
+
+## 💬 Final Note
+
+Use karo, enjoy karo, aur group mein bakchodi karo 😎
+Ye bot aapka group bana dega ek real time entertaining adda! 🔥
