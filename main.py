@@ -23,13 +23,10 @@ import re
 import random
 import sys
 
+import pytz # <-- Added back for timezone handling
+
 # Flask imports
 from flask import Flask, request, jsonify
-
-# APScheduler imports (Removed for manual reset)
-# from apscheduler.schedulers.asyncio import AsyncIOScheduler
-# from apscheduler.triggers.cron import CronTrigger
-import pytz
 
 # --- Logger Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -358,7 +355,6 @@ async def reset_monthly_earnings_manual():
     # This function resets earnings manually when called by the owner.
     logger.info("Manually resetting monthly earnings...")
     now = datetime.now(pytz.timezone('Asia/Kolkata')) # Current time in Delhi timezone
-    current_month_year = now.strftime("%Y-%m") # e.g., "2025-07"
 
     try:
         # Set all users' group_message_count to 0
@@ -371,10 +367,10 @@ async def reset_monthly_earnings_manual():
         # Update the reset date and month/year
         reset_status_collection.update_one(
             {"_id": "last_manual_reset_date"}, # Use a different _id for manual reset tracking
-            {"$set": {"last_reset_month_year": current_month_year, "last_reset_timestamp": now}},
+            {"$set": {"last_reset_timestamp": now}},
             upsert=True
         )
-        logger.info(f"Manual reset status updated to {current_month_year}. (Earning system by @asbhaibsr)")
+        logger.info(f"Manual reset status updated. (Earning system by @asbhaibsr)")
 
     except Exception as e:
         logger.error(f"Error resetting monthly earnings manually: {e}. (Earning system by @asbhaibsr)")
@@ -985,17 +981,7 @@ if __name__ == "__main__":
 
     logger.info("Starting Pyrogram bot... (Code by @asbhaibsr)")
     
-    async def start_bot():
-        await app.start() # Pyrogram bot को शुरू करें
-        logger.info("Pyrogram bot connected and running! (Code by @asbhaibsr)")
-        
-        logger.info("Pyrogram bot is now idle, listening for messages... (Code by @asbhaibsr)")
-        await app.idle() # Bot को चालू रखने के लिए idle() को await करें
-
-        await app.stop() # जब बॉट बंद हो, तभी ये लाइनें चलेंगी
-        logger.info("Pyrogram bot stopped. (Code by @asbhaibsr)")
-
-    # Pyrogram app.run() मेथड को सीधे कॉल करें और उसे async फंक्शन दें
-    app.run(start_bot())
+    # Pyrogram app.run() मेथड को सीधे कॉल करें. यह Pyrogram को शुरू और आइडल रखेगा.
+    app.run()
     
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
