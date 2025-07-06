@@ -419,11 +419,17 @@ async def start_private_command(client: Client, message: Message):
     update_cooldown(message.from_user.id)
 
     user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
-    welcome_messages = [
-        f"Hi **{user_name}!** 👋 Main aa gayi hoon. Chalo, baatein karte hain! ✨",
-        f"Hellooo **{user_name}!** 💖 Main sunne aur seekhne ke liye taiyar hoon. 😊",
-        f"Namaste **{user_name}!** Koi kaam hai? 😉 Main yahan hoon!"
-    ]
+    
+    welcome_message_text = (
+        f"👋 **Hi {user_name}! Main Hoon Aapki apni Smart AI Bot!** ✨\n\n"
+        "🌟 **Mere Features:**\n"
+        "• **Earning Potential (Points):** Group mein active rehkar messages se points kamao aur leaderboard pe aao. Sabse zyada active users ko monthly rewards mil sakte hain!\n"
+        "• **AI Chatting & Learning:** Main aapki baaton se seekhti hoon aur contextually reply karti hoon. Jitni baat karoge, utni intelligent banungi!\n"
+        "• **Data Storage:** Aapki conversations ko database mein store karti hoon, taaki future mein behtar jawab de sakun. Aapki privacy secure hai!\n"
+        "• **Group Management:** Mujhe groups mein add karke apne chats ko aur mazedaar banao.\n"
+        "• **Admin Tools (Owner Only):** Boss ke liye special commands, jaise broadcast messages, data clean karna, groups list dekhna, aur bot ko restart karna.\n\n"
+        "Chalo, ab baatein shuru karte hain! 😊"
+    )
     
     keyboard = InlineKeyboardMarkup(
         [
@@ -443,7 +449,7 @@ async def start_private_command(client: Client, message: Message):
 
     await message.reply_photo(
         photo=BOT_PHOTO_URL,
-        caption=random.choice(welcome_messages),
+        caption=welcome_message_text,
         reply_markup=keyboard
     )
     await store_message(message)
@@ -459,11 +465,17 @@ async def start_group_command(client: Client, message: Message):
     update_cooldown(message.from_user.id)
 
     user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
-    welcome_messages = [
-        f"Hello **{user_name}!** 👋 Main aa gayi hoon. Group ki baatein sunne ko taiyar hoon! ✨",
-        f"Hey **{user_name}!** 💖 Main yahan aapki conversations se seekhne aayi hoon. 😊",
-        f"Namaste **{user_name}!** Is group mein main hoon aapki apni bot. 😄"
-    ]
+    
+    welcome_message_text = (
+        f"👋 **Hello {user_name}! Main Hoon Aapki apni Smart AI Bot!** ✨\n\n"
+        "🌟 **Mere Features:**\n"
+        "• **Earning Potential (Points):** Group mein active rehkar messages se points kamao aur leaderboard pe aao. Sabse zyada active users ko monthly rewards mil sakte hain!\n"
+        "• **AI Chatting & Learning:** Main aapki baaton se seekhti hoon aur contextually reply karti hoon. Jitni baat karoge, utni intelligent banungi!\n"
+        "• **Data Storage:** Aapki conversations ko database mein store karti hoon, taaki future mein behtar jawab de sakun. Aapki privacy secure hai!\n"
+        "• **Group Management:** Mujhe groups mein add karke apne chats ko aur mazedaar banao.\n"
+        "• **Admin Tools (Owner Only):** Boss ke liye special commands, jaise broadcast messages, data clean karna, groups list dekhna, aur bot ko restart karna.\n\n"
+        "Chalo, ab baatein shuru karte hain! 😊"
+    )
 
     keyboard = InlineKeyboardMarkup(
         [
@@ -480,7 +492,7 @@ async def start_group_command(client: Client, message: Message):
 
     await message.reply_photo(
         photo=BOT_PHOTO_URL,
-        caption=random.choice(welcome_messages),
+        caption=welcome_message_text,
         reply_markup=keyboard
     )
     await store_message(message)
@@ -498,7 +510,7 @@ async def callback_handler(client, callback_query):
     # Callback query handler. Developed by @asbhaibsr.
     if callback_query.data == "buy_git_repo":
         await callback_query.message.reply_text(
-            f"🤩 Agar aapko mere jaisa khud ka bot banwana hai, toh aapko ₹500 dene honge. Iske liye **@{ASBHAI_USERNAME}** se contact karein aur unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group",
+            f"💰 **Dosto, agar aapko is bot ka repo (yani Git Repository) chahiye, toh ₹1000 dekar hamare @{ASBHAI_USERNAME} par message karein.** Aapko ek `reply.py` file mil jayegi jisme mere jaise ek naya bot banane ke codes likhe hain. Use aap Git par nayi repository bana kar khud ka bot bana sakte hain. Isme koi credit nahi hai, bilkul fresh aur mast hai! **Message tabhi karein jab aapko lena ho, bina faltu ke message na karein.**",
             quote=True
         )
         await callback_query.answer("Details mil gayi na? Ab jao, deal final karo! 😉", show_alert=False)
@@ -535,10 +547,11 @@ async def top_users_command(client: Client, message: Message):
         return
 
     earning_messages = [
-        "💰 **Top 3 Active Users (This Month)** 💰\n\n"
+        "🏆 **Earning Leaderboard: Top Active Users!** 🏆\n\n"
     ]
 
     prizes = {1: "₹30", 2: "₹15", 3: "₹5"} # Define prizes for top 3
+    rank_symbols = {1: "🥇", 2: "🥈", 3: "🥉"}
 
     # Limit to top 3 for display
     for i, user in enumerate(top_users[:3]): # Modified: Slicing to display only top 3
@@ -547,19 +560,21 @@ async def top_users_command(client: Client, message: Message):
         username_str = f"@{user.get('username')}" if user.get('username') else "N/A"
         message_count = user.get('message_count', 0)
         prize_str = prizes.get(rank, "₹0")
+        symbol = rank_symbols.get(rank, "🏅")
 
         earning_messages.append(
-            f"**Rank {rank}:** {user_name} ({username_str})\n"
-            f"   • Total Messages: **{message_count}**\n"
-            f"   • Potential Earning: **{prize_str}**\n"
+            f"**{symbol} Rank {rank}:** [{user_name}](tg://user?id={user['user_id']}) {username_str}\n"
+            f"   •💬 Total Messages: **{message_count}**\n"
+            f"   • 💸 Potential Earning: **{prize_str}**\n"
         )
     
     earning_messages.append(
-        "\n**Earning Rules:**\n"
-        "• Earning will be based solely on **conversation (messages) within group chats.**\n"
-        "• **Spamming or sending a high volume of messages in quick succession will not be counted.** Only genuine, relevant conversation will be considered.\n"
-        "• Please ensure your conversations are **meaningful and engaging.**\n"
-        "• This leaderboard can be **reset manually by the owner using /clearearning command.**\n\n" # Updated info
+        "\n--- **Earning Rules** ---\n"
+        "• 💬 **Group Conversations:** Points sirf group chats mein ki gayi genuine baaton par milenge.\n"
+        "• 🚫 **No Spam:** Lagatar spam messages ya sirf stickers bhejkar points nahi milenge. Sirf meaningful chats count hongi.\n"
+        "• 🎯 **Relevant Content:** Aapke messages group topic se relevant hone chahiye aur sabhi ke liye useful ya engaging ho.\n"
+        "• 🔄 **Monthly Reset:** Yeh leaderboard har mahine reset kiya jayega, jiska nirdharan owner karega (`/clearearning` command se).\n"
+        "• 🎁 **Prize Distribution:** Top 3 users ko owner dwara rewards diye jayenge.\n\n"
         "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
 
@@ -571,7 +586,7 @@ async def top_users_command(client: Client, message: Message):
         ]
     )
 
-    await message.reply_text("\n".join(earning_messages), reply_markup=keyboard, quote=True)
+    await message.reply_text("\n".join(earning_messages), reply_markup=keyboard, quote=True, disable_web_page_preview=True)
     await store_message(message) # Store the command message itself
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -1089,3 +1104,4 @@ if __name__ == "__main__":
     app.run()
     
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
+
