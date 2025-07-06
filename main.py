@@ -15,6 +15,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
+from pyrogram.enums import ChatType # Import ChatType for clearer comparisons
 
 from pymongo import MongoClient
 from datetime import datetime, timedelta
@@ -165,7 +166,7 @@ async def store_message(message: Message):
             "first_name": message.from_user.first_name if message.from_user else None,
             "chat_id": message.chat.id,
             "chat_type": message.chat.type.name,
-            "chat_title": message.chat.title if message.chat.type != "private" else None,
+            "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
             "timestamp": datetime.now(),
             "is_bot_observed_pair": False, # Default to False, will be updated if it's a reply to bot
             "credits": "Code by @asbhaibsr, Support: @aschat_group" # Hidden Credit
@@ -216,7 +217,9 @@ async def store_message(message: Message):
         
         # --- NEW/IMPROVED: Update user's group message count for earning ---
         # This section is crucial for earning tracking.
-        if message.chat.type in ["group", "supergroup"] and message.from_user and not message.from_user.is_bot:
+        logger.debug(f"DEBUG: Checking earning condition in store_message: chat_type={message.chat.type.name}, is_from_user={bool(message.from_user)}, is_not_bot={not message.from_user.is_bot if message.from_user else 'N/A'}") # NEW DEBUG LOG
+        
+        if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and message.from_user and not message.from_user.is_bot:
             user_id_to_track = message.from_user.id
             username_to_track = message.from_user.username
             first_name_to_track = message.from_user.first_name
@@ -481,8 +484,9 @@ async def start_group_command(client: Client, message: Message):
         reply_markup=keyboard
     )
     await store_message(message)
-    if message.chat.type in ["group", "supergroup"]:
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum here
         # Ensure group info is updated when /start is called in a group
+        logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.") # NEW DEBUG LOG
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -580,7 +584,7 @@ async def broadcast_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    # Convert OWNER_ID to int for comparison
+    # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
@@ -599,7 +603,7 @@ async def broadcast_command(client: Client, message: Message):
     for chat_id in unique_chat_ids:
         try:
             # Avoid sending broadcast to the private chat where the command was issued
-            if chat_id == message.chat.id and message.chat.type == "private":
+            if chat_id == message.chat.id and message.chat.type == ChatType.PRIVATE: # Use ChatType enum
                 continue 
             
             await client.send_message(chat_id, broadcast_text)
@@ -625,7 +629,7 @@ async def stats_private_command(client: Client, message: Message):
         return
 
     total_messages = messages_collection.count_documents({})
-    unique_group_ids = group_tracking_collection.count_documents({})
+    unique_group_ids = group_tracking_collection.count_documents({}) # Correctly counts documents in group_tracking_collection
     num_users = user_tracking_collection.count_documents({})
 
     stats_text = (
@@ -665,7 +669,7 @@ async def stats_group_command(client: Client, message: Message):
     )
     await message.reply_text(stats_text)
     await store_message(message)
-    if message.chat.type in ["group", "supergroup"]:
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -680,7 +684,7 @@ async def list_groups_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    # Convert OWNER_ID to int for comparison
+    # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
@@ -712,7 +716,7 @@ async def leave_group_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    # Convert OWNER_ID to int for comparison
+    # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
@@ -762,7 +766,7 @@ async def clear_data_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    # Convert OWNER_ID to int for comparison
+    # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🤫 (Code by @asbhaibsr)")
         return
@@ -818,7 +822,7 @@ async def delete_specific_message_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    # Convert OWNER_ID to int for comparison
+    # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
@@ -859,7 +863,7 @@ async def clear_earning_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    # Convert OWNER_ID to int for comparison
+    # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Sorry darling! Yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🚫 (Code by @asbhaibsr)")
         return
@@ -878,7 +882,7 @@ async def restart_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    # Convert OWNER_ID to int for comparison
+    # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
         await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)")
         return
@@ -899,7 +903,8 @@ async def new_member_handler(client: Client, message: Message):
         logger.info(f"Processing new member: {member.id} ({member.first_name}) in chat {message.chat.id}. Is bot: {member.is_bot}. (Event handled by @asbhaibsr)")
         # Check if the bot itself was added to a group
         if member.id == client.me.id:
-            if message.chat.type in ["group", "supergroup"]:
+            if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum here
+                logger.info(f"DEBUG: Bot {client.me.id} detected as new member in group {message.chat.id}. Calling update_group_info.") # NEW DEBUG LOG
                 await update_group_info(message.chat.id, message.chat.title)
                 logger.info(f"Bot joined new group: {message.chat.title} ({message.chat.id}). (Event handled by @asbhaibsr)")
                 
@@ -933,7 +938,7 @@ async def new_member_handler(client: Client, message: Message):
             # However, the primary "start bot in private" is handled by the /start private command.
             # This part primarily catches if someone *else* adds a user to a *private* bot chat (rare/edge case)
             # or if a new user is added to a group.
-            if message.chat.type == "private" and member.id == message.from_user.id and not user_exists:
+            if message.chat.type == ChatType.PRIVATE and member.id == message.from_user.id and not user_exists: # Use ChatType enum
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
                 notification_message = (
@@ -952,7 +957,7 @@ async def new_member_handler(client: Client, message: Message):
                     logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
                 
             # Condition for new user joining a group where the bot is present
-            elif message.chat.type in ["group", "supergroup"] and not user_exists:
+            elif message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and not user_exists: # Use ChatType enum
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
                 group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
@@ -985,7 +990,7 @@ async def left_member_handler(client: Client, message: Message):
     logger.info(f"Left chat member detected in chat {message.chat.id}. Left member ID: {message.left_chat_member.id}. Bot ID: {client.me.id}. (Event handled by @asbhaibsr)")
 
     if message.left_chat_member and message.left_chat_member.id == client.me.id:
-        if message.chat.type in ["group", "supergroup"]:
+        if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum
             group_tracking_collection.delete_one({"_id": message.chat.id})
             messages_collection.delete_many({"chat_id": message.chat.id})
             earning_tracking_collection.update_many(
@@ -1041,7 +1046,9 @@ async def handle_message_and_reply(client: Client, message: Message):
     logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}). (Handle message by @asbhaibsr)")
 
     # Update group and user info regardless of whether it's a command or regular message
-    if message.chat.type in ["group", "supergroup"]:
+    # Ensure update_group_info is called correctly when a message arrives in a group
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum
+        logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.") # NEW DEBUG LOG
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
