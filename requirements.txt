@@ -5,3 +5,5 @@ aiohttp
 dnspython
 tgcrypto==1.2.2
 Flask
+APScheduler
+pytz
