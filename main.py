@@ -230,7 +230,10 @@ async def store_message(message: Message):
                  "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
                 upsert=True
             )
-            logger.info(f"Group message count updated for user {user_id_to_track} ({first_name_to_track}). Current count: {earning_tracking_collection.find_one({'_id': user_id_to_track}).get('group_message_count', 0)}. (Earning tracking by @asbhaibsr)")
+            # Fetch and log the current count after update
+            updated_user_data = earning_tracking_collection.find_one({'_id': user_id_to_track})
+            current_count = updated_user_data.get('group_message_count', 0) if updated_user_data else 0
+            logger.info(f"Group message count updated for user {user_id_to_track} ({first_name_to_track}). Current count: {current_count}. (Earning tracking by @asbhaibsr)")
 
         await prune_old_messages()
 
