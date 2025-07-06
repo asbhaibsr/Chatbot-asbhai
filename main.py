@@ -9,7 +9,7 @@
 import os
 import asyncio
 import threading
-import time # Cool down ke liye time module import kiya hai
+import time
 
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 import logging
 import re
 import random
-import sys # Restart ke liye sys module import kiya hai
+import sys
 
 # Flask imports
 from flask import Flask, request, jsonify
@@ -29,7 +29,7 @@ from flask import Flask, request, jsonify
 # APScheduler imports for monthly reset
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-import pytz # timezone support ke liye
+import pytz
 
 # --- Logger Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -501,6 +501,60 @@ async def callback_handler(client, callback_query):
 
     logger.info(f"Callback query processed. (Code by @asbhaibsr)")
 
+@app.on_message(filters.command("topusers") & filters.private)
+async def top_users_command(client: Client, message: Message):
+    # Top users command handler for earning leaderboard. Designed by @asbhaibsr.
+    if is_on_cooldown(message.from_user.id):
+        return
+    update_cooldown(message.from_user.id)
+
+    top_users = await get_top_earning_users()
+
+    if not top_users:
+        await message.reply_text("😢 Abhi koi user leaderboard par nahi hai. Baatein karo aur pehle ban jao! ✨\n\n**Powered By:** @asbhaibsr", quote=True)
+        return
+
+    earning_messages = [
+        "💰 **Top 3 Active Users (This Month)** 💰\n\n"
+    ]
+
+    prizes = {1: "₹30", 2: "₹15", 3: "₹5"} # Define prizes for top 3
+
+    for i, user in enumerate(top_users):
+        rank = i + 1
+        user_name = user.get('first_name', 'Unknown User')
+        username_str = f"@{user.get('username')}" if user.get('username') else "N/A"
+        message_count = user.get('message_count', 0)
+        prize_str = prizes.get(rank, "₹0")
+
+        earning_messages.append(
+            f"**Rank {rank}:** {user_name} ({username_str})\n"
+            f"   • Total Messages: **{message_count}**\n"
+            f"   • Potential Earning: **{prize_str}**\n"
+        )
+    
+    earning_messages.append(
+        "\n**Earning Rules:**\n"
+        "• Earning will be based solely on **conversation (messages) within group chats.**\n"
+        "• **Spamming or sending a high volume of messages in quick succession will not be counted.** Only genuine, relevant conversation will be considered.\n"
+        "• Please ensure your conversations are **meaningful and engaging.**\n"
+        "• This leaderboard will be **reset on the 1st of every month at midnight (00:00 IST) Delhi, India time.**\n\n"
+        "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", url=f"https://t.me/{ASBHAI_USERNAME}") # Direct link to owner
+            ]
+        ]
+    )
+
+    await message.reply_text("\n".join(earning_messages), reply_markup=keyboard, quote=True)
+    await store_message(message)
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    logger.info(f"Top users command processed. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("broadcast") & filters.private)
 async def broadcast_command(client: Client, message: Message):
@@ -754,7 +808,7 @@ async def delete_specific_message_command(client: Client, message: Message):
     if message_to_delete:
         delete_result = messages_collection.delete_one({"_id": message_to_delete["_id"]})
         if delete_result.deleted_count > 0:
-            await message.reply_text(f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' wale message ko dhoondh ke delete kar diya. Ab woh history ka hissa nahi raha! ✨ (Code by @asbhaibsr)")
+            await message.reply_text(f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' wale message ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)")
             logger.info(f"Deleted message with content: '{search_query}'. (Code by @asbhaibsr)")
         else:
             await message.reply_text("Aww, yeh message to mujhe mila hi nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)")
@@ -931,9 +985,19 @@ if __name__ == "__main__":
     scheduler.start()
     logger.info("Scheduler started for monthly earning reset (Delhi Time). (Code by @asbhaibsr)")
 
-    app.run()
+    # Pyrogram client को कनेक्ट करें
+    app.start()
+
+    # Pyrogram को इवेंट लूप में idle रखें, ताकि APScheduler भी इसी में चले
+    logger.info("Pyrogram bot is now idle, listening for messages... (Code by @asbhaibsr)")
+    app.idle()
+
+    # जब बॉट बंद हो, तो APScheduler को भी बंद कर दें
+    scheduler.shutdown()
+    logger.info("Scheduler shut down. (Code by @asbhaibsr)")
+
+    # Pyrogram client को बंद करें
+    app.stop()
+    logger.info("Pyrogram bot stopped. (Code by @asbhaibsr)")
+
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
-
-
-
-
