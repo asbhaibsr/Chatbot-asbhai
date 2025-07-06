@@ -973,7 +973,11 @@ if __name__ == "__main__":
 
     logger.info("Starting Pyrogram bot... (Code by @asbhaibsr)")
     
-    # Scheduler setup for monthly earnings reset (Delhi, India timezone)
+    # Pyrogram client को कनेक्ट करें सबसे पहले
+    app.start() # <-- ये लाइन सबसे पहले बॉट को स्टार्ट करेगी और इवेंट लूप शुरू करेगी
+
+    # अब जब Pyrogram का इवेंट लूप चल रहा है, तब Scheduler को शुरू करें
+    logger.info("Scheduler setup for monthly earnings reset (Delhi, India timezone). (Code by @asbhaibsr)")
     scheduler = AsyncIOScheduler(timezone=pytz.timezone('Asia/Kolkata'))
     # Schedule the reset function to run on the 1st day of every month at 00:00 (midnight IST)
     @scheduler.scheduled_job(CronTrigger(day='1', hour='0', minute='0'), id='reset_monthly_earnings_job')
@@ -982,11 +986,8 @@ if __name__ == "__main__":
         await reset_monthly_earnings()
 
     # Start the scheduler
-    scheduler.start()
+    scheduler.start() # <-- अब इसे Pyrogram.start() के बाद कॉल करें
     logger.info("Scheduler started for monthly earning reset (Delhi Time). (Code by @asbhaibsr)")
-
-    # Pyrogram client को कनेक्ट करें
-    app.start()
 
     # Pyrogram को इवेंट लूप में idle रखें, ताकि APScheduler भी इसी में चले
     logger.info("Pyrogram bot is now idle, listening for messages... (Code by @asbhaibsr)")
