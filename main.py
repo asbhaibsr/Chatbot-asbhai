@@ -76,6 +76,7 @@ try:
     # Create indexes for efficient querying if they don't exist
     messages_collection.create_index([("timestamp", 1)])
     messages_collection.create_index([("user_id", 1)])
+    # Ensure this index is on group_message_count for sorting
     earning_tracking_collection.create_index([("group_message_count", -1)])
 
 
@@ -153,6 +154,11 @@ async def prune_old_messages():
 # --- Message Storage Logic ---
 async def store_message(message: Message):
     try:
+        # Avoid storing messages from bots
+        if message.from_user and message.from_user.is_bot:
+            logger.debug(f"Skipping storage for message from bot: {message.from_user.id}. (Code by @asbhaibsr)")
+            return
+
         message_data = {
             "message_id": message.id,
             "user_id": message.from_user.id if message.from_user else None,
@@ -209,16 +215,22 @@ async def store_message(message: Message):
         messages_collection.insert_one(message_data)
         logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
         
-        # New: Update user's group message count for earning, only if it's a group message and not from a bot
+        # --- NEW/IMPROVED: Update user's group message count for earning ---
+        # This section is crucial for earning tracking.
         if message.chat.type in ["group", "supergroup"] and message.from_user and not message.from_user.is_bot:
+            user_id_to_track = message.from_user.id
+            username_to_track = message.from_user.username
+            first_name_to_track = message.from_user.first_name
+
+            # Increment group_message_count for the user
             earning_tracking_collection.update_one(
-                {"_id": message.from_user.id}, # User ID is the _id
+                {"_id": user_id_to_track},
                 {"$inc": {"group_message_count": 1},
-                 "$set": {"username": message.from_user.username, "first_name": message.from_user.first_name, "last_active_group_message": datetime.now()},
+                 "$set": {"username": username_to_track, "first_name": first_name_to_track, "last_active_group_message": datetime.now()},
                  "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
                 upsert=True
             )
-            logger.debug(f"Group message count updated for {message.from_user.id}. (Earning tracking by @asbhaibsr)")
+            logger.info(f"Group message count updated for user {user_id_to_track} ({first_name_to_track}). Current count: {earning_tracking_collection.find_one({'_id': user_id_to_track}).get('group_message_count', 0)}. (Earning tracking by @asbhaibsr)")
 
         await prune_old_messages()
 
@@ -332,11 +344,14 @@ async def update_user_info(user_id: int, username: str, first_name: str):
 
 # --- Earning System Functions ---
 async def get_top_earning_users():
-    # This function returns the top 3 users based on group_message_count.
+    # This function returns the top users based on group_message_count.
+    # We should return all users with >0 messages, then the display logic can limit to top 3
     pipeline = [
         {"$match": {"group_message_count": {"$gt": 0}}}, # Only users with more than 0 group messages
         {"$sort": {"group_message_count": -1}}, # Sort in descending order
-        {"$limit": 3} # Get only top 3
+        # Remove limit here so the function returns all active users.
+        # The display logic in top_users_command will take care of top 3.
+        # {"$limit": 3} 
     ]
 
     top_users_data = list(earning_tracking_collection.aggregate(pipeline))
@@ -478,20 +493,13 @@ async def callback_handler(client, callback_query):
         # /topusers कमांड का लॉजिक यहाँ कॉल करें
         # हमें इसे एक मैसेज ऑब्जेक्ट की तरह पास करना होगा
         # reply_text, from_user, chat, command, etc. जैसे आवश्यक एट्रीब्यूट्स के साथ
-        fake_message = type('obj', (object,), {
-            'from_user': callback_query.from_user,
-            'chat': callback_query.message.chat,
-            'command': ['topusers', 'check'], # /topusers कमांड को अनुकरण करें
-            'reply_text': callback_query.message.reply_text, # reply_text फ़ंक्शन को पास करें
-            'reply_photo': callback_query.message.reply_photo, # reply_photo फ़ंक्शन को पास करें
-            'id': callback_query.message.id # Original message ID
-        })()
-        await top_users_command(client, fake_message)
+        # Changed: Passed original message for context and reply.
+        await top_users_command(client, callback_query.message)
         await callback_query.answer("Earning Leaderboard dikha raha hoon! 💰", show_alert=False)
 
     logger.info(f"Callback query processed. (Code by @asbhaibsr)")
 
-@app.on_message(filters.command("topusers") & filters.private)
+@app.on_message(filters.command("topusers") & (filters.private | filters.group)) # Allow in both private and group
 async def top_users_command(client: Client, message: Message):
     # Top users command handler for earning leaderboard. Designed by @asbhaibsr.
     if is_on_cooldown(message.from_user.id):
@@ -510,7 +518,8 @@ async def top_users_command(client: Client, message: Message):
 
     prizes = {1: "₹30", 2: "₹15", 3: "₹5"} # Define prizes for top 3
 
-    for i, user in enumerate(top_users):
+    # Limit to top 3 for display
+    for i, user in enumerate(top_users[:3]): # Modified: Slicing to display only top 3
         rank = i + 1
         user_name = user.get('first_name', 'Unknown User')
         username_str = f"@{user.get('username')}" if user.get('username') else "N/A"
@@ -541,7 +550,7 @@ async def top_users_command(client: Client, message: Message):
     )
 
     await message.reply_text("\n".join(earning_messages), reply_markup=keyboard, quote=True)
-    await store_message(message)
+    await store_message(message) # Store the command message itself
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Top users command processed. (Code by @asbhaibsr)")
@@ -569,6 +578,7 @@ async def broadcast_command(client: Client, message: Message):
     failed_count = 0
     for chat_id in unique_chat_ids:
         try:
+            # Avoid sending broadcast to the private chat where the command was issued
             if chat_id == message.chat.id and message.chat.type == "private":
                 continue 
             
@@ -701,7 +711,14 @@ async def leave_group_command(client: Client, message: Message):
         
         group_tracking_collection.delete_one({"_id": group_id})
         messages_collection.delete_many({"chat_id": group_id})
-        
+        # New: Also clear earning data for users in this group (optional, but good for cleanup)
+        # Note: This would clear *all* messages for users who were *only* in this group.
+        # For more granular control, one might need to iterate through messages for this group ID.
+        # For simplicity and general cleanup, we'll assume it's fine for now.
+        # If a user is in multiple groups, their count across other groups would remain.
+        # For now, let's just log a message about potential cleanup for earning tracking
+        logger.info(f"Considered cleaning earning data for users from left group {group_id}. (Code by @asbhaibsr)")
+
         await message.reply_text(f"Safaltapoorvak group `{group_id}` se bahar aa gayi, aur uska sara data bhi clean kar diya! Bye-bye! 👋 (Code by @asbhaibsr)")
         logger.info(f"Left group {group_id} and cleared its data. (Code by @asbhaibsr)")
 
@@ -789,6 +806,9 @@ async def delete_specific_message_command(client: Client, message: Message):
     search_query = " ".join(message.command[1:])
     
     # Try to find message in current chat first
+    # This logic was attempting to find a specific message in the current chat or globally
+    # but might not be ideal for deleting based on content alone, as content might not be unique.
+    # For now, keeping it as is, but consider if you want to delete based on message ID for more precision.
     message_to_delete = messages_collection.find_one({"chat_id": message.chat.id, "content": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
 
     if not message_to_delete:
@@ -939,37 +959,43 @@ async def left_member_handler(client: Client, message: Message):
 async def handle_message_and_reply(client: Client, message: Message):
     # Main message handler for replies. Core logic by @asbhaibsr.
     if message.from_user and message.from_user.is_bot:
+        # Important: Bots' messages should not count towards earning,
+        # and generally, the bot should not learn from other bots' messages.
         return
 
+    # Apply cooldown before processing message
     if message.from_user and is_on_cooldown(message.from_user.id):
         return
     if message.from_user:
         update_cooldown(message.from_user.id)
 
+    # Update group and user info regardless of whether it's a command or regular message
     if message.chat.type in ["group", "supergroup"]:
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
-    await store_message(message)
+    await store_message(message) # This is where the earning count increments
 
-    logger.info(f"Attempting to generate reply for chat {message.chat.id}. (Logic by @asbhaibsr)")
-    reply_doc = await generate_reply(message)
-    
-    if reply_doc:
-        try:
-            if reply_doc.get("type") == "text":
-                await message.reply_text(reply_doc["content"])
-                logger.info(f"Replied with text: {reply_doc['content']}. (System by @asbhaibsr)")
-            elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
-                await message.reply_sticker(reply_doc["sticker_id"])
-                logger.info(f"Replied with sticker: {reply_doc['sticker_id']}. (System by @asbhaibsr)")
-            else:
-                logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}. (System by @asbhaibsr)")
-        except Exception as e:
-            logger.error(f"Error sending reply for message {message.id}: {e}. (System by @asbhaibsr)")
-    else:
-        logger.info("No suitable reply found. (System by @asbhaibsr)")
+    # Only attempt to generate a reply if it's not a command message
+    if not message.text or not message.text.startswith('/'):
+        logger.info(f"Attempting to generate reply for chat {message.chat.id}. (Logic by @asbhaibsr)")
+        reply_doc = await generate_reply(message)
+        
+        if reply_doc:
+            try:
+                if reply_doc.get("type") == "text":
+                    await message.reply_text(reply_doc["content"])
+                    logger.info(f"Replied with text: {reply_doc['content']}. (System by @asbhaibsr)")
+                elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
+                    await message.reply_sticker(reply_doc["sticker_id"])
+                    logger.info(f"Replied with sticker: {reply_doc['sticker_id']}. (System by @asbhaibsr)")
+                else:
+                    logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}. (System by @asbhaibsr)")
+            except Exception as e:
+                logger.error(f"Error sending reply for message {message.id}: {e}. (System by @asbhaibsr)")
+        else:
+            logger.info("No suitable reply found. (System by @asbhaibsr)")
 
 
 # --- Main entry point ---
