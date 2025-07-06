@@ -72,12 +72,15 @@ try:
     earning_tracking_collection = db_tracking.monthly_earnings_data
     # New: Collection to track last reset date (Still useful for logging/tracking last manual reset)
     reset_status_collection = db_tracking.reset_status
+    # NEW: Collection to store user languages
+    user_language_collection = db_tracking.user_languages
     logger.info("MongoDB (Tracking & Earning) connection successful. Credit: @asbhaibsr")
 
     # Create indexes for efficient querying if they don't exist
     messages_collection.create_index([("timestamp", 1)])
     messages_collection.create_index([("user_id", 1)])
     earning_tracking_collection.create_index([("group_message_count", -1)])
+    user_language_collection.create_index([("user_id", 1)], unique=True) # Ensure unique language per user
 
 
 except Exception as e:
@@ -119,6 +122,236 @@ def is_on_cooldown(user_id):
 
 def update_cooldown(user_id):
     user_cooldowns[user_id] = time.time()
+
+# --- Language Handling ---
+async def get_user_language(user_id: int):
+    # Function to retrieve user's preferred language.
+    lang_data = user_language_collection.find_one({"user_id": user_id})
+    return lang_data.get("language", "en") if lang_data else "en" # Default to English
+
+async def set_user_language(user_id: int, language: str):
+    # Function to set user's preferred language.
+    user_language_collection.update_one(
+        {"user_id": user_id},
+        {"$set": {"language": language, "last_updated": datetime.now()}},
+        upsert=True
+    )
+    logger.info(f"User {user_id} language set to {language}. (Language system by @asbhaibsr)")
+
+# --- Language-specific Messages ---
+MESSAGES = {
+    "en": {
+        "welcome_private": lambda user_name: [
+            f"Hi **{user_name}!** 👋 I'm here. Let's chat! ✨",
+            f"Hellooo **{user_name}!** 💖 I'm ready to listen and learn. 😊",
+            f"Namaste **{user_name}!** Need anything? 😉 I'm here!"
+        ],
+        "welcome_group": lambda user_name: [
+            f"Hello **{user_name}!** 👋 I'm here. Ready to listen to group conversations! ✨",
+            f"Hey **{user_name}!** 💖 I'm here to learn from your conversations. 😊",
+            f"Namaste **{user_name}!** I'm your bot in this group. 😄"
+        ],
+        "buttons_common": [
+            InlineKeyboardButton("➕ Add Me to Your Group", url=f"https://t.me/{app.me.username}?startgroup=true")
+        ],
+        "buttons_group_only": [
+            InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
+            InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
+        ],
+        "buttons_private_only": [
+            InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
+            InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
+        ],
+        "buttons_buy_earning": [
+            InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo"),
+            InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard")
+        ],
+        "buy_code_details": lambda asbhai_username: f"🤩 If you want a bot like me, you'll need to pay ₹500. Contact **@{asbhai_username}** and tell them you want this bot's code. Hurry, deals are hot! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group",
+        "cooldown_message": "Please wait a moment before sending another command. ⏳",
+        "no_leaderboard_data": "😢 No user is on the leaderboard yet. Start chatting and be the first! ✨\n\n**Powered By:** @asbhaibsr",
+        "top_users_header": "💰 **Top Active Users (This Month)** 💰\n\n",
+        "user_earning_details": lambda rank, user_name, username_str, message_count, prize_str: f"**Rank {rank}:** {user_name} ({username_str})\n   • Total Messages: **{message_count}**\n   • Potential Earning: **{prize_str}**\n",
+        "earning_rules": "\n**Earning Rules:**\n• Earning will be based solely on **conversation (messages) within group chats.**\n• **Spamming or sending a high volume of messages in quick succession will not be counted.** Only genuine, relevant conversation will be considered.\n• Please ensure your conversations are **meaningful and engaging.**\n• This leaderboard can be **reset manually by the owner using /clearearning command.**\n\n**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group",
+        "withdraw_button": "💰 Withdraw Earnings",
+        "owner_command_only": "Oops! Sorry sweetie, this command is only for my boss. You don't have permission. 🤷‍♀️ (Code by @asbhaibsr)",
+        "broadcast_usage": "Hey, write something to broadcast! 🙄 Like: `/broadcast Your message here` (Code by @asbhaibsr)",
+        "broadcast_sent": lambda sent, failed: f"Broadcast done, darling! ✨ **{sent}** chats reached, and **{failed}** failed. Never mind, next time! 😉 (System by @asbhaibsr)",
+        "stats_usage": "Umm, to check stats, type it correctly! `/stats check` like this. 😊 (Code by @asbhaibsr)",
+        "bot_stats": lambda groups, users, messages: (
+            "📊 **Bot Statistics** 📊\n"
+            f"• Groups I'm in: **{groups}** lovely groups!\n"
+            f"• Total users observed: **{users}** dear users!\n"
+            f"• Total messages stored: **{messages}** treasure of talks! 🤩\n\n"
+            f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+        ),
+        "no_groups_found": "I'm not in any group yet. I'm lonely, someone add me! 🥺 (Code by @asbhaibsr)",
+        "group_list_header": "📚 **Groups I'm In** 📚\n\n",
+        "group_list_item": lambda i, title, group_id, added_on: f"{i+1}. **{title}** (`{group_id}`)\n   • Joined: {added_on}\n",
+        "group_list_footer": "\n_This data is from the tracking database, completely secret!_ 🤫\n**Code & System By:** @asbhaibsr",
+        "leave_group_usage": "Please provide the group ID you want me to leave. Usage: `/leavegroup -1001234567890` (like this, darling!) (Code by @asbhaibsr)",
+        "invalid_group_id_format": "You provided an incorrect Group ID format. Group ID starts with `-100...`. Be careful! 😊 (Code by @asbhaibsr)",
+        "leave_group_success": lambda group_id: f"Successfully left group `{group_id}` and cleared all its data! Bye-bye! 👋 (Code by @asbhaibsr)",
+        "leave_group_error": lambda e: f"An error occurred while leaving the group: {e}. Oh no! 😢 (Code by @asbhaibsr)",
+        "clear_data_usage": "How much data to clear? Tell me the percentage, like: `/cleardata 10%` or `/cleardata 100%`! 🧹 (Code by @asbhaibsr)",
+        "invalid_percentage": "Percentage must be between 1 and 100. Be a little careful! 🤔 (Code by @asbhaibsr)",
+        "invalid_percentage_format": "Invalid percentage format. Percentage should be a number, like `10` or `50`. Try again!💖 (Code by @asbhaibsr)",
+        "no_data_to_clear": "I don't have any data to delete yet. Everything is clean-clean! ✨ (Code by @asbhaibsr)",
+        "low_data_clear_warning": lambda percentage: f"There's so little data that clearing {percentage}% won't make a difference! 😂 (Code by @asbhaibsr)",
+        "zero_percent_clear": "Zero percent? That means no deletion! 😉 (Code by @asbhaibsr)",
+        "data_clear_success": lambda percentage, count: f"Wow! 🤩 I successfully deleted **{percentage}%** of your data, meaning **{count}** messages! Now I'm feeling a bit lighter. ✨ (Code by @asbhaibsr)",
+        "no_data_found_to_clear": "Umm, didn't find anything to delete. Looks like you already cleaned everything! 🤷‍♀️ (Code by @asbhaibsr)",
+        "delete_message_usage": "Which message to delete, tell me! Like: `/deletemessage hello` or `/deletemessage 'what's up'` 👻 (Code by @asbhaibsr)",
+        "message_delete_success": lambda query: f"As you command, my master! 🧞‍♀️ I found and deleted the message '{query}'. Now it's no longer part of history! ✨ (Code by @asbhaibsr)",
+        "message_not_found_in_db": "Aww, I couldn't find this message. Maybe it changed its location! 🕵️‍♀️ (Code by @asbhaibsr)",
+        "message_not_found_globally": "Umm, I couldn't find your message in my database. Check the spelling? 🤔 (Code by @asbhaibsr)",
+        "earning_clear_success": "💰 **Earning data successfully cleared!** Now everyone will start from zero again! 😉 (Code by @asbhaibsr)",
+        "restart_message": "Okay, darling! I'm taking a short nap and then I'll be back, completely fresh and energetic! Please wait a bit, okay? ✨ (System by @asbhaibsr)",
+        "new_group_alert": lambda group_title, group_id, added_by_user, added_on: (
+            f"🥳 **New Group Alert!**\n"
+            f"Bot has been added to a new group!\n\n"
+            f"**Group Name:** {group_title}\n"
+            f"**Group ID:** `{group_id}`\n"
+            f"**Added By:** {added_by_user}\n"
+            f"**Added On:** {added_on}\n\n"
+            f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+        ),
+        "new_user_private_alert": lambda user_name, user_id, user_username, started_on: (
+            f"✨ **New User Alert!**\n"
+            f"A new user has started the bot in private chat.\n\n"
+            f"**User Name:** {user_name}\n"
+            f"**User ID:** `{user_id}`\n"
+            f"**Username:** {user_username}\n"
+            f"**Started On:** {started_on}\n\n"
+            f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+        ),
+        "new_group_member_alert": lambda user_name, user_id, user_username, group_title, group_id, joined_on: (
+            f"👥 **New Group Member Alert!**\n"
+            f"A new user has been added to a group where the bot is also present.\n\n"
+            f"**User Name:** {user_name}\n"
+            f"**User ID:** `{user_id}`\n"
+            f"**Username:** {user_username}\n"
+            f"**Group Name:** {group_title}\n"
+            f"**Group ID:** `{group_id}`\n"
+            f"**Joined On:** {joined_on}\n\n"
+            f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+        ),
+        "group_left_alert": lambda group_title, group_id, left_by_user, left_on: (
+            f"💔 **Group Left Alert!**\n"
+            f"Bot has been removed from a group or left itself.\n\n"
+            f"**Group Name:** {group_title}\n"
+            f"**Group ID:** `{group_id}`\n"
+            f"**Action By:** {left_by_user}\n"
+            f"**Left On:** {left_on}\n\n"
+            f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+        )
+    },
+    "hi": {
+        "welcome_private": lambda user_name: [
+            f"नमस्ते **{user_name}!** 👋 मैं आ गई हूँ। चलो, बातें करते हैं! ✨",
+            f"हेलोooo **{user_name}!** 💖 मैं सुनने और सीखने के लिए तैयार हूँ। 😊",
+            f"नमस्ते **{user_name}!** कोई काम है? 😉 मैं यहाँ हूँ!"
+        ],
+        "welcome_group": lambda user_name: [
+            f"नमस्ते **{user_name}!** 👋 मैं आ गई हूँ। ग्रुप की बातें सुनने को तैयार हूँ! ✨",
+            f"हे **{user_name}!** 💖 मैं यहाँ आपकी बातचीत से सीखने आई हूँ। 😊",
+            f"नमस्ते **{user_name}!** इस ग्रुप में मैं हूँ आपकी अपनी बॉट। 😄"
+        ],
+        "buttons_common": [
+            InlineKeyboardButton("➕ मुझे अपने ग्रुप में जोड़ें", url=f"https://t.me/{app.me.username}?startgroup=true")
+        ],
+        "buttons_group_only": [
+            InlineKeyboardButton("📣 अपडेट्स चैनल", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
+            InlineKeyboardButton("❓ सपोर्ट ग्रुप", url="https://t.me/aschat_group")
+        ],
+        "buttons_private_only": [
+            InlineKeyboardButton("📣 अपडेट्स चैनल", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
+            InlineKeyboardButton("❓ सपोर्ट ग्रुप", url="https://t.me/aschat_group")
+        ],
+        "buttons_buy_earning": [
+            InlineKeyboardButton("🛒 मेरा कोड खरीदें", callback_data="buy_git_repo"),
+            InlineKeyboardButton("💰 कमाई लीडरबोर्ड", callback_data="show_earning_leaderboard")
+        ],
+        "buy_code_details": lambda asbhai_username: f"🤩 अगर आपको मेरे जैसा खुद का बॉट बनवाना है, तो आपको ₹500 देने होंगे। इसके लिए **@{asbhai_username}** से संपर्क करें और उन्हें बताइए कि आपको इस बॉट का कोड चाहिए बनवाने के लिए। जल्दी करो, डील्स हॉट हैं! 💸\n\n**मालिक:** @asbhaibsr\n**अपडेट्स:** @asbhai_bsr\n**सपोर्ट:** @aschat_group",
+        "cooldown_message": "कृपया दूसरा कमांड भेजने से पहले थोड़ा इंतजार करें। ⏳",
+        "no_leaderboard_data": "😢 अभी कोई यूजर लीडरबोर्ड पर नहीं है। बातें करो और पहले बन जाओ! ✨\n\n**द्वारा संचालित:** @asbhaibsr",
+        "top_users_header": "💰 **शीर्ष सक्रिय उपयोगकर्ता (इस महीने)** 💰\n\n",
+        "user_earning_details": lambda rank, user_name, username_str, message_count, prize_str: f"**रैंक {rank}:** {user_name} ({username_str})\n   • कुल संदेश: **{message_count}**\n   • संभावित कमाई: **{prize_str}**\n",
+        "earning_rules": "\n**कमाई के नियम:**\n• कमाई केवल **समूह चैट के भीतर बातचीत (संदेशों) पर आधारित होगी।**\n• **स्पैमिंग या तेज़ी से बड़ी संख्या में संदेश भेजना गिना नहीं जाएगा।** केवल वास्तविक, प्रासंगिक बातचीत पर विचार किया जाएगा।\n• कृपया सुनिश्चित करें कि आपकी बातचीत **अर्थपूर्ण और आकर्षक हो।**\n• इस लीडरबोर्ड को **मालिक द्वारा /clearearning कमांड का उपयोग करके मैन्युअल रूप से रीसेट किया जा सकता है।**\n\n**द्वारा संचालित:** @asbhaibsr\n**अपडेट्स:** @asbhai_bsr\n**सपोर्ट:** @aschat_group",
+        "withdraw_button": "💰 पैसे निकलवाएँ",
+        "owner_command_only": "ओह! सॉरी स्वीटी, यह कमांड सिर्फ मेरे बॉस के लिए है। तुम्हें अनुमति नहीं है। 🤷‍♀️ (कोड द्वारा @asbhaibsr)",
+        "broadcast_usage": "हे, ब्रॉडकास्ट करने के लिए कुछ लिखो तो सही! 🙄 जैसे: `/broadcast आपका संदेश यहाँ` (कोड द्वारा @asbhaibsr)",
+        "broadcast_sent": lambda sent, failed: f"ब्रॉडकास्ट हो गया, डार्लिंग! ✨ **{sent}** चैट तक पहुंचा, और **{failed}** तक नहीं। कोई नहीं, अगली बार! 😉 (सिस्टम द्वारा @asbhaibsr)",
+        "stats_usage": "उम्म, आंकड़े देखने के लिए ठीक से लिखो ना! `/stats check` ऐसे। 😊 (कोड द्वारा @asbhaibsr)",
+        "bot_stats": lambda groups, users, messages: (
+            "📊 **बॉट के आंकड़े** 📊\n"
+            f"• जितने ग्रुप्स में मैं हूँ: **{groups}** प्यारे ग्रुप्स!\n"
+            f"• कुल उपयोगकर्ता जो मैंने देखे: **{users}** प्यारे उपयोगकर्ता!\n"
+            f"• कुल संदेश जो मैंने स्टोर किए: **{messages}** बातों का खजाना! 🤩\n\n"
+            f"**द्वारा संचालित:** @asbhaibsr\n**अपडेट्स:** @asbhai_bsr\n**सपोर्ट:** @aschat_group"
+        ),
+        "no_groups_found": "मैं अभी किसी ग्रुप में नहीं हूँ। अकेली हूँ, कोई ऐड कर लो ना! 🥺 (कोड द्वारा @asbhaibsr)",
+        "group_list_header": "📚 **ग्रुप्स जहाँ मैं हूँ** 📚\n\n",
+        "group_list_item": lambda i, title, group_id, added_on: f"{i+1}. **{title}** (`{group_id}`)\n   • शामिल हुआ: {added_on}\n",
+        "group_list_footer": "\n_यह डेटा ट्रैकिंग डेटाबेस से है, बिल्कुल सीक्रेट!_ 🤫\n**कोड और सिस्टम द्वारा:** @asbhaibsr",
+        "leave_group_usage": "कृपया ग्रुप आईडी दें जिससे आप मुझे हटाना चाहते हैं। उपयोग: `/leavegroup -1001234567890` (ऐसे, डार्लिंग!) (कोड द्वारा @asbhaibsr)",
+        "invalid_group_id_format": "आपने गलत ग्रुप आईडी प्रारूप दिया है। ग्रुप आईडी `-100...` से शुरू होती है। थोड़ा ध्यान से! 😊 (कोड द्वारा @asbhaibsr)",
+        "leave_group_success": lambda group_id: f"सफलतापूर्वक ग्रुप `{group_id}` से बाहर आ गई, और उसका सारा डेटा भी क्लीन कर दिया! बाय-बाय! 👋 (कोड द्वारा @asbhaibsr)",
+        "leave_group_error": lambda e: f"ग्रुप से बाहर निकलते समय गलती हो गई: {e}. ओह नो! 😢 (कोड द्वारा @asbhaibsr)",
+        "clear_data_usage": "कितना डेटा क्लीन करना है? प्रतिशत बताओ ना, जैसे: `/cleardata 10%` या `/cleardata 100%`! 🧹 (कोड द्वारा @asbhaibsr)",
+        "invalid_percentage": "प्रतिशत 1 से 100 के बीच में होना चाहिए। थोड़ा ध्यान से! 🤔 (कोड द्वारा @asbhaibsr)",
+        "invalid_percentage_format": "अमान्य प्रतिशत प्रारूप। प्रतिशत संख्या में होना चाहिए, जैसे `10` या `50`। फिर से कोशिश करो!💖 (कोड द्वारा @asbhaibsr)",
+        "no_data_to_clear": "मेरे पास अभी कोई डेटा नहीं है डिलीट करने के लिए। सब क्लीन-क्लीन है! ✨ (कोड द्वारा @asbhaibsr)",
+        "low_data_clear_warning": lambda percentage: f"इतना कम डेटा है कि {percentage}% डिलीट करने से कुछ फर्क नहीं पड़ेगा! 😂 (कोड द्वारा @asbhaibsr)",
+        "zero_percent_clear": "शून्य प्रतिशत? इसका मतलब कोई विलोपन नहीं! 😉 (कोड द्वारा @asbhaibsr)",
+        "data_clear_success": lambda percentage, count: f"वाह! 🤩 मैंने आपका **{percentage}%** डेटा, यानी **{count}** संदेश, सफलतापूर्वक डिलीट कर दिए! अब मैं थोड़ी हल्की महसूस कर रही हूँ। ✨ (कोड द्वारा @asbhaibsr)",
+        "no_data_found_to_clear": "उम्म, कुछ डिलीट करने के लिए मिला ही नहीं। लगता है तुमने पहले ही सब क्लीन कर दिया है! 🤷‍♀️ (कोड द्वारा @asbhaibsr)",
+        "delete_message_usage": "कौन सा संदेश डिलीट करना है, बताओ तो सही! जैसे: `/deletemessage हेलो` या `/deletemessage 'क्या हाल है'` 👻 (कोड द्वारा @asbhaibsr)",
+        "message_delete_success": lambda query: f"जैसा हुकुम मेरे आका! 🧞‍♀️ मैंने '{query}' वाले संदेश को ढूँढ के डिलीट कर दिया। अब वो इतिहास का हिस्सा नहीं रहा! ✨ (कोड द्वारा @asbhaibsr)",
+        "message_not_found_in_db": "ओह, यह संदेश तो मुझे मिला ही नहीं। शायद उसने अपनी लोकेशन बदल दी है! 🕵️‍♀️ (कोड द्वारा @asbhaibsr)",
+        "message_not_found_globally": "उम्म, मुझे तुम्हारा यह संदेश तो मिला ही नहीं अपने डेटाबेस में। स्पेलिंग चेक कर लो? 🤔 (कोड द्वारा @asbhaibsr)",
+        "earning_clear_success": "💰 **कमाई का डेटा सफलतापूर्वक साफ़ कर दिया गया!** अब सब फिर से शून्य से शुरू करेंगे! 😉 (कोड द्वारा @asbhaibsr)",
+        "restart_message": "ठीक है, डार्लिंग! मैं अभी एक छोटी सी नींद ले रही हूँ और फिर वापस आ जाऊंगी, बिल्कुल फ्रेश और एनर्जेटिक! थोड़ा इंतजार करना, ठीक है? ✨ (सिस्टम द्वारा @asbhaibsr)",
+        "new_group_alert": lambda group_title, group_id, added_by_user, added_on: (
+            f"🥳 **नए ग्रुप की सूचना!**\n"
+            f"बॉट को एक नए ग्रुप में जोड़ा गया है!\n\n"
+            f"**ग्रुप का नाम:** {group_title}\n"
+            f"**ग्रुप आईडी:** `{group_id}`\n"
+            f"**जोड़ा गया:** {added_by_user}\n"
+            f"**जोड़ने का समय:** {added_on}\n\n"
+            f"**कोड द्वारा:** @asbhaibsr\n**अपडेट्स:** @asbhai_bsr\n**सपोर्ट:** @aschat_group"
+        ),
+        "new_user_private_alert": lambda user_name, user_id, user_username, started_on: (
+            f"✨ **नए उपयोगकर्ता की सूचना!**\n"
+            f"एक नए उपयोगकर्ता ने बॉट को निजी चैट में शुरू किया है।\n\n"
+            f"**उपयोगकर्ता का नाम:** {user_name}\n"
+            f"**उपयोगकर्ता आईडी:** `{user_id}`\n"
+            f"**उपयोगकर्ता नाम:** {user_username}\n"
+            f"**शुरू किया गया:** {started_on}\n\n"
+            f"**कोड द्वारा:** @asbhaibsr\n**अपडेट्स:** @asbhai_bsr\n**सपोर्ट:** @aschat_group"
+        ),
+        "new_group_member_alert": lambda user_name, user_id, user_username, group_title, group_id, joined_on: (
+            f"👥 **नए समूह सदस्य की सूचना!**\n"
+            f"एक नया उपयोगकर्ता समूह में जोड़ा गया है जहाँ बॉट भी मौजूद है।\n\n"
+            f"**उपयोगकर्ता का नाम:** {user_name}\n"
+            f"**उपयोगकर्ता आईडी:** `{user_id}`\n"
+            f"**उपयोगकर्ता नाम:** {user_username}\n"
+            f"**समूह का नाम:** {group_title}\n"
+            f"**समूह आईडी:** `{group_id}`\n"
+            f"**शामिल हुआ:** {joined_on}\n\n"
+            f"**कोड द्वारा:** @asbhaibsr\n**अपडेट्स:** @asbhai_bsr\n**सपोर्ट:** @aschat_group"
+        ),
+        "group_left_alert": lambda group_title, group_id, left_by_user, left_on: (
+            f"💔 **समूह छोड़ने की सूचना!**\n"
+            f"बॉट को एक समूह से हटाया गया है या वह खुद छोड़ गया है।\n\n"
+            f"**समूह का नाम:** {group_title}\n"
+            f"**समूह आईडी:** `{group_id}`\n"
+            f"**कार्रवाई करने वाला:** {left_by_user}\n"
+            f"**छोड़ने का समय:** {left_on}\n\n"
+            f"**कोड द्वारा:** @asbhaibsr\n**अपडेट्स:** @asbhai_bsr\n**सपोर्ट:** @aschat_group"
+        )
+    }
+}
+
 
 # --- Utility Functions ---
 def extract_keywords(text):
@@ -418,34 +651,41 @@ async def start_private_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
-    welcome_messages = [
-        f"Hi **{user_name}!** 👋 Main aa gayi hoon. Chalo, baatein karte hain! ✨",
-        f"Hellooo **{user_name}!** 💖 Main sunne aur seekhne ke liye taiyar hoon. 😊",
-        f"Namaste **{user_name}!** Koi kaam hai? 😉 Main yahan hoon!"
-    ]
-    
-    keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("➕ Add Me to Your Group", url=f"https://t.me/{client.me.username}?startgroup=true")
-            ],
-            [
-                InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
-                InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
-            ],
-            [
-                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo"),
-                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") # New button for earning
-            ]
-        ]
-    )
+    user_lang = await get_user_language(message.from_user.id)
 
-    await message.reply_photo(
-        photo=BOT_PHOTO_URL,
-        caption=random.choice(welcome_messages),
-        reply_markup=keyboard
-    )
+    # If language is not set (default 'en'), ask user to choose
+    if user_lang == "en" and not user_language_collection.find_one({"user_id": message.from_user.id}):
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("English 🇬🇧", callback_data="set_lang_en"),
+                    InlineKeyboardButton("हिंदी 🇮🇳", callback_data="set_lang_hi")
+                ]
+            ]
+        )
+        await message.reply_photo(
+            photo=BOT_PHOTO_URL,
+            caption="Please choose your language:\n\nकृपया अपनी भाषा चुनें:",
+            reply_markup=keyboard
+        )
+    else:
+        # Language is already set, or user chose it. Proceed with welcome message in chosen language.
+        user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
+        welcome_message = random.choice(MESSAGES[user_lang]["welcome_private"](user_name))
+        
+        keyboard = InlineKeyboardMarkup(
+            [
+                MESSAGES[user_lang]["buttons_common"],
+                MESSAGES[user_lang]["buttons_private_only"],
+                MESSAGES[user_lang]["buttons_buy_earning"]
+            ]
+        )
+        await message.reply_photo(
+            photo=BOT_PHOTO_URL,
+            caption=welcome_message,
+            reply_markup=keyboard
+        )
+
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -458,50 +698,91 @@ async def start_group_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
+    user_lang = await get_user_language(message.from_user.id)
+
+    # In groups, we directly send the welcome message. Language selection happens in private.
     user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
-    welcome_messages = [
-        f"Hello **{user_name}!** 👋 Main aa gayi hoon. Group ki baatein sunne ko taiyar hoon! ✨",
-        f"Hey **{user_name}!** 💖 Main yahan aapki conversations se seekhne aayi hoon. 😊",
-        f"Namaste **{user_name}!** Is group mein main hoon aapki apni bot. 😄"
-    ]
+    welcome_message = random.choice(MESSAGES[user_lang]["welcome_group"](user_name))
 
     keyboard = InlineKeyboardMarkup(
         [
-            [
-                InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
-                InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
-            ],
-            [
-                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo"),
-                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") # New button for earning
-            ]
+            MESSAGES[user_lang]["buttons_group_only"],
+            MESSAGES[user_lang]["buttons_buy_earning"]
         ]
     )
 
     await message.reply_photo(
         photo=BOT_PHOTO_URL,
-        caption=random.choice(welcome_messages),
+        caption=welcome_message,
         reply_markup=keyboard
     )
     await store_message(message)
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum here
-        # Ensure group info is updated when /start is called in a group
-        logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.") # NEW DEBUG LOG
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.")
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Group start command processed in chat {message.chat.id}. (Code by @asbhaibsr)")
 
 
+@app.on_callback_query(filters.regex("^set_lang_"))
+async def set_language_callback(client, callback_query):
+    user_id = callback_query.from_user.id
+    chosen_lang = callback_query.data.split("_")[2] # Extracts 'en' or 'hi'
+
+    await set_user_language(user_id, chosen_lang)
+    
+    user_name = callback_query.from_user.first_name if callback_query.from_user else "Pyaare Dost"
+    
+    # Send a confirmation message in the chosen language
+    if chosen_lang == "en":
+        welcome_message = random.choice(MESSAGES["en"]["welcome_private"](user_name))
+        confirm_text = "Language set to English! 🎉"
+    else: # hi
+        welcome_message = random.choice(MESSAGES["hi"]["welcome_private"](user_name))
+        confirm_text = "भाषा हिंदी पर सेट कर दी गई है! 🎉"
+
+    # Update the existing message with the welcome message in the chosen language
+    # and the relevant buttons
+    keyboard = InlineKeyboardMarkup(
+        [
+            MESSAGES[chosen_lang]["buttons_common"],
+            MESSAGES[chosen_lang]["buttons_private_only"],
+            MESSAGES[chosen_lang]["buttons_buy_earning"]
+        ]
+    )
+    await callback_query.message.edit_caption(
+        caption=welcome_message,
+        reply_markup=keyboard
+    )
+    await callback_query.answer(confirm_text, show_alert=False)
+    
+    # Store button interaction
+    buttons_collection.insert_one({
+        "user_id": user_id,
+        "username": callback_query.from_user.username,
+        "first_name": callback_query.from_user.first_name,
+        "button_data": callback_query.data,
+        "timestamp": datetime.now(),
+        "credit": "by @asbhaibsr"
+    })
+    logger.info(f"User {user_id} chose language: {chosen_lang}. (Language system by @asbhaibsr)")
+
+
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
     # Callback query handler. Developed by @asbhaibsr.
+    user_lang = await get_user_language(callback_query.from_user.id)
+
     if callback_query.data == "buy_git_repo":
         await callback_query.message.reply_text(
-            f"🤩 Agar aapko mere jaisa khud ka bot banwana hai, toh aapko ₹500 dene honge. Iske liye **@{ASBHAI_USERNAME}** se contact karein aur unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group",
+            MESSAGES[user_lang]["buy_code_details"](ASBHAI_USERNAME),
             quote=True
         )
-        await callback_query.answer("Details mil gayi na? Ab jao, deal final karo! 😉", show_alert=False)
+        await callback_query.answer(
+            "Details mil gayi na? Ab jao, deal final karo! 😉" if user_lang == "hi" else "Got the details? Now go, finalize the deal! 😉", 
+            show_alert=False
+        )
         # Store button interaction
         buttons_collection.insert_one({
             "user_id": callback_query.from_user.id,
@@ -511,13 +792,12 @@ async def callback_handler(client, callback_query):
             "timestamp": datetime.now(),
             "credit": "by @asbhaibsr"
         })
-    elif callback_query.data == "show_earning_leaderboard": # New callback for earning button
-        # /topusers कमांड का लॉजिक यहाँ कॉल करें
-        # हमें इसे एक मैसेज ऑब्जेक्ट की तरह पास करना होगा
-        # reply_text, from_user, chat, command, etc. जैसे आवश्यक एट्रीब्यूट्स के साथ
-        # Changed: Passed original message for context and reply.
+    elif callback_query.data == "show_earning_leaderboard":
         await top_users_command(client, callback_query.message)
-        await callback_query.answer("Earning Leaderboard dikha raha hoon! 💰", show_alert=False)
+        await callback_query.answer(
+            "Earning Leaderboard dikha raha hoon! 💰" if user_lang == "hi" else "Showing Earning Leaderboard! 💰", 
+            show_alert=False
+        )
 
     logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}. (Code by @asbhaibsr)")
 
@@ -528,14 +808,15 @@ async def top_users_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
+    user_lang = await get_user_language(message.from_user.id)
     top_users = await get_top_earning_users()
 
     if not top_users:
-        await message.reply_text("😢 Abhi koi user leaderboard par nahi hai. Baatein karo aur pehle ban jao! ✨\n\n**Powered By:** @asbhaibsr", quote=True)
+        await message.reply_text(MESSAGES[user_lang]["no_leaderboard_data"], quote=True)
         return
 
     earning_messages = [
-        "💰 **Top 3 Active Users (This Month)** 💰\n\n"
+        MESSAGES[user_lang]["top_users_header"]
     ]
 
     prizes = {1: "₹30", 2: "₹15", 3: "₹5"} # Define prizes for top 3
@@ -549,24 +830,15 @@ async def top_users_command(client: Client, message: Message):
         prize_str = prizes.get(rank, "₹0")
 
         earning_messages.append(
-            f"**Rank {rank}:** {user_name} ({username_str})\n"
-            f"   • Total Messages: **{message_count}**\n"
-            f"   • Potential Earning: **{prize_str}**\n"
+            MESSAGES[user_lang]["user_earning_details"](rank, user_name, username_str, message_count, prize_str)
         )
     
-    earning_messages.append(
-        "\n**Earning Rules:**\n"
-        "• Earning will be based solely on **conversation (messages) within group chats.**\n"
-        "• **Spamming or sending a high volume of messages in quick succession will not be counted.** Only genuine, relevant conversation will be considered.\n"
-        "• Please ensure your conversations are **meaningful and engaging.**\n"
-        "• This leaderboard can be **reset manually by the owner using /clearearning command.**\n\n" # Updated info
-        "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
-    )
+    earning_messages.append(MESSAGES[user_lang]["earning_rules"])
 
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", url=f"https://t.me/{ASBHAI_USERNAME}") # Direct link to owner
+                InlineKeyboardButton(MESSAGES[user_lang]["withdraw_button"], url=f"https://t.me/{ASBHAI_USERNAME}") # Direct link to owner
             ]
         ]
     )
@@ -584,13 +856,15 @@ async def broadcast_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
+    user_lang = await get_user_language(message.from_user.id)
+
     # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["owner_command_only"])
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Hey, broadcast karne ke liye kuch likho toh sahi! 🙄 Jaise: `/broadcast Aapka message yahan` (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["broadcast_usage"])
         return
 
     broadcast_text = " ".join(message.command[1:])
@@ -613,7 +887,7 @@ async def broadcast_command(client: Client, message: Message):
             logger.error(f"Failed to send broadcast to chat {chat_id}: {e}. (Broadcast by @asbhaibsr)")
             failed_count += 1
     
-    await message.reply_text(f"Broadcast ho gaya, darling! ✨ **{sent_count}** chats tak pahunchi, aur **{failed_count}** tak nahi. Koi nahi, next time! 😉 (System by @asbhaibsr)")
+    await message.reply_text(MESSAGES[user_lang]["broadcast_sent"](sent_count, failed_count))
     await store_message(message)
     logger.info(f"Broadcast command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
 
@@ -624,21 +898,17 @@ async def stats_private_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
+    user_lang = await get_user_language(message.from_user.id)
+
     if len(message.command) < 2 or message.command[1].lower() != "check":
-        await message.reply_text("Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["stats_usage"])
         return
 
     total_messages = messages_collection.count_documents({})
     unique_group_ids = group_tracking_collection.count_documents({}) # Correctly counts documents in group_tracking_collection
     num_users = user_tracking_collection.count_documents({})
 
-    stats_text = (
-        "📊 **Bot Statistics** 📊\n"
-        f"• Jitne groups mein main hoon: **{unique_group_ids}** lovely groups!\n"
-        f"• Total users jo maine observe kiye: **{num_users}** pyaare users!\n"
-        f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩\n\n"
-        f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
-    )
+    stats_text = MESSAGES[user_lang]["bot_stats"](unique_group_ids, num_users, total_messages)
     await message.reply_text(stats_text)
     await store_message(message)
     if message.from_user:
@@ -652,21 +922,17 @@ async def stats_group_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
+    user_lang = await get_user_language(message.from_user.id)
+
     if len(message.command) < 2 or message.command[1].lower() != "check":
-        await message.reply_text("Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["stats_usage"])
         return
 
     total_messages = messages_collection.count_documents({})
     unique_group_ids = group_tracking_collection.count_documents({})
     num_users = user_tracking_collection.count_documents({})
 
-    stats_text = (
-        "📊 **Bot Statistics** 📊\n"
-        f"• Jitne groups mein main hoon: **{unique_group_ids}** lovely groups!\n"
-        f"• Total users jo maine observe kiye: **{num_users}** pyaare users!\n"
-        f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩\n\n"
-        f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
-    )
+    stats_text = MESSAGES[user_lang]["bot_stats"](unique_group_ids, num_users, total_messages)
     await message.reply_text(stats_text)
     await store_message(message)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum
@@ -684,26 +950,27 @@ async def list_groups_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
+    user_lang = await get_user_language(message.from_user.id)
+
     # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["owner_command_only"])
         return
 
     groups = list(group_tracking_collection.find({}))
     if not groups:
-        await message.reply_text("Main abhi kisi group mein nahi hoon. Akeli hoon, koi add kar lo na! 🥺 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["no_groups_found"])
         return
 
-    group_list_text = "📚 **Groups Jahan Main Hoon** 📚\n\n"
+    group_list_text = MESSAGES[user_lang]["group_list_header"]
     for i, group in enumerate(groups):
         title = group.get("title", "Unknown Group")
         group_id = group.get("_id")
         added_on = group.get("added_on", "N/A").strftime("%Y-%m-%d %H:%M") if isinstance(group.get("added_on"), datetime) else "N/A"
         
-        group_list_text += f"{i+1}. **{title}** (`{group_id}`)\n"
-        group_list_text += f"   • Joined: {added_on}\n"
+        group_list_text += MESSAGES[user_lang]["group_list_item"](i, title, group_id, added_on)
         
-    group_list_text += "\n_Yeh data tracking database se hai, bilkul secret!_ 🤫\n**Code & System By:** @asbhaibsr"
+    group_list_text += MESSAGES[user_lang]["group_list_footer"]
     await message.reply_text(group_list_text)
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -716,19 +983,21 @@ async def leave_group_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
+    user_lang = await get_user_language(message.from_user.id)
+
     # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["owner_command_only"])
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Kripya group ID dein jisse aap mujhe hatana chahte hain. Upyog: `/leavegroup -1001234567890` (aise, darling!) (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["leave_group_usage"])
         return
 
     try:
         group_id_str = message.command[1]
         if not group_id_str.startswith('-100'):
-            await message.reply_text("Aapne galat Group ID format diya hai. Group ID `-100...` se shuru hoti hai. Thoda dhyaan se! 😊 (Code by @asbhaibsr)")
+            await message.reply_text(MESSAGES[user_lang]["invalid_group_id_format"])
             return
 
         group_id = int(group_id_str)
@@ -737,21 +1006,15 @@ async def leave_group_command(client: Client, message: Message):
         
         group_tracking_collection.delete_one({"_id": group_id})
         messages_collection.delete_many({"chat_id": group_id})
-        # New: Also clear earning data for users in this group (optional, but good for cleanup)
-        # Note: This would clear *all* messages for users who were *only* in this group.
-        # For more granular control, one might need to iterate through messages for this group ID.
-        # For simplicity and general cleanup, we'll assume it's fine for now.
-        # If a user is in multiple groups, their count across other groups would remain.
-        # For now, let's just log a message about potential cleanup for earning tracking
         logger.info(f"Considered cleaning earning data for users from left group {group_id}. (Code by @asbhaibsr)")
 
-        await message.reply_text(f"Safaltapoorvak group `{group_id}` se bahar aa gayi, aur uska sara data bhi clean kar diya! Bye-bye! 👋 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["leave_group_success"](group_id))
         logger.info(f"Left group {group_id} and cleared its data. (Code by @asbhaibsr)")
 
     except ValueError:
-        await message.reply_text("Invalid group ID format. Kripya ek valid numeric ID dein. Thoda number check kar lo! 😉 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["invalid_group_id_format"]) # Reusing for generic invalid format
     except Exception as e:
-        await message.reply_text(f"Group se bahar nikalte samay galti ho gayi: {e}. Oh no! 😢 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["leave_group_error"](e))
         logger.error(f"Error leaving group {group_id_str}: {e}. (Code by @asbhaibsr)")
     
     await store_message(message)
@@ -766,36 +1029,38 @@ async def clear_data_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
+    user_lang = await get_user_language(message.from_user.id)
+
     # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🤫 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["owner_command_only"])
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Kitna data clean karna hai? Percentage batao na, jaise: `/cleardata 10%` ya `/cleardata 100%`! 🧹 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["clear_data_usage"])
         return
 
     percentage_str = message.command[1].strip('%')
     try:
         percentage = int(percentage_str)
         if not (1 <= percentage <= 100):
-            await message.reply_text("Percentage 1 se 100 ke beech mein hona chahiye. Thoda dhyan se! 🤔 (Code by @asbhaibsr)")
+            await message.reply_text(MESSAGES[user_lang]["invalid_percentage"])
             return
     except ValueError:
-        await message.reply_text("Invalid percentage format. Percentage number mein hona chahiye, jaise `10` ya `50`. Fir se try karo!💖 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["invalid_percentage_format"])
         return
 
     total_messages = messages_collection.count_documents({})
     if total_messages == 0:
-        await message.reply_text("Mere paas abhi koi data nahi hai delete karne ke liye. Sab clean-clean hai! ✨ (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["no_data_to_clear"])
         return
 
     messages_to_delete_count = int(total_messages * (percentage / 100))
     if messages_to_delete_count == 0 and percentage > 0:
-        await message.reply_text(f"Itna kam data hai ki {percentage}% delete karne se kuch fark nahi padega! 😂 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["low_data_clear_warning"](percentage))
         return
     elif messages_to_delete_count == 0 and percentage == 0:
-        await message.reply_text("Zero percent? That means no deletion! 😉 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["zero_percent_clear"])
         return
 
 
@@ -807,10 +1072,10 @@ async def clear_data_command(client: Client, message: Message):
 
     if oldest_message_ids:
         delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
-        await message.reply_text(f"Wow! 🤩 Maine aapka **{percentage}%** data, yaani **{delete_result.deleted_count}** messages, successfully delete kar diye! Ab main thodi light feel kar rahi hoon. ✨ (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["data_clear_success"](percentage, delete_result.deleted_count))
         logger.info(f"Cleared {delete_result.deleted_count} messages based on {percentage}% request. (Code by @asbhaibsr)")
     else:
-        await message.reply_text("Umm, kuch delete karne ke liye mila hi nahi. Lagta hai tumne pehle hi sab clean kar diya hai! 🤷‍♀️ (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["no_data_found_to_clear"])
     
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -822,21 +1087,20 @@ async def delete_specific_message_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
+    user_lang = await get_user_language(message.from_user.id)
+
     # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["owner_command_only"])
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Kaun sa message delete karna hai, batao toh sahi! Jaise: `/deletemessage hello` ya `/deletemessage 'kya haal hai'` 👻 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["delete_message_usage"])
         return
 
     search_query = " ".join(message.command[1:])
     
     # Try to find message in current chat first
-    # This logic was attempting to find a specific message in the current chat or globally
-    # but might not be ideal for deleting based on content alone, as content might not be unique.
-    # For now, keeping it as is, but consider if you want to delete based on message ID for more precision.
     message_to_delete = messages_collection.find_one({"chat_id": message.chat.id, "content": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
 
     if not message_to_delete:
@@ -846,12 +1110,12 @@ async def delete_specific_message_command(client: Client, message: Message):
     if message_to_delete:
         delete_result = messages_collection.delete_one({"_id": message_to_delete["_id"]})
         if delete_result.deleted_count > 0:
-            await message.reply_text(f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' wale message ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)")
+            await message.reply_text(MESSAGES[user_lang]["message_delete_success"](search_query))
             logger.info(f"Deleted message with content: '{search_query}'. (Code by @asbhaibsr)")
         else:
-            await message.reply_text("Aww, yeh message to mujhe mila hi nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)")
+            await message.reply_text(MESSAGES[user_lang]["message_not_found_in_db"])
     else:
-        await message.reply_text("Umm, mujhe tumhara yeh message to mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["message_not_found_globally"])
     
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -863,13 +1127,15 @@ async def clear_earning_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
+    user_lang = await get_user_language(message.from_user.id)
+
     # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Sorry darling! Yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🚫 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["owner_command_only"])
         return
 
     await reset_monthly_earnings_manual()
-    await message.reply_text("💰 **Earning data successfully cleared!** Ab sab phir se zero se shuru karenge! 😉 (Code by @asbhaibsr)")
+    await message.reply_text(MESSAGES[user_lang]["earning_clear_success"])
     logger.info(f"Owner {message.from_user.id} manually triggered earning data reset. (Code by @asbhaibsr)")
     
     await store_message(message)
@@ -882,12 +1148,14 @@ async def restart_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
+    user_lang = await get_user_language(message.from_user.id)
+
     # Convert OWNER_ID to str for comparison
     if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)")
+        await message.reply_text(MESSAGES[user_lang]["owner_command_only"])
         return
 
-    await message.reply_text("Okay, darling! Main abhi ek chhota sa nap le rahi hoon aur phir wapas aa jaungi, bilkul fresh aur energetic! Thoda wait karna, theek hai? ✨ (System by @asbhaibsr)")
+    await message.reply_text(MESSAGES[user_lang]["restart_message"])
     logger.info("Bot is restarting... (System by @asbhaibsr)")
     # Give some time for the message to be sent
     await asyncio.sleep(0.5) 
@@ -898,6 +1166,7 @@ async def restart_command(client: Client, message: Message):
 async def new_member_handler(client: Client, message: Message):
     # Handler for new members. Notifications by @asbhaibsr.
     logger.info(f"New chat members detected in chat {message.chat.id}. Bot ID: {client.me.id}. (Event handled by @asbhaibsr)")
+    owner_lang = await get_user_language(int(OWNER_ID)) # Get owner's language for notifications
 
     for member in message.new_chat_members:
         logger.info(f"Processing new member: {member.id} ({member.first_name}) in chat {message.chat.id}. Is bot: {member.is_bot}. (Event handled by @asbhaibsr)")
@@ -911,44 +1180,30 @@ async def new_member_handler(client: Client, message: Message):
                 # Send notification to OWNER
                 group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
                 added_by_user = message.from_user.first_name if message.from_user else "Unknown User"
-                notification_message = (
-                    f"🥳 **New Group Alert!**\n"
-                    f"Bot ko ek naye group mein add kiya gaya hai!\n\n"
-                    f"**Group Name:** {group_title}\n"
-                    f"**Group ID:** `{message.chat.id}`\n"
-                    f"**Added By:** {added_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
-                    f"**Added On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+                notification_message = MESSAGES[owner_lang]["new_group_alert"](
+                    group_title,
+                    message.chat.id,
+                    f"{added_by_user} ({message.from_user.id if message.from_user else 'N/A'})",
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 )
                 try:
                     await client.send_message(chat_id=OWNER_ID, text=notification_message)
                     logger.info(f"Owner notified about new group: {group_title}. (Notification by @asbhaibsr)")
                 except Exception as e:
                     logger.error(f"Could not notify owner about new group {group_title}: {e}. (Notification error by @asbhaibsr)")
-            # If the bot itself was added, no need to process other members in this specific event
             return 
 
-        # Check if a new user joined a private chat with the bot (i.e., started the bot)
-        # Or if a new user joined a group where the bot is present
         if not member.is_bot: # Only for actual users, not other bots
             user_exists = user_tracking_collection.find_one({"_id": member.id})
             
-            # Condition for new user starting bot in private chat
-            # This logic needs to be careful: new_chat_members in private chat usually means the user themselves.
-            # However, the primary "start bot in private" is handled by the /start private command.
-            # This part primarily catches if someone *else* adds a user to a *private* bot chat (rare/edge case)
-            # or if a new user is added to a group.
             if message.chat.type == ChatType.PRIVATE and member.id == message.from_user.id and not user_exists: # Use ChatType enum
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
-                notification_message = (
-                    f"✨ **New User Alert!**\n"
-                    f"Ek naye user ne bot ko private mein start kiya hai.\n\n"
-                    f"**User Name:** {user_name}\n"
-                    f"**User ID:** `{member.id}`\n"
-                    f"**Username:** {user_username}\n"
-                    f"**Started On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+                notification_message = MESSAGES[owner_lang]["new_user_private_alert"](
+                    user_name,
+                    member.id,
+                    user_username,
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 )
                 try:
                     await client.send_message(chat_id=OWNER_ID, text=notification_message)
@@ -956,21 +1211,17 @@ async def new_member_handler(client: Client, message: Message):
                 except Exception as e:
                     logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
                 
-            # Condition for new user joining a group where the bot is present
             elif message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and not user_exists: # Use ChatType enum
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
                 group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
-                notification_message = (
-                    f"👥 **New Group Member Alert!**\n"
-                    f"Ek naya user group mein add hua hai jahan bot bhi hai.\n\n"
-                    f"**User Name:** {user_name}\n"
-                    f"**User ID:** `{member.id}`\n"
-                    f"**Username:** {user_username}\n"
-                    f"**Group Name:** {group_title}\n"
-                    f"**Group ID:** `{message.chat.id}`\n"
-                    f"**Joined On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+                notification_message = MESSAGES[owner_lang]["new_group_member_alert"](
+                    user_name,
+                    member.id,
+                    user_username,
+                    group_title,
+                    message.chat.id,
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 )
                 try:
                     await client.send_message(chat_id=OWNER_ID, text=notification_message)
@@ -978,7 +1229,6 @@ async def new_member_handler(client: Client, message: Message):
                 except Exception as e:
                     logger.error(f"Could not notify owner about new group member {user_name} in {group_title}: {e}. (Notification error by @asbhaibsr)")
     
-    # Store the new_chat_members event message itself (optional, but consistent with other message storage)
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -988,6 +1238,7 @@ async def new_member_handler(client: Client, message: Message):
 async def left_member_handler(client: Client, message: Message):
     # Left member handler. Logic by @asbhaibsr.
     logger.info(f"Left chat member detected in chat {message.chat.id}. Left member ID: {message.left_chat_member.id}. Bot ID: {client.me.id}. (Event handled by @asbhaibsr)")
+    owner_lang = await get_user_language(int(OWNER_ID)) # Get owner's language for notifications
 
     if message.left_chat_member and message.left_chat_member.id == client.me.id:
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum
@@ -997,22 +1248,16 @@ async def left_member_handler(client: Client, message: Message):
                 {"_id": {"$in": [user["_id"] for user in earning_tracking_collection.find({})]}}, # All users
                 {"$pull": {"groups": message.chat.id}} # Remove this group from user's group list (if you store one)
             )
-            # More direct approach to reset counts for users specifically from this group if needed,
-            # but current earnings logic is global per user, not per group.
-            # So, general cleanup is enough.
 
             logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared. (Code by @asbhaibsr)")
             # Send notification to OWNER
             group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
             left_by_user = message.from_user.first_name if message.from_user else "Unknown User"
-            notification_message = (
-                f"💔 **Group Left Alert!**\n"
-                f"Bot ko ek group se remove kiya gaya hai ya woh khud leave kar gaya.\n\n"
-                f"**Group Name:** {group_title}\n"
-                f"**Group ID:** `{message.chat.id}`\n"
-                f"**Action By:** {left_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
-                f"**Left On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+            notification_message = MESSAGES[owner_lang]["group_left_alert"](
+                group_title,
+                message.chat.id,
+                f"{left_by_user} ({message.from_user.id if message.from_user else 'N/A'})",
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             )
             try:
                 await client.send_message(chat_id=OWNER_ID, text=notification_message)
@@ -1021,7 +1266,6 @@ async def left_member_handler(client: Client, message: Message):
                 logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}. (Notification error by @asbhaibsr)")
             return # No need to store message if bot left
 
-    # Store the left_chat_member event message itself
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -1031,8 +1275,6 @@ async def left_member_handler(client: Client, message: Message):
 async def handle_message_and_reply(client: Client, message: Message):
     # Main message handler for replies. Core logic by @asbhaibsr.
     if message.from_user and message.from_user.is_bot:
-        # Important: Bots' messages should not count towards earning,
-        # and generally, the bot should not learn from other bots' messages.
         logger.debug(f"Skipping message from bot user: {message.from_user.id}. (Handle message by @asbhaibsr)")
         return
 
@@ -1046,7 +1288,6 @@ async def handle_message_and_reply(client: Client, message: Message):
     logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}). (Handle message by @asbhaibsr)")
 
     # Update group and user info regardless of whether it's a command or regular message
-    # Ensure update_group_info is called correctly when a message arrives in a group
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum
         logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.") # NEW DEBUG LOG
         await update_group_info(message.chat.id, message.chat.title)
@@ -1055,8 +1296,19 @@ async def handle_message_and_reply(client: Client, message: Message):
 
     await store_message(message) # This is where the earning count increments
 
-    # Only attempt to generate a reply if it's not a command message
-    if not message.text or not message.text.startswith('/'):
+    # Only attempt to generate a reply if it's not a command message AND language is already set
+    # Or if it's a command that needs to be handled
+    if message.text and message.text.startswith('/'):
+        # Commands are handled by their respective decorators, so we don't need to generate a reply here.
+        # However, we need to ensure /start in private triggers language selection if not set.
+        # This is already handled by start_private_command, so no specific action here.
+        pass
+    else:
+        # For non-command messages, check if language is set.
+        # If it's a private chat and language is not set, we might need to prompt for language first.
+        # However, the /start command already handles this.
+        # For regular messages, we assume the language is set or defaults to English.
+        # So proceed with generating reply.
         logger.info(f"Attempting to generate reply for chat {message.chat.id}. (Logic by @asbhaibsr)")
         reply_doc = await generate_reply(message)
         
@@ -1089,3 +1341,4 @@ if __name__ == "__main__":
     app.run()
     
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
+
