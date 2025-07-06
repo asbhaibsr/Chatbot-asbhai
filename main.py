@@ -76,7 +76,6 @@ try:
     # Create indexes for efficient querying if they don't exist
     messages_collection.create_index([("timestamp", 1)])
     messages_collection.create_index([("user_id", 1)])
-    # Ensure this index is on group_message_count for sorting
     earning_tracking_collection.create_index([("group_message_count", -1)])
 
 
@@ -213,7 +212,7 @@ async def store_message(message: Message):
                     logger.debug(f"Marked bot's original message {message.reply_to_message.id} as observed pair. (System by @asbhaibsr)")
 
         messages_collection.insert_one(message_data)
-        logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
+        logger.info(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)") # Changed to INFO for better visibility
         
         # --- NEW/IMPROVED: Update user's group message count for earning ---
         # This section is crucial for earning tracking.
@@ -222,18 +221,24 @@ async def store_message(message: Message):
             username_to_track = message.from_user.username
             first_name_to_track = message.from_user.first_name
 
-            # Increment group_message_count for the user
-            earning_tracking_collection.update_one(
-                {"_id": user_id_to_track},
-                {"$inc": {"group_message_count": 1},
-                 "$set": {"username": username_to_track, "first_name": first_name_to_track, "last_active_group_message": datetime.now()},
-                 "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
-                upsert=True
-            )
-            # Fetch and log the current count after update
-            updated_user_data = earning_tracking_collection.find_one({'_id': user_id_to_track})
-            current_count = updated_user_data.get('group_message_count', 0) if updated_user_data else 0
-            logger.info(f"Group message count updated for user {user_id_to_track} ({first_name_to_track}). Current count: {current_count}. (Earning tracking by @asbhaibsr)")
+            logger.info(f"DEBUG: Attempting to update earning count for user {user_id_to_track} ({first_name_to_track}) in chat {message.chat.id}.") # Added debug log
+
+            try:
+                # Increment group_message_count for the user
+                earning_tracking_collection.update_one(
+                    {"_id": user_id_to_track},
+                    {"$inc": {"group_message_count": 1},
+                     "$set": {"username": username_to_track, "first_name": first_name_to_track, "last_active_group_message": datetime.now()},
+                     "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
+                    upsert=True
+                )
+                # Fetch and log the current count after update
+                updated_user_data = earning_tracking_collection.find_one({'_id': user_id_to_track})
+                current_count = updated_user_data.get('group_message_count', 0) if updated_user_data else 0
+                logger.info(f"Group message count updated for user {user_id_to_track} ({first_name_to_track}). Current count: {current_count}. (Earning tracking by @asbhaibsr)")
+            except Exception as e:
+                logger.error(f"ERROR: Failed to update earning count for user {user_id_to_track}: {e}. (Earning tracking error by @asbhaibsr)")
+
 
         await prune_old_messages()
 
