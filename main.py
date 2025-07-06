@@ -26,6 +26,11 @@ import sys # Restart ke liye sys module import kiya hai
 # Flask imports
 from flask import Flask, request, jsonify
 
+# APScheduler imports for monthly reset
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz # timezone support ke liye
+
 # --- Logger Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -35,7 +40,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 MONGO_URI_MESSAGES = os.getenv("MONGO_URI_MESSAGES")
 MONGO_URI_BUTTONS = os.getenv("MONGO_URI_BUTTONS")
-MONGO_URI_TRACKING = os.getenv("MONGO_URI_TRACKING")
+MONGO_URI_TRACKING = os.getenv("MONGO_URI_TRACKING") # This will now also house earning data
 
 OWNER_ID = os.getenv("OWNER_ID") # Owner ki user ID (string format mein)
 
@@ -54,21 +59,31 @@ try:
     client_messages = MongoClient(MONGO_URI_MESSAGES)
     db_messages = client_messages.bot_database_messages
     messages_collection = db_messages.messages
-    logger.info("MongoDB (Messages) connection successful. Credit: @asbhaibsr") # Credit added
+    logger.info("MongoDB (Messages) connection successful. Credit: @asbhaibsr")
     
     client_buttons = MongoClient(MONGO_URI_BUTTONS)
     db_buttons = client_buttons.bot_button_data
     buttons_collection = db_buttons.button_interactions
-    logger.info("MongoDB (Buttons) connection successful. Credit: @asbhaibsr") # Credit added
+    logger.info("MongoDB (Buttons) connection successful. Credit: @asbhaibsr")
     
     client_tracking = MongoClient(MONGO_URI_TRACKING)
     db_tracking = client_tracking.bot_tracking_data
     group_tracking_collection = db_tracking.groups_data
     user_tracking_collection = db_tracking.users_data
-    logger.info("MongoDB (Tracking) connection successful. Credit: @asbhaibsr") # Credit added
+    # New: Earning Tracking Collection within the same tracking DB
+    earning_tracking_collection = db_tracking.monthly_earnings_data
+    # New: Collection to track last reset date
+    reset_status_collection = db_tracking.reset_status
+    logger.info("MongoDB (Tracking & Earning) connection successful. Credit: @asbhaibsr")
+
+    # Create indexes for efficient querying if they don't exist
+    messages_collection.create_index([("timestamp", 1)])
+    messages_collection.create_index([("user_id", 1)])
+    earning_tracking_collection.create_index([("group_message_count", -1)])
+
 
 except Exception as e:
-    logger.error(f"Failed to connect to one or more MongoDB instances: {e}. Designed by @asbhaibsr") # Credit added
+    logger.error(f"Failed to connect to one or more MongoDB instances: {e}. Designed by @asbhaibsr")
     exit(1)
 
 # --- Pyrogram Client ---
@@ -84,11 +99,11 @@ flask_app = Flask(__name__) # Core system by @asbhaibsr
 
 @flask_app.route('/')
 def home():
-    return "Bot is running! Developed by @asbhaibsr. Support: @aschat_group" # Credit added
+    return "Bot is running! Developed by @asbhaibsr. Support: @aschat_group"
 
 @flask_app.route('/health')
 def health_check():
-    return jsonify({"status": "ok", "message": "Bot is alive and healthy! Designed by @asbhaibsr"}), 200 # Credit added
+    return jsonify({"status": "ok", "message": "Bot is alive and healthy! Designed by @asbhaibsr"}), 200
 
 def run_flask_app():
     # This background process runs the web server. Original code by @asbhaibsr
@@ -118,11 +133,11 @@ def extract_keywords(text):
 async def prune_old_messages():
     # Database pruning logic by @asbhaibsr
     total_messages = messages_collection.count_documents({})
-    logger.info(f"Current total messages in DB: {total_messages}. (System by @asbhaibsr)") # Credit added
+    logger.info(f"Current total messages in DB: {total_messages}. (System by @asbhaibsr)")
 
     if total_messages > MAX_MESSAGES_THRESHOLD:
         messages_to_delete_count = int(total_messages * PRUNE_PERCENTAGE)
-        logger.info(f"Threshold reached. Deleting {messages_to_delete_count} oldest messages. (System by @asbhaibsr)") # Credit added
+        logger.info(f"Threshold reached. Deleting {messages_to_delete_count} oldest messages. (System by @asbhaibsr)")
 
         oldest_message_ids = []
         for msg in messages_collection.find({}) \
@@ -132,11 +147,11 @@ async def prune_old_messages():
 
         if oldest_message_ids:
             delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
-            logger.info(f"Successfully deleted {delete_result.deleted_count} messages. (System by @asbhaibsr)") # Credit added
+            logger.info(f"Successfully deleted {delete_result.deleted_count} messages. (System by @asbhaibsr)")
         else:
-            logger.warning("No oldest messages found to delete despite threshold being reached. (System by @asbhaibsr)") # Credit added
+            logger.warning("No oldest messages found to delete despite threshold being reached. (System by @asbhaibsr)")
     else:
-        logger.info("Message threshold not reached. No pruning needed. (System by @asbhaibsr)") # Credit added
+        logger.info("Message threshold not reached. No pruning needed. (System by @asbhaibsr)")
 
 # --- Message Storage Logic ---
 async def store_message(message: Message):
@@ -165,7 +180,7 @@ async def store_message(message: Message):
             message_data["sticker_id"] = message.sticker.file_id
             message_data["keywords"] = extract_keywords(message.sticker.emoji)
         else:
-            logger.debug(f"Unsupported message type for storage: {message.id}. (Code by @asbhaibsr)") # Credit added
+            logger.debug(f"Unsupported message type for storage: {message.id}. (Code by @asbhaibsr)")
             return
 
         # Check if this message is a reply to a bot's message
@@ -186,23 +201,32 @@ async def store_message(message: Message):
             # Check if the reply was to the bot itself
             if message.reply_to_message.from_user and message.reply_to_message.from_user.id == app.me.id:
                 message_data["is_bot_observed_pair"] = True
-                # If this message is a reply to the bot, mark the *original bot message* as part of an observed pair
-                # This helps in linking the bot's output to a user's response
                 original_bot_message_in_db = messages_collection.find_one({"chat_id": message.chat.id, "message_id": message.reply_to_message.id})
                 if original_bot_message_in_db:
                     messages_collection.update_one(
                         {"_id": original_bot_message_in_db["_id"]},
                         {"$set": {"is_bot_observed_pair": True}}
                     )
-                    logger.debug(f"Marked bot's original message {message.reply_to_message.id} as observed pair. (System by @asbhaibsr)") # Credit added
+                    logger.debug(f"Marked bot's original message {message.reply_to_message.id} as observed pair. (System by @asbhaibsr)")
 
         messages_collection.insert_one(message_data)
-        logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)") # Credit added
+        logger.debug(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
         
+        # New: Update user's group message count for earning, only if it's a group message and not from a bot
+        if message.chat.type in ["group", "supergroup"] and message.from_user and not message.from_user.is_bot:
+            earning_tracking_collection.update_one(
+                {"_id": message.from_user.id}, # User ID is the _id
+                {"$inc": {"group_message_count": 1},
+                 "$set": {"username": message.from_user.username, "first_name": message.from_user.first_name, "last_active_group_message": datetime.now()},
+                 "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
+                upsert=True
+            )
+            logger.debug(f"Group message count updated for {message.from_user.id}. (Earning tracking by @asbhaibsr)")
+
         await prune_old_messages()
 
     except Exception as e:
-        logger.error(f"Error storing message {message.id}: {e}. (System by @asbhaibsr)") # Credit added
+        logger.error(f"Error storing message {message.id}: {e}. (System by @asbhaibsr)")
 
 # --- Reply Generation Logic ---
 async def generate_reply(message: Message):
@@ -222,7 +246,7 @@ async def generate_reply(message: Message):
     query_keywords = extract_keywords(query_content)
 
     if not query_keywords and not query_content:
-        logger.debug("No content or keywords extracted for reply generation. (Code by @asbhaibsr)") # Credit added
+        logger.debug("No content or keywords extracted for reply generation. (Code by @asbhaibsr)")
         return
 
     # --- Step 1: Prioritize replies from bot's observed pairs (contextual learning) ---
@@ -257,7 +281,7 @@ async def generate_reply(message: Message):
         logger.info(f"Contextual reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}. (Logic by @asbhaibsr)")
         return chosen_reply
 
-    logger.info(f"No direct observed reply for: '{query_content}'. Falling back to keyword search. (Logic by @asbhaibsr)") # Credit added
+    logger.info(f"No direct observed reply for: '{query_content}'. Falling back to keyword search. (Logic by @asbhaibsr)")
 
     # --- Step 2: Fallback to general keyword matching (less contextual) ---
     keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
@@ -285,7 +309,7 @@ async def generate_reply(message: Message):
         logger.info(f"Keyword-based reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}. (Logic by @asbhaibsr)")
         return chosen_reply
     
-    logger.info(f"No suitable reply found for: '{query_content}'. (Logic by @asbhaibsr)") # Credit added
+    logger.info(f"No suitable reply found for: '{query_content}'. (Logic by @asbhaibsr)")
     return None
 
 # --- Tracking Functions ---
@@ -297,7 +321,7 @@ async def update_group_info(chat_id: int, chat_title: str):
          "$setOnInsert": {"added_on": datetime.now(), "member_count": 0, "credit": "by @asbhaibsr"}}, # Hidden Credit
         upsert=True
     )
-    logger.info(f"Group info updated for {chat_title} ({chat_id}). (Tracking by @asbhaibsr)") # Credit added
+    logger.info(f"Group info updated for {chat_title} ({chat_id}). (Tracking by @asbhaibsr)")
 
 async def update_user_info(user_id: int, username: str, first_name: str):
     # User tracking logic by @asbhaibsr
@@ -307,7 +331,59 @@ async def update_user_info(user_id: int, username: str, first_name: str):
          "$setOnInsert": {"joined_on": datetime.now(), "credit": "by @asbhaibsr"}}, # Hidden Credit
         upsert=True
     )
-    logger.info(f"User info updated for {first_name} ({user_id}). (Tracking by @asbhaibsr)") # Credit added
+    logger.info(f"User info updated for {first_name} ({user_id}). (Tracking by @asbhaibsr)")
+
+# --- Earning System Functions ---
+async def get_top_earning_users():
+    # This function returns the top 3 users based on group_message_count.
+    pipeline = [
+        {"$match": {"group_message_count": {"$gt": 0}}}, # Only users with more than 0 group messages
+        {"$sort": {"group_message_count": -1}}, # Sort in descending order
+        {"$limit": 3} # Get only top 3
+    ]
+
+    top_users_data = list(earning_tracking_collection.aggregate(pipeline))
+
+    top_users_details = []
+    for user_data in top_users_data:
+        top_users_details.append({
+            "user_id": user_data["_id"],
+            "first_name": user_data.get("first_name", "Unknown User"),
+            "username": user_data.get("username"),
+            "message_count": user_data["group_message_count"]
+        })
+    return top_users_details
+
+async def reset_monthly_earnings():
+    logger.info("Checking for monthly earnings reset...")
+    now = datetime.now(pytz.timezone('Asia/Kolkata')) # Current time in Delhi timezone
+    current_month_year = now.strftime("%Y-%m") # e.g., "2025-07"
+
+    # Check if this month's reset has already happened
+    reset_status = reset_status_collection.find_one({"_id": "last_reset_date"})
+    
+    # If it's the first time resetting or the month has changed since the last reset
+    if not reset_status or reset_status.get("last_reset_month_year") != current_month_year:
+        try:
+            # Set all users' group_message_count to 0
+            earning_tracking_collection.update_many(
+                {}, # All documents
+                {"$set": {"group_message_count": 0}}
+            )
+            logger.info("Monthly earning message counts reset successfully. (Earning system by @asbhaibsr)")
+
+            # Update the reset date and month/year
+            reset_status_collection.update_one(
+                {"_id": "last_reset_date"},
+                {"$set": {"last_reset_month_year": current_month_year, "last_reset_timestamp": now}},
+                upsert=True
+            )
+            logger.info(f"Reset status updated to {current_month_year}. (Earning system by @asbhaibsr)")
+
+        except Exception as e:
+            logger.error(f"Error resetting monthly earnings: {e}. (Earning system by @asbhaibsr)")
+    else:
+        logger.info(f"Monthly earnings already reset for {current_month_year}. Skipping. (Earning system by @asbhaibsr)")
 
 # --- Pyrogram Event Handlers ---
 
@@ -315,7 +391,7 @@ async def update_user_info(user_id: int, username: str, first_name: str):
 async def start_private_command(client: Client, message: Message):
     # Start command handler. Designed by @asbhaibsr.
     if is_on_cooldown(message.from_user.id):
-        return # Cooldown par koi message nahi
+        return
     update_cooldown(message.from_user.id)
 
     user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
@@ -331,13 +407,12 @@ async def start_private_command(client: Client, message: Message):
                 InlineKeyboardButton("➕ Add Me to Your Group", url=f"https://t.me/{client.me.username}?startgroup=true")
             ],
             [
-                InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}")
+                InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
+                InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
             ],
             [
-                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo") # Button text updated
-            ],
-            [
-                InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group") # Support group added
+                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo"),
+                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") # New button for earning
             ]
         ]
     )
@@ -350,13 +425,13 @@ async def start_private_command(client: Client, message: Message):
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Private start command processed. (Code by @asbhaibsr)") # Credit added
+    logger.info(f"Private start command processed. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("start") & filters.group)
 async def start_group_command(client: Client, message: Message):
     # Group start command handler. Designed by @asbhaibsr.
     if is_on_cooldown(message.from_user.id):
-        return # Cooldown par koi message nahi
+        return
     update_cooldown(message.from_user.id)
 
     user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
@@ -369,13 +444,12 @@ async def start_group_command(client: Client, message: Message):
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}")
+                InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
+                InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
             ],
             [
-                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo") # Button text updated
-            ],
-            [
-                InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group") # Support group added
+                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo"),
+                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") # New button for earning
             ]
         ]
     )
@@ -390,17 +464,17 @@ async def start_group_command(client: Client, message: Message):
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Group start command processed. (Code by @asbhaibsr)") # Credit added
+    logger.info(f"Group start command processed. (Code by @asbhaibsr)")
 
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
     # Callback query handler. Developed by @asbhaibsr.
     if callback_query.data == "buy_git_repo":
         await callback_query.message.reply_text(
-            f"🤩 Agar aapko mere jaisa khud ka bot banwana hai, toh aapko ₹500 dene honge. Iske liye **@{ASBHAI_USERNAME}** se contact karein aur unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group", # Credit added
+            f"🤩 Agar aapko mere jaisa khud ka bot banwana hai, toh aapko ₹500 dene honge. Iske liye **@{ASBHAI_USERNAME}** se contact karein aur unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group",
             quote=True
         )
-        await callback_query.answer("Details mil gayi na? Ab jao, deal final karo! 😉", show_alert=False) # Alert message updated
+        await callback_query.answer("Details mil gayi na? Ab jao, deal final karo! 😉", show_alert=False)
         # Store button interaction
         buttons_collection.insert_one({
             "user_id": callback_query.from_user.id,
@@ -408,24 +482,39 @@ async def callback_handler(client, callback_query):
             "first_name": callback_query.from_user.first_name,
             "button_data": callback_query.data,
             "timestamp": datetime.now(),
-            "credit": "by @asbhaibsr" # Hidden Credit
+            "credit": "by @asbhaibsr"
         })
-    logger.info(f"Callback query processed. (Code by @asbhaibsr)") # Credit added
+    elif callback_query.data == "show_earning_leaderboard": # New callback for earning button
+        # /topusers कमांड का लॉजिक यहाँ कॉल करें
+        # हमें इसे एक मैसेज ऑब्जेक्ट की तरह पास करना होगा
+        # reply_text, from_user, chat, command, etc. जैसे आवश्यक एट्रीब्यूट्स के साथ
+        fake_message = type('obj', (object,), {
+            'from_user': callback_query.from_user,
+            'chat': callback_query.message.chat,
+            'command': ['topusers', 'check'], # /topusers कमांड को अनुकरण करें
+            'reply_text': callback_query.message.reply_text, # reply_text फ़ंक्शन को पास करें
+            'reply_photo': callback_query.message.reply_photo, # reply_photo फ़ंक्शन को पास करें
+            'id': callback_query.message.id # Original message ID
+        })()
+        await top_users_command(client, fake_message)
+        await callback_query.answer("Earning Leaderboard dikha raha hoon! 💰", show_alert=False)
+
+    logger.info(f"Callback query processed. (Code by @asbhaibsr)")
 
 
 @app.on_message(filters.command("broadcast") & filters.private)
 async def broadcast_command(client: Client, message: Message):
     # Broadcast command handler. Designed for owner by @asbhaibsr.
     if is_on_cooldown(message.from_user.id):
-        return # Cooldown par koi message nahi
+        return
     update_cooldown(message.from_user.id)
 
     if str(message.from_user.id) != OWNER_ID:
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Hey, broadcast karne ke liye kuch likho toh sahi! 🙄 Jaise: `/broadcast Aapka message yahan` (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Hey, broadcast karne ke liye kuch likho toh sahi! 🙄 Jaise: `/broadcast Aapka message yahan` (Code by @asbhaibsr)")
         return
 
     broadcast_text = " ".join(message.command[1:])
@@ -443,22 +532,22 @@ async def broadcast_command(client: Client, message: Message):
             sent_count += 1
             await asyncio.sleep(0.1)
         except Exception as e:
-            logger.error(f"Failed to send broadcast to chat {chat_id}: {e}. (Broadcast by @asbhaibsr)") # Credit added
+            logger.error(f"Failed to send broadcast to chat {chat_id}: {e}. (Broadcast by @asbhaibsr)")
             failed_count += 1
     
-    await message.reply_text(f"Broadcast ho gaya, darling! ✨ **{sent_count}** chats tak pahunchi, aur **{failed_count}** tak nahi. Koi nahi, next time! 😉 (System by @asbhaibsr)") # Credit added
+    await message.reply_text(f"Broadcast ho gaya, darling! ✨ **{sent_count}** chats tak pahunchi, aur **{failed_count}** tak nahi. Koi nahi, next time! 😉 (System by @asbhaibsr)")
     await store_message(message)
-    logger.info(f"Broadcast command processed. (Code by @asbhaibsr)") # Credit added
+    logger.info(f"Broadcast command processed. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("stats") & filters.private)
 async def stats_private_command(client: Client, message: Message):
     # Stats command handler for private chat. Logic by @asbhaibsr.
     if is_on_cooldown(message.from_user.id):
-        return # Cooldown par koi message nahi
+        return
     update_cooldown(message.from_user.id)
 
     if len(message.command) < 2 or message.command[1].lower() != "check":
-        await message.reply_text("Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)")
         return
 
     total_messages = messages_collection.count_documents({})
@@ -470,23 +559,23 @@ async def stats_private_command(client: Client, message: Message):
         f"• Jitne groups mein main hoon: **{unique_group_ids}** lovely groups!\n"
         f"• Total users jo maine observe kiye: **{num_users}** pyaare users!\n"
         f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩\n\n"
-        f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Credit added
+        f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await message.reply_text(stats_text)
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Private stats command processed. (Code by @asbhaibsr)") # Credit added
+    logger.info(f"Private stats command processed. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("stats") & filters.group)
 async def stats_group_command(client: Client, message: Message):
     # Stats command handler for groups. Logic by @asbhaibsr.
     if is_on_cooldown(message.from_user.id):
-        return # Cooldown par koi message nahi
+        return
     update_cooldown(message.from_user.id)
 
     if len(message.command) < 2 or message.command[1].lower() != "check":
-        await message.reply_text("Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)")
         return
 
     total_messages = messages_collection.count_documents({})
@@ -498,7 +587,7 @@ async def stats_group_command(client: Client, message: Message):
         f"• Jitne groups mein main hoon: **{unique_group_ids}** lovely groups!\n"
         f"• Total users jo maine observe kiye: **{num_users}** pyaare users!\n"
         f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩\n\n"
-        f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Credit added
+        f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await message.reply_text(stats_text)
     await store_message(message)
@@ -506,7 +595,7 @@ async def stats_group_command(client: Client, message: Message):
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Group stats command processed. (Code by @asbhaibsr)") # Credit added
+    logger.info(f"Group stats command processed. (Code by @asbhaibsr)")
 
 # --- Group Management Commands ---
 
@@ -514,16 +603,16 @@ async def stats_group_command(client: Client, message: Message):
 async def list_groups_command(client: Client, message: Message):
     # List groups command. Admin only. Code by @asbhaibsr.
     if is_on_cooldown(message.from_user.id):
-        return # Cooldown par koi message nahi
+        return
     update_cooldown(message.from_user.id)
 
     if str(message.from_user.id) != OWNER_ID:
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
     groups = list(group_tracking_collection.find({}))
     if not groups:
-        await message.reply_text("Main abhi kisi group mein nahi hoon. Akeli hoon, koi add kar lo na! 🥺 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Main abhi kisi group mein nahi hoon. Akeli hoon, koi add kar lo na! 🥺 (Code by @asbhaibsr)")
         return
 
     group_list_text = "📚 **Groups Jahan Main Hoon** 📚\n\n"
@@ -535,31 +624,31 @@ async def list_groups_command(client: Client, message: Message):
         group_list_text += f"{i+1}. **{title}** (`{group_id}`)\n"
         group_list_text += f"   • Joined: {added_on}\n"
         
-    group_list_text += "\n_Yeh data tracking database se hai, bilkul secret!_ 🤫\n**Code & System By:** @asbhaibsr" # Credit added
+    group_list_text += "\n_Yeh data tracking database se hai, bilkul secret!_ 🤫\n**Code & System By:** @asbhaibsr"
     await message.reply_text(group_list_text)
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Groups list command processed. (Code by @asbhaibsr)") # Credit added
+    logger.info(f"Groups list command processed. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("leavegroup") & filters.private)
 async def leave_group_command(client: Client, message: Message):
     # Leave group command. Admin only. Code by @asbhaibsr.
     if is_on_cooldown(message.from_user.id):
-        return # Cooldown par koi message nahi
+        return
     update_cooldown(message.from_user.id)
 
     if str(message.from_user.id) != OWNER_ID:
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Kripya group ID dein jisse aap mujhe hatana chahte hain. Upyog: `/leavegroup -1001234567890` (aise, darling!) (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Kripya group ID dein jisse aap mujhe hatana chahte hain. Upyog: `/leavegroup -1001234567890` (aise, darling!) (Code by @asbhaibsr)")
         return
 
     try:
         group_id_str = message.command[1]
         if not group_id_str.startswith('-100'):
-            await message.reply_text("Aapne galat Group ID format diya hai. Group ID `-100...` se shuru hoti hai. Thoda dhyaan se! 😊 (Code by @asbhaibsr)") # Credit added
+            await message.reply_text("Aapne galat Group ID format diya hai. Group ID `-100...` se shuru hoti hai. Thoda dhyaan se! 😊 (Code by @asbhaibsr)")
             return
 
         group_id = int(group_id_str)
@@ -569,14 +658,14 @@ async def leave_group_command(client: Client, message: Message):
         group_tracking_collection.delete_one({"_id": group_id})
         messages_collection.delete_many({"chat_id": group_id})
         
-        await message.reply_text(f"Safaltapoorvak group `{group_id}` se bahar aa gayi, aur uska sara data bhi clean kar diya! Bye-bye! 👋 (Code by @asbhaibsr)") # Credit added
-        logger.info(f"Left group {group_id} and cleared its data. (Code by @asbhaibsr)") # Credit added
+        await message.reply_text(f"Safaltapoorvak group `{group_id}` se bahar aa gayi, aur uska sara data bhi clean kar diya! Bye-bye! 👋 (Code by @asbhaibsr)")
+        logger.info(f"Left group {group_id} and cleared its data. (Code by @asbhaibsr)")
 
     except ValueError:
-        await message.reply_text("Invalid group ID format. Kripya ek valid numeric ID dein. Thoda number check kar lo! 😉 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Invalid group ID format. Kripya ek valid numeric ID dein. Thoda number check kar lo! 😉 (Code by @asbhaibsr)")
     except Exception as e:
-        await message.reply_text(f"Group se bahar nikalte samay galti ho gayi: {e}. Oh no! 😢 (Code by @asbhaibsr)") # Credit added
-        logger.error(f"Error leaving group {group_id_str}: {e}. (Code by @asbhaibsr)") # Credit added
+        await message.reply_text(f"Group se bahar nikalte samay galti ho gayi: {e}. Oh no! 😢 (Code by @asbhaibsr)")
+        logger.error(f"Error leaving group {group_id_str}: {e}. (Code by @asbhaibsr)")
     
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -587,38 +676,38 @@ async def leave_group_command(client: Client, message: Message):
 async def clear_data_command(client: Client, message: Message):
     # Clear data command. Admin only. Code by @asbhaibsr.
     if is_on_cooldown(message.from_user.id):
-        return # Cooldown par koi message nahi
+        return
     update_cooldown(message.from_user.id)
 
     if str(message.from_user.id) != OWNER_ID:
-        await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🤫 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🤫 (Code by @asbhaibsr)")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Kitna data clean karna hai? Percentage batao na, jaise: `/cleardata 10%` ya `/cleardata 100%`! 🧹 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Kitna data clean karna hai? Percentage batao na, jaise: `/cleardata 10%` ya `/cleardata 100%`! 🧹 (Code by @asbhaibsr)")
         return
 
     percentage_str = message.command[1].strip('%')
     try:
         percentage = int(percentage_str)
         if not (1 <= percentage <= 100):
-            await message.reply_text("Percentage 1 se 100 ke beech mein hona chahiye. Thoda dhyan se! 🤔 (Code by @asbhaibsr)") # Credit added
+            await message.reply_text("Percentage 1 se 100 ke beech mein hona chahiye. Thoda dhyan se! 🤔 (Code by @asbhaibsr)")
             return
     except ValueError:
-        await message.reply_text("Invalid percentage format. Percentage number mein hona chahiye, jaise `10` ya `50`. Fir se try karo!💖 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Invalid percentage format. Percentage number mein hona chahiye, jaise `10` ya `50`. Fir se try karo!💖 (Code by @asbhaibsr)")
         return
 
     total_messages = messages_collection.count_documents({})
     if total_messages == 0:
-        await message.reply_text("Mere paas abhi koi data nahi hai delete karne ke liye. Sab clean-clean hai! ✨ (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Mere paas abhi koi data nahi hai delete karne ke liye. Sab clean-clean hai! ✨ (Code by @asbhaibsr)")
         return
 
     messages_to_delete_count = int(total_messages * (percentage / 100))
     if messages_to_delete_count == 0 and percentage > 0:
-        await message.reply_text(f"Itna kam data hai ki {percentage}% delete karne se kuch fark nahi padega! 😂 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text(f"Itna kam data hai ki {percentage}% delete karne se kuch fark nahi padega! 😂 (Code by @asbhaibsr)")
         return
     elif messages_to_delete_count == 0 and percentage == 0:
-        await message.reply_text("Zero percent? That means no deletion! 😉 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Zero percent? That means no deletion! 😉 (Code by @asbhaibsr)")
         return
 
 
@@ -630,10 +719,10 @@ async def clear_data_command(client: Client, message: Message):
 
     if oldest_message_ids:
         delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
-        await message.reply_text(f"Wow! 🤩 Maine aapka **{percentage}%** data, yaani **{delete_result.deleted_count}** messages, successfully delete kar diye! Ab main thodi light feel kar rahi hoon. ✨ (Code by @asbhaibsr)") # Credit added
-        logger.info(f"Cleared {delete_result.deleted_count} messages based on {percentage}% request. (Code by @asbhaibsr)") # Credit added
+        await message.reply_text(f"Wow! 🤩 Maine aapka **{percentage}%** data, yaani **{delete_result.deleted_count}** messages, successfully delete kar diye! Ab main thodi light feel kar rahi hoon. ✨ (Code by @asbhaibsr)")
+        logger.info(f"Cleared {delete_result.deleted_count} messages based on {percentage}% request. (Code by @asbhaibsr)")
     else:
-        await message.reply_text("Umm, kuch delete karne ke liye mila hi nahi. Lagta hai tumne pehle hi sab clean kar diya hai! 🤷‍♀️ (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Umm, kuch delete karne ke liye mila hi nahi. Lagta hai tumne pehle hi sab clean kar diya hai! 🤷‍♀️ (Code by @asbhaibsr)")
     
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -642,15 +731,15 @@ async def clear_data_command(client: Client, message: Message):
 async def delete_specific_message_command(client: Client, message: Message):
     # Delete specific message command. Admin only. Code by @asbhaibsr.
     if is_on_cooldown(message.from_user.id):
-        return # Cooldown par koi message nahi
+        return
     update_cooldown(message.from_user.id)
 
     if str(message.from_user.id) != OWNER_ID:
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Kaun sa message delete karna hai, batao toh sahi! Jaise: `/deletemessage hello` ya `/deletemessage 'kya haal hai'` 👻 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Kaun sa message delete karna hai, batao toh sahi! Jaise: `/deletemessage hello` ya `/deletemessage 'kya haal hai'` 👻 (Code by @asbhaibsr)")
         return
 
     search_query = " ".join(message.command[1:])
@@ -665,12 +754,12 @@ async def delete_specific_message_command(client: Client, message: Message):
     if message_to_delete:
         delete_result = messages_collection.delete_one({"_id": message_to_delete["_id"]})
         if delete_result.deleted_count > 0:
-            await message.reply_text(f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' wale message ko dhoondh ke delete kar diya. Ab woh history ka hissa nahi raha! ✨ (Code by @asbhaibsr)") # Credit added
-            logger.info(f"Deleted message with content: '{search_query}'. (Code by @asbhaibsr)") # Credit added
+            await message.reply_text(f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' wale message ko dhoondh ke delete kar diya. Ab woh history ka hissa nahi raha! ✨ (Code by @asbhaibsr)")
+            logger.info(f"Deleted message with content: '{search_query}'. (Code by @asbhaibsr)")
         else:
-            await message.reply_text("Aww, yeh message to mujhe mila hi nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)") # Credit added
+            await message.reply_text("Aww, yeh message to mujhe mila hi nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)")
     else:
-        await message.reply_text("Umm, mujhe tumhara yeh message to mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Umm, mujhe tumhara yeh message to mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)")
     
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -679,33 +768,30 @@ async def delete_specific_message_command(client: Client, message: Message):
 async def restart_command(client: Client, message: Message):
     # Restart command. Admin only. Code by @asbhaibsr.
     if is_on_cooldown(message.from_user.id):
-        return # Cooldown par koi message nahi
+        return
     update_cooldown(message.from_user.id)
 
     if str(message.from_user.id) != OWNER_ID:
-        await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)") # Credit added
+        await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)")
         return
 
-    await message.reply_text("Okay, darling! Main abhi ek chhota sa nap le rahi hoon aur phir wapas aa jaungi, bilkul fresh aur energetic! Thoda wait karna, theek hai? ✨ (System by @asbhaibsr)") # Credit added
-    logger.info("Bot is restarting... (System by @asbhaibsr)") # Credit added
+    await message.reply_text("Okay, darling! Main abhi ek chhota sa nap le rahi hoon aur phir wapas aa jaungi, bilkul fresh aur energetic! Thoda wait karna, theek hai? ✨ (System by @asbhaibsr)")
+    logger.info("Bot is restarting... (System by @asbhaibsr)")
     # Give some time for the message to be sent
     await asyncio.sleep(0.5) 
     os.execl(sys.executable, sys.executable, *sys.argv) # This will restart the script (Code by @asbhaibsr)
 
-# --- New chat members and left chat members (Cool down bhi lagaya) ---
+# --- New chat members and left chat members ---
 @app.on_message(filters.new_chat_members)
 async def new_member_handler(client: Client, message: Message):
     # Handler for new members. Notifications by @asbhaibsr.
-    # Cooldown check yahan isliye nahi laga rahe kyunki yeh notification owner ko jaana hai,
-    # na ki naye join hone wale user ko directly message karna hai.
-    # Lekin store_message aur update_user_info mein cooldown check rahega.
 
     for member in message.new_chat_members:
         # Check if the bot itself was added to a group
         if member.id == client.me.id:
             if message.chat.type in ["group", "supergroup"]:
                 await update_group_info(message.chat.id, message.chat.title)
-                logger.info(f"Bot joined new group: {message.chat.title} ({message.chat.id}). (Event handled by @asbhaibsr)") # Credit added
+                logger.info(f"Bot joined new group: {message.chat.title} ({message.chat.id}). (Event handled by @asbhaibsr)")
                 
                 # Send notification to OWNER
                 group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
@@ -717,24 +803,22 @@ async def new_member_handler(client: Client, message: Message):
                     f"**Group ID:** `{message.chat.id}`\n"
                     f"**Added By:** {added_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
                     f"**Added On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Credit added
+                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
                 )
                 try:
                     await client.send_message(chat_id=OWNER_ID, text=notification_message)
-                    logger.info(f"Owner notified about new group: {group_title}. (Notification by @asbhaibsr)") # Credit added
+                    logger.info(f"Owner notified about new group: {group_title}. (Notification by @asbhaibsr)")
                 except Exception as e:
-                    logger.error(f"Could not notify owner about new group {group_title}: {e}. (Notification error by @asbhaibsr)") # Credit added
+                    logger.error(f"Could not notify owner about new group {group_title}: {e}. (Notification error by @asbhaibsr)")
             break # Bot ko add kiya gaya, to aage check karne ki zaroorat nahi
 
         # Check if a new user joined a private chat with the bot (i.e., started the bot)
         # Or if a new user joined a group where the bot is present
         if not member.is_bot: # Only for actual users, not other bots
-            # Check if this is the first time the user is interacting with the bot in private chat
-            # This logic needs to check if the user exists in user_tracking_collection
             user_exists = user_tracking_collection.find_one({"_id": member.id})
             
+            # Condition for new user starting bot in private chat
             if message.chat.type == "private" and member.id == message.from_user.id and not user_exists:
-                # Naya user ne bot ko private mein start kiya aur pehli baar hai
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
                 notification_message = (
@@ -744,16 +828,16 @@ async def new_member_handler(client: Client, message: Message):
                     f"**User ID:** `{member.id}`\n"
                     f"**Username:** {user_username}\n"
                     f"**Started On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Credit added
+                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
                 )
                 try:
                     await client.send_message(chat_id=OWNER_ID, text=notification_message)
-                    logger.info(f"Owner notified about new private user: {user_name}. (Notification by @asbhaibsr)") # Credit added
+                    logger.info(f"Owner notified about new private user: {user_name}. (Notification by @asbhaibsr)")
                 except Exception as e:
-                    logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)") # Credit added
+                    logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
                 
+            # Condition for new user joining a group where the bot is present
             elif message.chat.type in ["group", "supergroup"] and not user_exists:
-                # Naya user group mein add hua hai aur pehli baar hai
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
                 group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
@@ -766,16 +850,15 @@ async def new_member_handler(client: Client, message: Message):
                     f"**Group Name:** {group_title}\n"
                     f"**Group ID:** `{message.chat.id}`\n"
                     f"**Joined On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Credit added
+                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
                 )
                 try:
                     await client.send_message(chat_id=OWNER_ID, text=notification_message)
-                    logger.info(f"Owner notified about new group member: {user_name} in {group_title}. (Notification by @asbhaibsr)") # Credit added
+                    logger.info(f"Owner notified about new group member: {user_name} in {group_title}. (Notification by @asbhaibsr)")
                 except Exception as e:
-                    logger.error(f"Could not notify owner about new group member {user_name} in {group_title}: {e}. (Notification error by @asbhaibsr)") # Credit added
+                    logger.error(f"Could not notify owner about new group member {user_name} in {group_title}: {e}. (Notification error by @asbhaibsr)")
 
     await store_message(message)
-    # Owner ki info update karna optional hai agar wo naye user mein nahi hai
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -786,7 +869,7 @@ async def left_member_handler(client: Client, message: Message):
         if message.chat.type in ["group", "supergroup"]:
             group_tracking_collection.delete_one({"_id": message.chat.id})
             messages_collection.delete_many({"chat_id": message.chat.id})
-            logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared. (Code by @asbhaibsr)") # Credit added
+            logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared. (Code by @asbhaibsr)")
             # No reply here as the bot is leaving
     await store_message(message)
 
@@ -797,7 +880,7 @@ async def handle_message_and_reply(client: Client, message: Message):
         return
 
     if message.from_user and is_on_cooldown(message.from_user.id):
-        return # Cooldown par koi message nahi
+        return
     if message.from_user:
         update_cooldown(message.from_user.id)
 
@@ -808,32 +891,49 @@ async def handle_message_and_reply(client: Client, message: Message):
 
     await store_message(message)
 
-    logger.info(f"Attempting to generate reply for chat {message.chat.id}. (Logic by @asbhaibsr)") # Credit added
+    logger.info(f"Attempting to generate reply for chat {message.chat.id}. (Logic by @asbhaibsr)")
     reply_doc = await generate_reply(message)
     
     if reply_doc:
         try:
             if reply_doc.get("type") == "text":
                 await message.reply_text(reply_doc["content"])
-                logger.info(f"Replied with text: {reply_doc['content']}. (System by @asbhaibsr)") # Credit added
+                logger.info(f"Replied with text: {reply_doc['content']}. (System by @asbhaibsr)")
             elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
                 await message.reply_sticker(reply_doc["sticker_id"])
-                logger.info(f"Replied with sticker: {reply_doc['sticker_id']}. (System by @asbhaibsr)") # Credit added
+                logger.info(f"Replied with sticker: {reply_doc['sticker_id']}. (System by @asbhaibsr)")
             else:
-                logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}. (System by @asbhaibsr)") # Credit added
+                logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}. (System by @asbhaibsr)")
         except Exception as e:
-            logger.error(f"Error sending reply for message {message.id}: {e}. (System by @asbhaibsr)") # Credit added
+            logger.error(f"Error sending reply for message {message.id}: {e}. (System by @asbhaibsr)")
     else:
-        logger.info("No suitable reply found. (System by @asbhaibsr)") # Credit added
+        logger.info("No suitable reply found. (System by @asbhaibsr)")
 
 
 # --- Main entry point ---
 if __name__ == "__main__":
     # Main bot execution point. Designed by @asbhaibsr.
-    logger.info("Starting Flask health check server in a separate thread... (Code by @asbhaibsr)") # Credit added
+    logger.info("Starting Flask health check server in a separate thread... (Code by @asbhaibsr)")
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.start()
 
-    logger.info("Starting Pyrogram bot... (Code by @asbhaibsr)") # Credit added
+    logger.info("Starting Pyrogram bot... (Code by @asbhaibsr)")
+    
+    # Scheduler setup for monthly earnings reset (Delhi, India timezone)
+    scheduler = AsyncIOScheduler(timezone=pytz.timezone('Asia/Kolkata'))
+    # Schedule the reset function to run on the 1st day of every month at 00:00 (midnight IST)
+    @scheduler.scheduled_job(CronTrigger(day='1', hour='0', minute='0'), id='reset_monthly_earnings_job')
+    async def monthly_reset_job_wrapper():
+        logger.info("Executing monthly earnings reset job (Delhi Time)...")
+        await reset_monthly_earnings()
+
+    # Start the scheduler
+    scheduler.start()
+    logger.info("Scheduler started for monthly earning reset (Delhi Time). (Code by @asbhaibsr)")
+
     app.run()
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
+
+
+
+
