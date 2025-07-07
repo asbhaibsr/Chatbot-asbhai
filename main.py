@@ -446,7 +446,8 @@ async def reset_monthly_earnings_manual():
         logger.info("Monthly earning message counts reset successfully by manual command. (Earning system by @asbhaibsr)")
 
         # Clear all pending withdrawal requests
-        deleted_withdrawals_count = withdrawal_requests_collection.delete_many({"status": "pending"}).deleted_count # Only clear pending
+        # The prompt specifically says "pending" so we filter by status.
+        deleted_withdrawals_count = withdrawal_requests_collection.delete_many({"status": "pending"}).deleted_count 
         logger.info(f"Cleared {deleted_withdrawals_count} pending withdrawal requests. (Earning system by @asbhaibsr)")
 
         # Update the reset date and month/year
@@ -589,12 +590,14 @@ async def callback_handler(client, callback_query):
         # Check if the user is in the top 3 (or whatever criteria you define for eligibility)
         is_eligible_for_withdrawal = False
         eligible_user_data = None
-        for i, user in enumerate(top_users[:3]): # Check only top 3 for eligibility
-            if user['user_id'] == user_id:
-                is_eligible_for_withdrawal = True
-                eligible_user_data = user
-                break
+        # Get top 3 eligible user IDs
+        eligible_user_ids = [user['user_id'] for user in top_users[:3]]
 
+        if user_id in eligible_user_ids:
+            is_eligible_for_withdrawal = True
+            # Find the user's data from the top_users list
+            eligible_user_data = next((user for user in top_users if user['user_id'] == user_id), None)
+            
         if not is_eligible_for_withdrawal:
             await callback_query.answer("🚫 Aapka name earning leaderboard mein nahi hai. Withdraw karne ke liye groups mein active rahen ya hamare @aschat_group par aakar bot se baatein karein!", show_alert=True)
             return
@@ -789,16 +792,18 @@ async def top_users_command(client: Client, message: Message):
             ]
         )
     else:
-        # If user is not eligible, don't show the withdraw button, or show a disabled one/text
+        # If user is not eligible, don't show the withdraw button,
+        # instead show a message suggesting them to be active in groups.
         keyboard = InlineKeyboardMarkup(
             [
                 [
-                    InlineKeyboardButton("🚫 Withdraw (Not Eligible)", callback_data="show_earning_leaderboard") # Placeholder to show button but do nothing
+                    InlineKeyboardButton("Join Group & Chat to Earn", url="https://t.me/aschat_group")
                 ]
             ]
         )
-        # Or, you can just set keyboard = None if you don't want any button for ineligible users
-        # keyboard = None 
+        # The message about not being eligible is handled in the callback,
+        # but for visual clarity, we can provide a hint here.
+        # Alternatively, if you strictly want NO button for ineligible users, set keyboard = None.
 
 
     await message.reply_text("\n".join(earning_messages), reply_markup=keyboard, quote=True, disable_web_page_preview=True)
@@ -1105,7 +1110,7 @@ async def delete_specific_message_command(client: Client, message: Message):
         else:
             await message.reply_text("Aww, yeh message to mujhe mila hi nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)")
     else:
-        await message.reply_text("Umm, mujhe tumhara yeh message to mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)")
+        await message.reply_text("Umm, mujhe tumhara yeh message to mila ही nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)")
     
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True)
@@ -1424,4 +1429,3 @@ if __name__ == "__main__":
     app.run()
     
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
-
