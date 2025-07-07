@@ -1,133 +1,39 @@
-# 🤖 Self-Learning Telegram AI Bot — Powered by @asbhaibsr
+<h1 align="center">💋 Cute & Talkative Telegram Girl Bot 💋</h1>
 
-Welcome to the **most advanced, self-learning Telegram bot** built for chat groups, fun interactions, earning systems, and full admin control. Perfect for Telegram kings & queens who want their group chat 🔥 always on fire!
-
-> **⚠️ Note:** Yeh bot aapke chats se *khud seekhta hai* aur har message ko smart banata hai. Use karo, sikhao, aur chat ka mazaa uthao!
-
----
-
-## 👑 Developed & Managed By:
-
-* 👨‍💻 **Owner:** [@asbhaibsr](https://t.me/asbhaibsr)
-* 📢 **Update Channel:** [@asbhai\_bsr](https://t.me/asbhai_bsr)
-* 💬 **Support / Chat Group:** [@aschat\_group](https://t.me/aschat_group)
-* 👼 **Live Demo Bot:** [@askiangelbot](https://t.me/askiangelbot) — *Check how it works in real-time!*
+<p align="center">
+    👑 Ladki wali awaaz mein baat karti hoon... yaad rakhti hoon... aur group mein sabko mast reply deti hoon 😚<br>
+    💸 Sabse zyada baat karne walon ko milta hai inaam bhi (Leaderboard wala system 🎁)<br>
+    <br>
+    <img src="https://envs.sh/FU3.jpg" alt="Bot Girl" width="180"/>
+</p>
 
 ---
 
-## 🚀 Features
+## 🌟 Kya-Kya Aata Hai Mujhe?
 
-* 🤖 **Self-Learning AI Chatting**
-* 🧠 **Smart, Contextual Replies**
-* 💬 **Stores Every Chat Message (Text + Stickers)**
-* 📊 **Group & User Activity Tracking**
-* 💸 **Earning System for Active Members**
-* 📦 **MongoDB Storage for Scale & Speed**
-* 📣 **Broadcast, Stats, Cleanup, Restart & Admin Tools**
-* 🩺 **24/7 Health Check via Flask (Koyeb Compatible)**
+- 💬 Har message ka jawab — khud soch ke karti hoon
+- 📊 **Top 3 Users** leaderboard — sabse zyada bolne walo ke liye prize
+- 👑 Admins mujhe group mein **ON / OFF** bhi kar sakte hain
+- 🎯 Owner ke liye powerful commands jaise **broadcast**, **restart**, etc.
+- 🔍 Saari baatein yaad bhi rakhti hoon, par overload hone par 20% clear bhi karti hoon
 
 ---
 
-## 🛠 Setup Instructions
+## 🚀 Ek Click Mein Koyeb Pe Deploy Karo
 
-### 1. Environment Variables (.env)
-
-```env
-API_ID=your_api_id
-API_HASH=your_api_hash
-BOT_TOKEN=your_bot_token
-OWNER_ID=your_telegram_user_id
-MONGO_URI_MESSAGES=your_mongo_uri_1
-MONGO_URI_BUTTONS=your_mongo_uri_2
-MONGO_URI_TRACKING=your_mongo_uri_3
-PORT=8000
-```
-
-### 2. Deployment (Replit / Koyeb / VPS)
-
-* Upload this bot.
-* Set env variables.
-* Health check URL for uptime.
-* Deploy and enjoy unlimited chat fun!
+[![🌸 Click to Deploy on Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?name=chatbot-asbhai&repository=asbhaibsr%2FChatbot-asbhai&branch=main&run_command=python3+main.py&instance_type=free&regions=was&instances_min=0&autoscaling_sleep_idle_delay=300&env%5BAPI_HASH%5D=918e2aa94075a7d04717b371a21fb689&env%5BAPI_ID%5D=28762030&env%5BBOT_TOKEN%5D=8098449556%3AAAED8oT7U3lsPFwJxdxS-k0m27H3v9XC7EY&env%5BMONGO_URI_BUTTONS%5D=mongodb%2Bsrv%3A%2F%2Fed69yyr92n%3AkaY09k4z8zCjDSR3%40cluster0.6uhfmud.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BMONGO_URI_MESSAGES%5D=mongodb%2Bsrv%3A%2F%2Fjeriwo3420%3AsDz0ZevArtOnjpR0%40cluster0.yrfv26n.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BMONGO_URI_TRACKING%5D=mongodb%2Bsrv%3A%2F%2Fmockingbird07317%3ArTgIMbRuwlW7qMLq%40cluster0.4vlhect.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BOWNER_ID%5D=8019381468&ports=8080%3Bhttp%3B%2F&hc_protocol%5B8080%5D=tcp&hc_grace_period%5B8080%5D=5&hc_interval%5B8080%5D=30&hc_restart_limit%5B8080%5D=3&hc_timeout%5B8080%5D=5&hc_path%5B8080%5D=%2F&hc_method%5B8080%5D=get)
 
 ---
 
-## 💻 Owner-Only Commands
+## 📚 Commands Jo Tum Use Kar Sakte Ho
 
 ```bash
-/broadcast your message        # Send to all groups
-/stats check                   # Show total stats
-/topusers                      # Show earning leaderboard
-/cleardata 10%                 # Delete % of old messages
-/deletemessage hello bro       # Delete specific message
-/clearearning                  # Reset earning counts
-/groups                        # List all joined groups
-/leavegroup -100xxxxxxxxx      # Force bot leave
-/restart                       # Restart the bot
-```
-
----
-
-## 👥 For All Group Users
-
-* Just chat normally.
-* Bot will reply based on past conversations.
-* Reply to bot messages to teach it.
-* Use `/topusers` to see most active users & earners.
-
----
-
-## 🧠 MongoDB Collections Used
-
-| Collection              | Purpose                           |
-| ----------------------- | --------------------------------- |
-| `messages`              | Stores text/stickers of all users |
-| `button_interactions`   | Tracks inline button clicks       |
-| `groups_data`           | All groups where bot is added     |
-| `users_data`            | Tracks each user info             |
-| `monthly_earnings_data` | Monthly activity stats            |
-
----
-
-## ✅ Health Check (Koyeb / UptimeRobot)
-
-Used to keep the bot always awake.
-
-```
-GET /health
-```
-
-Returns:
-
-```json
-{"status": "ok", "message": "Bot is alive and healthy!"}
-```
-
----
-
-## 💎 Start Menu with Inline Buttons
-
-When someone sends /start:
-
-* ➕ **Add Me to Group**
-* 📢 **Updates Channel**  → [@asbhai\_bsr](https://t.me/asbhai_bsr)
-* ❓ **Support Group**    → [@aschat\_group](https://t.me/aschat_group)
-* 🛒 **Buy My Code**      → Contact [@asbhaibsr](https://t.me/asbhaibsr)
-* 💰 **Earning Leaderboard** → Shows top chatters
-
----
-
-## 👑 Credits & Licensing
-
-* 🔥 Bot Developer: [@asbhaibsr](https://t.me/asbhaibsr)
-* ❌ Re-uploading or selling this code without permission is **strictly prohibited**.
-* 📢 Stay updated: [@asbhai\_bsr](https://t.me/asbhai_bsr)
-* 💬 Chat or Help: [@aschat\_group](https://t.me/aschat_group)
-* 👼 Demo this bot live: [@askiangelbot](https://t.me/askiangelbot)
-
----
-
-## 💬 Final Note
-
-Use karo, enjoy karo, aur group mein bakchodi karo 😎
-Ye bot aapka group bana dega ek real time entertaining adda! 🔥
+/start              - Mujhse baatein shuru karo 💖
+/chat on | off      - Group mein mujhe chalu ya chup karo (Admins only)
+/topusers           - Top bolne waale logon ka naam dikhata hai 🥇
+/broadcast [msg]    - Owner sabko ek message bhej sakta hai 📢
+/stats check        - Bot ka total stats (groups, users, messages) 🧠
+/groups             - Owner ke liye group list 📃
+/cleardata 30%      - Purana data clean karo (Owner only)
+/clearearning       - Monthly earning reset (Owner only)
+/restart            - Bot ko fresh restart do (Owner only)
