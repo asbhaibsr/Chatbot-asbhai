@@ -15,7 +15,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
-from pyrogram.enums import ChatType # Import ChatType for clearer comparisons
+from pyrogram.enums import ChatType, ChatMemberStatus # Import ChatMemberStatus
 
 from pymongo import MongoClient
 from datetime import datetime, timedelta
@@ -51,6 +51,7 @@ PRUNE_PERCENTAGE = 0.30
 UPDATE_CHANNEL_USERNAME = "asbhai_bsr"
 ASBHAI_USERNAME = "asbhaibsr" # asbhaibsr ka username
 BOT_PHOTO_URL = "https://envs.sh/FU3.jpg" # New: Bot's photo URL
+REPO_LINK = "https://github.com/asbhaibsr/Chatbot-asbhai.git" # Repository link
 
 # --- MongoDB Setup ---
 try:
@@ -78,6 +79,11 @@ try:
     messages_collection.create_index([("timestamp", 1)])
     messages_collection.create_index([("user_id", 1)])
     earning_tracking_collection.create_index([("group_message_count", -1)])
+    # Ensure bot_enabled field exists for all groups, default to True
+    group_tracking_collection.update_many(
+        {"bot_enabled": {"$exists": False}},
+        {"$set": {"bot_enabled": True}}
+    )
 
 
 except Exception as e:
@@ -197,7 +203,7 @@ async def store_message(message: Message):
             if message.reply_to_message.text:
                 replied_content = message.reply_to_message.text
             elif message.reply_to_message.sticker:
-                replied_content = message.reply_to_message.sticker.emoji if message.reply_to_message.sticker.emoji else ""
+                replied_content = message.reply_to_message.sticker.emoji if message.reply_to_message.emoji else ""
             
             message_data["replied_to_content"] = replied_content
 
@@ -223,15 +229,25 @@ async def store_message(message: Message):
             user_id_to_track = message.from_user.id
             username_to_track = message.from_user.username
             first_name_to_track = message.from_user.first_name
+            current_group_id = message.chat.id
+            current_group_title = message.chat.title
+            current_group_username = message.chat.username # Get group username
 
             logger.info(f"DEBUG: Attempting to update earning count for user {user_id_to_track} ({first_name_to_track}) in chat {message.chat.id}.") # Added debug log
 
             try:
                 # Increment group_message_count for the user
+                # Also update last_active_group_id and last_active_group_username
                 earning_tracking_collection.update_one(
                     {"_id": user_id_to_track},
                     {"$inc": {"group_message_count": 1},
-                     "$set": {"username": username_to_track, "first_name": first_name_to_track, "last_active_group_message": datetime.now()},
+                     "$set": {"username": username_to_track, 
+                              "first_name": first_name_to_track, 
+                              "last_active_group_message": datetime.now(),
+                              "last_active_group_id": current_group_id, # New field
+                              "last_active_group_title": current_group_title, # New field
+                              "last_active_group_username": current_group_username # New field
+                              },
                      "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
                     upsert=True
                 )
@@ -273,28 +289,16 @@ async def generate_reply(message: Message):
     # Search for messages where the bot has previously replied to the current query_content
     # (i.e., user's message is the 'replied_to_content' of a bot's observed pair)
     
-    # First, try to find replies specific to the current chat
     potential_replies = []
     
-    # Find replies where the bot responded to exactly this content in this chat
-    observed_replies_chat_cursor = messages_collection.find({
-        "chat_id": message.chat.id,
+    # MODIFIED: Search for observed replies globally (removed chat_id filter)
+    observed_replies_cursor = messages_collection.find({
         "is_bot_observed_pair": True, # Means the message itself was part of an observed pair
         "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"},
         "user_id": app.me.id # The message to pick as a reply must be from the bot itself
     })
-    for doc in observed_replies_chat_cursor:
+    for doc in observed_replies_cursor:
         potential_replies.append(doc)
-
-    if not potential_replies:
-        # If no chat-specific observed replies, try global observed replies
-        observed_replies_global_cursor = messages_collection.find({
-            "is_bot_observed_pair": True, # Means the message itself was part of an observed pair
-            "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"},
-            "user_id": app.me.id # The message to pick as a reply must be from the bot itself
-        })
-        for doc in observed_replies_global_cursor:
-            potential_replies.append(doc)
 
     if potential_replies:
         chosen_reply = random.choice(potential_replies)
@@ -306,23 +310,15 @@ async def generate_reply(message: Message):
     # --- Step 2: Fallback to general keyword matching (less contextual) ---
     keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
     
-    general_replies_group_cursor = messages_collection.find({
-        "chat_id": message.chat.id,
+    # MODIFIED: Search for general keyword replies globally (removed chat_id filter)
+    general_replies_cursor = messages_collection.find({
         "type": {"$in": ["text", "sticker"]},
         "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
     })
 
     potential_replies = []
-    for doc in general_replies_group_cursor:
+    for doc in general_replies_cursor:
         potential_replies.append(doc)
-
-    if not potential_replies:
-        general_replies_global_cursor = messages_collection.find({
-            "type": {"$in": ["text", "sticker"]},
-            "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
-        })
-        for doc in general_replies_global_cursor:
-            potential_replies.append(doc)
 
     if potential_replies:
         chosen_reply = random.choice(potential_replies)
@@ -333,13 +329,13 @@ async def generate_reply(message: Message):
     return None
 
 # --- Tracking Functions ---
-async def update_group_info(chat_id: int, chat_title: str):
+async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None): # Added chat_username
     # Group tracking logic by @asbhaibsr
     try:
         group_tracking_collection.update_one(
             {"_id": chat_id},
-            {"$set": {"title": chat_title, "last_updated": datetime.now()},
-             "$setOnInsert": {"added_on": datetime.now(), "member_count": 0, "credit": "by @asbhaibsr"}}, # Hidden Credit
+            {"$set": {"title": chat_title, "username": chat_username, "last_updated": datetime.now()}, # Store username
+             "$setOnInsert": {"added_on": datetime.now(), "member_count": 0, "bot_enabled": True, "credit": "by @asbhaibsr"}}, # New field: bot_enabled
             upsert=True
         )
         logger.info(f"Group info updated/inserted successfully for {chat_title} ({chat_id}). (Tracking by @asbhaibsr)")
@@ -363,13 +359,10 @@ async def update_user_info(user_id: int, username: str, first_name: str):
 # --- Earning System Functions ---
 async def get_top_earning_users():
     # This function returns the top users based on group_message_count.
-    # We should return all users with >0 messages, then the display logic can limit to top 3
     pipeline = [
         {"$match": {"group_message_count": {"$gt": 0}}}, # Only users with more than 0 group messages
         {"$sort": {"group_message_count": -1}}, # Sort in descending order
-        # Remove limit here so the function returns all active users.
-        # The display logic in top_users_command will take care of top 3.
-        # {"$limit": 3} 
+        # No limit here, let the display logic handle top 3
     ]
 
     top_users_data = list(earning_tracking_collection.aggregate(pipeline))
@@ -381,7 +374,10 @@ async def get_top_earning_users():
             "user_id": user_data["_id"],
             "first_name": user_data.get("first_name", "Unknown User"),
             "username": user_data.get("username"),
-            "message_count": user_data["group_message_count"]
+            "message_count": user_data["group_message_count"],
+            "last_active_group_id": user_data.get("last_active_group_id"), # New
+            "last_active_group_title": user_data.get("last_active_group_title"), # New
+            "last_active_group_username": user_data.get("last_active_group_username") # New
         })
     return top_users_details
 
@@ -418,12 +414,9 @@ async def start_private_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
-    welcome_messages = [
-        f"Hi **{user_name}!** 👋 Main aa gayi hoon. Chalo, baatein karte hain! ✨",
-        f"Hellooo **{user_name}!** 💖 Main sunne aur seekhne ke liye taiyar hoon. 😊",
-        f"Namaste **{user_name}!** Koi kaam hai? 😉 Main yahan hoon!"
-    ]
+    user_name = message.from_user.first_name if message.from_user else "Dost"
+    
+    welcome_message = f"Hello **{user_name}!** 👋 Main aa gayi hoon. Chalo, baatein karte hain! 😊"
     
     keyboard = InlineKeyboardMarkup(
         [
@@ -435,15 +428,15 @@ async def start_private_command(client: Client, message: Message):
                 InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
             ],
             [
-                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo"),
-                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") # New button for earning
+                InlineKeyboardButton("ℹ️ Help", callback_data="show_help_menu"), # Changed from Buy My Code to Help
+                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") 
             ]
         ]
     )
 
     await message.reply_photo(
         photo=BOT_PHOTO_URL,
-        caption=random.choice(welcome_messages),
+        caption=welcome_message,
         reply_markup=keyboard
     )
     await store_message(message)
@@ -458,12 +451,9 @@ async def start_group_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    user_name = message.from_user.first_name if message.from_user else "Pyaare Dost"
-    welcome_messages = [
-        f"Hello **{user_name}!** 👋 Main aa gayi hoon. Group ki baatein sunne ko taiyar hoon! ✨",
-        f"Hey **{user_name}!** 💖 Main yahan aapki conversations se seekhne aayi hoon. 😊",
-        f"Namaste **{user_name}!** Is group mein main hoon aapki apni bot. 😄"
-    ]
+    user_name = message.from_user.first_name if message.from_user else "Dost"
+    
+    welcome_message = f"Hello **{user_name}!** 👋 Main aa gayi hoon. Group ki baatein sunne ko taiyar hoon! 😊"
 
     keyboard = InlineKeyboardMarkup(
         [
@@ -472,22 +462,21 @@ async def start_group_command(client: Client, message: Message):
                 InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
             ],
             [
-                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo"),
-                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") # New button for earning
+                InlineKeyboardButton("ℹ️ Help", callback_data="show_help_menu"), # Changed from Buy My Code to Help
+                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") 
             ]
         ]
     )
 
     await message.reply_photo(
         photo=BOT_PHOTO_URL,
-        caption=random.choice(welcome_messages),
+        caption=welcome_message,
         reply_markup=keyboard
     )
     await store_message(message)
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum here
-        # Ensure group info is updated when /start is called in a group
-        logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.") # NEW DEBUG LOG
-        await update_group_info(message.chat.id, message.chat.title)
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: 
+        logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.") 
+        await update_group_info(message.chat.id, message.chat.title, message.chat.username) # Pass group username
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Group start command processed in chat {message.chat.id}. (Code by @asbhaibsr)")
@@ -496,7 +485,7 @@ async def start_group_command(client: Client, message: Message):
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
     # Callback query handler. Developed by @asbhaibsr.
-    if callback_query.data == "buy_git_repo":
+    if callback_query.data == "buy_git_repo": # Kept for backward compatibility if old button exists
         await callback_query.message.reply_text(
             f"🤩 Agar aapko mere jaisa khud ka bot banwana hai, toh aapko ₹500 dene honge. Iske liye **@{ASBHAI_USERNAME}** se contact karein aur unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group",
             quote=True
@@ -511,13 +500,44 @@ async def callback_handler(client, callback_query):
             "timestamp": datetime.now(),
             "credit": "by @asbhaibsr"
         })
-    elif callback_query.data == "show_earning_leaderboard": # New callback for earning button
-        # /topusers कमांड का लॉजिक यहाँ कॉल करें
-        # हमें इसे एक मैसेज ऑब्जेक्ट की तरह पास करना होगा
-        # reply_text, from_user, chat, command, etc. जैसे आवश्यक एट्रीब्यूट्स के साथ
-        # Changed: Passed original message for context and reply.
+    elif callback_query.data == "show_earning_leaderboard": 
         await top_users_command(client, callback_query.message)
         await callback_query.answer("Earning Leaderboard dikha raha hoon! 💰", show_alert=False)
+    elif callback_query.data == "show_help_menu": # New callback handler for Help button
+        help_text = (
+            "💡 **Main Kaise Kaam Karti Hoon?**\n\n"
+            "Main ek self-learning bot hoon jo conversations se seekhti hai. Aap groups mein ya mujhse private mein baat kar sakte hain, aur main aapke messages ko yaad rakhti hoon. Jab koi user similar baat karta hai, toh main usse seekhe hue reply deti hoon.\n\n"
+            "**✨ Mere Functions:**\n"
+            "• **Conversation:** Groups aur private chat mein baat karti hoon.\n"
+            "• **Seekhna:** Aapki baaton se naye replies generate karna seekhti hoon.\n"
+            "• **Commands:** Kuch khaas commands hain jo aap use kar sakte hain:\n"
+            "  • `/start`: Mujhse baat shuru karne ke liye.\n"
+            "  • `/help`: Yeh menu dekhne ke liye (jo aap abhi dekh rahe hain!).\n"
+            "  • `/topusers`: Sabse active users ka leaderboard dekhne ke liye.\n"
+            "  • `/chat on/off`: (Sirf Group Admins ke liye) Group mein meri messages band/chalu karne ke liye.\n"
+            "  • `/groups`: (Sirf Owner ke liye) Jin groups mein main hoon, unki list dekhne ke liye.\n"
+            "  • `/stats check`: Bot ke statistics dekhne ke liye.\n"
+            "  • `/cleardata <percentage>`: (Sirf Owner ke liye) Database se data delete karne ke liye.\n"
+            "  • `/deletemessage <content>`: (Sirf Owner ke liye) Specific message delete karne ke liye.\n"
+            "  • `/clearearning`: (Sirf Owner ke liye) Earning data reset karne ke liye.\n"
+            "  • `/leavegroup <group_id>`: (Sirf Owner ke liye) Kisi group ko chhodne ke liye.\n"
+            "  • `/broadcast <message>`: (Sirf Owner ke liye) Sabhi groups mein message bhejne ke liye.\n"
+            "  • `/restart`: (Sirf Owner ke liye) Bot ko restart karne ke liye.\n\n"
+            "**🔗 Mera Code (GitHub Repository):**\n"
+            f"[**{REPO_LINK}**]({REPO_LINK})\n\n"
+            "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+        )
+        await callback_query.message.reply_text(help_text, quote=True, disable_web_page_preview=True)
+        await callback_query.answer("Help menu dikha raha hoon! 😊", show_alert=False)
+        # Store button interaction
+        buttons_collection.insert_one({
+            "user_id": callback_query.from_user.id,
+            "username": callback_query.from_user.username,
+            "first_name": callback_query.from_user.first_name,
+            "button_data": callback_query.data,
+            "timestamp": datetime.now(),
+            "credit": "by @asbhaibsr"
+        })
 
     logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}. (Code by @asbhaibsr)")
 
@@ -541,17 +561,41 @@ async def top_users_command(client: Client, message: Message):
     prizes = {1: "₹30", 2: "₹15", 3: "₹5"} # Define prizes for top 3
 
     # Limit to top 3 for display
-    for i, user in enumerate(top_users[:3]): # Modified: Slicing to display only top 3
+    for i, user in enumerate(top_users[:3]): 
         rank = i + 1
         user_name = user.get('first_name', 'Unknown User')
         username_str = f"@{user.get('username')}" if user.get('username') else "N/A"
         message_count = user.get('message_count', 0)
         prize_str = prizes.get(rank, "₹0")
 
+        group_info = ""
+        last_group_id = user.get('last_active_group_id')
+        last_group_title = user.get('last_active_group_title', 'Unknown Group')
+        last_group_username = user.get('last_active_group_username')
+
+        if last_group_id and not str(last_group_id).startswith("-100"): # Check if not a private group by ID
+             # Private chats IDs don't start with -100
+            chat_obj = None
+            try:
+                chat_obj = await client.get_chat(last_group_id)
+            except Exception as e:
+                logger.warning(f"Could not fetch chat info for group ID {last_group_id}: {e}")
+
+            if chat_obj and chat_obj.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+                group_display_name = chat_obj.title if chat_obj.title else last_group_title
+                group_username_display = f" (@{chat_obj.username})" if chat_obj.username else ""
+                group_info = f"   • Last Active in: **{group_display_name}**{group_username_display}\n"
+            else:
+                 # Fallback to stored if fetching failed or it's not a group/supergroup
+                group_username_display = f" (@{last_group_username})" if last_group_username else ""
+                group_info = f"   • Last Active in: **{last_group_title}**{group_username_display}\n"
+
+
         earning_messages.append(
             f"**Rank {rank}:** {user_name} ({username_str})\n"
             f"   • Total Messages: **{message_count}**\n"
             f"   • Potential Earning: **{prize_str}**\n"
+            f"{group_info}" # Add group info here
         )
     
     earning_messages.append(
@@ -559,7 +603,7 @@ async def top_users_command(client: Client, message: Message):
         "• Earning will be based solely on **conversation (messages) within group chats.**\n"
         "• **Spamming or sending a high volume of messages in quick succession will not be counted.** Only genuine, relevant conversation will be considered.\n"
         "• Please ensure your conversations are **meaningful and engaging.**\n"
-        "• This leaderboard can be **reset manually by the owner using /clearearning command.**\n\n" # Updated info
+        "• This leaderboard can be **reset manually by the owner using /clearearning command.**\n\n" 
         "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
 
@@ -669,8 +713,8 @@ async def stats_group_command(client: Client, message: Message):
     )
     await message.reply_text(stats_text)
     await store_message(message)
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum
-        await update_group_info(message.chat.id, message.chat.title)
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: 
+        await update_group_info(message.chat.id, message.chat.title, message.chat.username) # Pass group username
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Group stats command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
@@ -698,10 +742,23 @@ async def list_groups_command(client: Client, message: Message):
     for i, group in enumerate(groups):
         title = group.get("title", "Unknown Group")
         group_id = group.get("_id")
+        group_username = group.get("username", "N/A") # Get group username
         added_on = group.get("added_on", "N/A").strftime("%Y-%m-%d %H:%M") if isinstance(group.get("added_on"), datetime) else "N/A"
         
-        group_list_text += f"{i+1}. **{title}** (`{group_id}`)\n"
-        group_list_text += f"   • Joined: {added_on}\n"
+        member_count = "N/A"
+        try:
+            chat_obj = await client.get_chat(group_id)
+            member_count = await client.get_chat_members_count(group_id)
+        except Exception as e:
+            logger.warning(f"Could not fetch member count for group {group_id}: {e}")
+
+        username_display = f" (@{group_username})" if group_username != "N/A" else ""
+        
+        group_list_text += (
+            f"{i+1}. **{title}**{username_display} (`{group_id}`)\n"
+            f"   • Joined: {added_on}\n"
+            f"   • Members: {member_count}\n" # Added member count
+        )
         
     group_list_text += "\n_Yeh data tracking database se hai, bilkul secret!_ 🤫\n**Code & System By:** @asbhaibsr"
     await message.reply_text(group_list_text)
@@ -737,12 +794,6 @@ async def leave_group_command(client: Client, message: Message):
         
         group_tracking_collection.delete_one({"_id": group_id})
         messages_collection.delete_many({"chat_id": group_id})
-        # New: Also clear earning data for users in this group (optional, but good for cleanup)
-        # Note: This would clear *all* messages for users who were *only* in this group.
-        # For more granular control, one might need to iterate through messages for this group ID.
-        # For simplicity and general cleanup, we'll assume it's fine for now.
-        # If a user is in multiple groups, their count across other groups would remain.
-        # For now, let's just log a message about potential cleanup for earning tracking
         logger.info(f"Considered cleaning earning data for users from left group {group_id}. (Code by @asbhaibsr)")
 
         await message.reply_text(f"Safaltapoorvak group `{group_id}` se bahar aa gayi, aur uska sara data bhi clean kar diya! Bye-bye! 👋 (Code by @asbhaibsr)")
@@ -833,10 +884,7 @@ async def delete_specific_message_command(client: Client, message: Message):
 
     search_query = " ".join(message.command[1:])
     
-    # Try to find message in current chat first
-    # This logic was attempting to find a specific message in the current chat or globally
-    # but might not be ideal for deleting based on content alone, as content might not be unique.
-    # For now, keeping it as is, but consider if you want to delete based on message ID for more precision.
+    # Try to find message in current chat first (this is still relevant for user experience)
     message_to_delete = messages_collection.find_one({"chat_id": message.chat.id, "content": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
 
     if not message_to_delete:
@@ -893,6 +941,53 @@ async def restart_command(client: Client, message: Message):
     await asyncio.sleep(0.5) 
     os.execl(sys.executable, sys.executable, *sys.argv) # This will restart the script (Code by @asbhaibsr)
 
+# --- New: /chat on/off command ---
+@app.on_message(filters.command("chat") & filters.group)
+async def toggle_chat_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return
+    update_cooldown(message.from_user.id)
+
+    if not message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        await message.reply_text("Yeh command sirf groups mein kaam karti hai, darling! 😉")
+        return
+
+    # Check if the user is an admin
+    member = await client.get_chat_member(message.chat.id, message.from_user.id)
+    if member.status not in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR]:
+        await message.reply_text("Maaf karna, yeh command sirf group admins hi use kar sakte hain. 🤷‍♀️")
+        return
+
+    if len(message.command) < 2:
+        current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
+        current_status = current_status_doc.get("bot_enabled", True) if current_status_doc else True
+        status_text = "chaalu hai (ON)" if current_status else "band hai (OFF)"
+        await message.reply_text(f"Main abhi is group mein **{status_text}** hoon. Use `/chat on` ya `/chat off` control karne ke liye. (Code by @asbhaibsr)")
+        return
+
+    action = message.command[1].lower()
+
+    if action == "on":
+        group_tracking_collection.update_one(
+            {"_id": message.chat.id},
+            {"$set": {"bot_enabled": True}}
+        )
+        await message.reply_text("🚀 Main phir se aa gayi! Ab main is group mein baatein karungi aur seekhungi. 😊")
+        logger.info(f"Bot enabled in group {message.chat.id} by admin {message.from_user.id}. (Code by @asbhaibsr)")
+    elif action == "off":
+        group_tracking_collection.update_one(
+            {"_id": message.chat.id},
+            {"$set": {"bot_enabled": False}}
+        )
+        await message.reply_text("😴 Main abhi thodi der ke liye chup ho rahi hoon. Jab meri zaroorat ho, `/chat on` karke bula lena. Bye-bye! 👋")
+        logger.info(f"Bot disabled in group {message.chat.id} by admin {message.from_user.id}. (Code by @asbhaibsr)")
+    else:
+        await message.reply_text("Galat command, darling! `/chat on` ya `/chat off` use karo. 😉")
+    
+    await store_message(message)
+    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
+
 # --- New chat members and left chat members ---
 @app.on_message(filters.new_chat_members)
 async def new_member_handler(client: Client, message: Message):
@@ -903,9 +998,9 @@ async def new_member_handler(client: Client, message: Message):
         logger.info(f"Processing new member: {member.id} ({member.first_name}) in chat {message.chat.id}. Is bot: {member.is_bot}. (Event handled by @asbhaibsr)")
         # Check if the bot itself was added to a group
         if member.id == client.me.id:
-            if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum here
-                logger.info(f"DEBUG: Bot {client.me.id} detected as new member in group {message.chat.id}. Calling update_group_info.") # NEW DEBUG LOG
-                await update_group_info(message.chat.id, message.chat.title)
+            if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: 
+                logger.info(f"DEBUG: Bot {client.me.id} detected as new member in group {message.chat.id}. Calling update_group_info.") 
+                await update_group_info(message.chat.id, message.chat.title, message.chat.username) # Pass group username
                 logger.info(f"Bot joined new group: {message.chat.title} ({message.chat.id}). (Event handled by @asbhaibsr)")
                 
                 # Send notification to OWNER
@@ -925,20 +1020,12 @@ async def new_member_handler(client: Client, message: Message):
                     logger.info(f"Owner notified about new group: {group_title}. (Notification by @asbhaibsr)")
                 except Exception as e:
                     logger.error(f"Could not notify owner about new group {group_title}: {e}. (Notification error by @asbhaibsr)")
-            # If the bot itself was added, no need to process other members in this specific event
             return 
 
-        # Check if a new user joined a private chat with the bot (i.e., started the bot)
-        # Or if a new user joined a group where the bot is present
-        if not member.is_bot: # Only for actual users, not other bots
+        if not member.is_bot: 
             user_exists = user_tracking_collection.find_one({"_id": member.id})
             
-            # Condition for new user starting bot in private chat
-            # This logic needs to be careful: new_chat_members in private chat usually means the user themselves.
-            # However, the primary "start bot in private" is handled by the /start private command.
-            # This part primarily catches if someone *else* adds a user to a *private* bot chat (rare/edge case)
-            # or if a new user is added to a group.
-            if message.chat.type == ChatType.PRIVATE and member.id == message.from_user.id and not user_exists: # Use ChatType enum
+            if message.chat.type == ChatType.PRIVATE and member.id == message.from_user.id and not user_exists:
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
                 notification_message = (
@@ -956,8 +1043,7 @@ async def new_member_handler(client: Client, message: Message):
                 except Exception as e:
                     logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
                 
-            # Condition for new user joining a group where the bot is present
-            elif message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and not user_exists: # Use ChatType enum
+            elif message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and not user_exists:
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
                 group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
@@ -978,7 +1064,6 @@ async def new_member_handler(client: Client, message: Message):
                 except Exception as e:
                     logger.error(f"Could not notify owner about new group member {user_name} in {group_title}: {e}. (Notification error by @asbhaibsr)")
     
-    # Store the new_chat_members event message itself (optional, but consistent with other message storage)
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -990,16 +1075,13 @@ async def left_member_handler(client: Client, message: Message):
     logger.info(f"Left chat member detected in chat {message.chat.id}. Left member ID: {message.left_chat_member.id}. Bot ID: {client.me.id}. (Event handled by @asbhaibsr)")
 
     if message.left_chat_member and message.left_chat_member.id == client.me.id:
-        if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum
+        if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: 
             group_tracking_collection.delete_one({"_id": message.chat.id})
             messages_collection.delete_many({"chat_id": message.chat.id})
             earning_tracking_collection.update_many(
-                {"_id": {"$in": [user["_id"] for user in earning_tracking_collection.find({})]}}, # All users
-                {"$pull": {"groups": message.chat.id}} # Remove this group from user's group list (if you store one)
+                {"_id": {"$in": [user["_id"] for user in earning_tracking_collection.find({})]}}, 
+                {"$pull": {"groups": message.chat.id}} 
             )
-            # More direct approach to reset counts for users specifically from this group if needed,
-            # but current earnings logic is global per user, not per group.
-            # So, general cleanup is enough.
 
             logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared. (Code by @asbhaibsr)")
             # Send notification to OWNER
@@ -1019,9 +1101,8 @@ async def left_member_handler(client: Client, message: Message):
                 logger.info(f"Owner notified about bot leaving group: {group_title}. (Notification by @asbhaibsr)")
             except Exception as e:
                 logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}. (Notification error by @asbhaibsr)")
-            return # No need to store message if bot left
+            return 
 
-    # Store the left_chat_member event message itself
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -1031,10 +1112,15 @@ async def left_member_handler(client: Client, message: Message):
 async def handle_message_and_reply(client: Client, message: Message):
     # Main message handler for replies. Core logic by @asbhaibsr.
     if message.from_user and message.from_user.is_bot:
-        # Important: Bots' messages should not count towards earning,
-        # and generally, the bot should not learn from other bots' messages.
         logger.debug(f"Skipping message from bot user: {message.from_user.id}. (Handle message by @asbhaibsr)")
         return
+
+    # Check bot_enabled status for groups
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        group_status = group_tracking_collection.find_one({"_id": message.chat.id})
+        if group_status and not group_status.get("bot_enabled", True): # Default to True if not found
+            logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling. (Code by @asbhaibsr)")
+            return # Do not process messages if bot is disabled in this group
 
     # Apply cooldown before processing message
     if message.from_user and is_on_cooldown(message.from_user.id):
@@ -1046,10 +1132,9 @@ async def handle_message_and_reply(client: Client, message: Message):
     logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}). (Handle message by @asbhaibsr)")
 
     # Update group and user info regardless of whether it's a command or regular message
-    # Ensure update_group_info is called correctly when a message arrives in a group
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum
-        logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.") # NEW DEBUG LOG
-        await update_group_info(message.chat.id, message.chat.title)
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: 
+        logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.") 
+        await update_group_info(message.chat.id, message.chat.title, message.chat.username) # Pass group username
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -1085,7 +1170,6 @@ if __name__ == "__main__":
 
     logger.info("Starting Pyrogram bot... (Code by @asbhaibsr)")
     
-    # Pyrogram app.run() मेथड को सीधे कॉल करें. यह Pyrogram को शुरू और आइडल रखेगा.
     app.run()
     
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
