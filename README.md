@@ -10,9 +10,13 @@
 
 ---
 
-### 🎬🔥 Bot Real Entry Animation – Click to Watch
+### 🎬🔥 Bot Real Entry Animation – Live Demo
 
-👉 [Watch Bot Animation on Telegram](https://t.me/asbhai_bsr/999)
+<div align="center">
+  <a href="https://t.me/asbhai_bsr/999">
+    <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&duration=3000&pause=300&color=F97316&center=true&vCenter=true&multiline=true&width=600&lines=👩‍💻+Bot+Warming+Up...;⚡+Loading+Main+Modules...;💬+Chat+System+Activated!;🎉+Now+Talking+Like+A+Real+Person..." alt="Bot Animation" />
+  </a>
+</div>
 
 ---
 
