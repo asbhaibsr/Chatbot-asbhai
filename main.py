@@ -39,7 +39,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URI_MESSAGES = os.getenv("MONGO_URI_MESSAGES")
 MONGO_URI_BUTTONS = os.getenv("MONGO_URI_BUTTONS")
 MONGO_URI_TRACKING = os.getenv("MONGO_URI_TRACKING") # This will now also house earning data
-MONGO_URI_WITHDRAWALS = os.getenv("MONGO_URI_WITHDRAWALS") # NEW: Separate URI for withdrawal requests
 
 OWNER_ID = os.getenv("OWNER_ID") # Owner ki user ID (string format mein)
 
@@ -52,12 +51,6 @@ PRUNE_PERCENTAGE = 0.30
 UPDATE_CHANNEL_USERNAME = "asbhai_bsr"
 ASBHAI_USERNAME = "asbhaibsr" # asbhaibsr ka username
 BOT_PHOTO_URL = "https://envs.sh/FU3.jpg" # New: Bot's photo URL
-
-# --- Payment Details (NEW) ---
-# Replace with your actual UPI ID, QR code link, and bank account details
-UPI_ID = "your_upi_id@bank" # Example: yourname@ybl
-QR_CODE_LINK = "https://example.com/your_qr_code.jpg" # Direct link to an image of your QR code
-BANK_DETAILS = "Bank Name: ABC Bank\nAccount No: 1234567890\nIFSC: ABC1234567"
 
 # --- MongoDB Setup ---
 try:
@@ -75,25 +68,16 @@ try:
     db_tracking = client_tracking.bot_tracking_data
     group_tracking_collection = db_tracking.groups_data
     user_tracking_collection = db_tracking.users_data
-    # New: Earning Tracking Collection within the same tracking DB
+    # Earning Tracking Collection within the same tracking DB
     earning_tracking_collection = db_tracking.monthly_earnings_data
-    # New: Collection to track last reset date (Still useful for logging/tracking last manual reset)
+    # Collection to track last reset date (Still useful for logging/tracking last manual reset)
     reset_status_collection = db_tracking.reset_status
     logger.info("MongoDB (Tracking & Earning) connection successful. Credit: @asbhaibsr")
-
-    # NEW: Withdrawal Requests Collection
-    client_withdrawals = MongoClient(MONGO_URI_WITHDRAWALS)
-    db_withdrawals = client_withdrawals.bot_withdrawal_data
-    withdrawal_requests_collection = db_withdrawals.requests
-    logger.info("MongoDB (Withdrawals) connection successful. Credit: @asbhaibsr")
-
 
     # Create indexes for efficient querying if they don't exist
     messages_collection.create_index([("timestamp", 1)])
     messages_collection.create_index([("user_id", 1)])
     earning_tracking_collection.create_index([("group_message_count", -1)])
-    # Ensure is_active index for user_tracking_collection
-    user_tracking_collection.create_index([("is_active", 1)])
 
 
 except Exception as e:
@@ -107,34 +91,6 @@ app = Client(
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
-
-# --- Chat On/Off State (NEW) ---
-# Dictionary to store chat state for each group: {chat_id: True/False (on/off)}
-# Default is ON.
-group_chat_states = {} 
-
-async def load_chat_states():
-    """Loads chat states from the group_tracking_collection."""
-    try:
-        groups = group_tracking_collection.find({})
-        for group in groups:
-            # Default to True (chat is on) if not found or explicitly set
-            group_chat_states[group["_id"]] = group.get("chat_enabled", True)
-        logger.info(f"Loaded chat states for {len(group_chat_states)} groups. (Feature by @asbhaibsr)")
-    except Exception as e:
-        logger.error(f"Error loading chat states: {e}. (Feature by @asbhaibsr)")
-
-async def update_group_chat_state_in_db(chat_id: int, enabled: bool):
-    """Updates the chat_enabled state for a group in the database."""
-    try:
-        group_tracking_collection.update_one(
-            {"_id": chat_id},
-            {"$set": {"chat_enabled": enabled, "last_updated": datetime.now()}},
-            upsert=True # Ensures the document exists if it's a new group
-        )
-        logger.info(f"Chat state for group {chat_id} updated to {enabled} in DB. (Feature by @asbhaibsr)")
-    except Exception as e:
-        logger.error(f"Error updating chat state in DB for group {chat_id}: {e}. (Feature by @asbhaibsr)")
 
 # --- Flask App Setup ---
 flask_app = Flask(__name__) # Core system by @asbhaibsr
@@ -380,31 +336,27 @@ async def generate_reply(message: Message):
 async def update_group_info(chat_id: int, chat_title: str):
     # Group tracking logic by @asbhaibsr
     try:
-        # Also ensure chat_enabled field exists and is handled.
-        # If a group is added for the first time, chat_enabled will be True by default.
         group_tracking_collection.update_one(
             {"_id": chat_id},
             {"$set": {"title": chat_title, "last_updated": datetime.now()},
-             "$setOnInsert": {"added_on": datetime.now(), "member_count": 0, "chat_enabled": True, "credit": "by @asbhaibsr"}}, # Hidden Credit, chat_enabled default to True
+             "$setOnInsert": {"added_on": datetime.now(), "member_count": 0, "credit": "by @asbhaibsr"}}, # Hidden Credit
             upsert=True
         )
-        # Update local cache for chat state
-        group_chat_states[chat_id] = group_chat_states.get(chat_id, True) # Keep existing state or default to True
         logger.info(f"Group info updated/inserted successfully for {chat_title} ({chat_id}). (Tracking by @asbhaibsr)")
     except Exception as e:
         logger.error(f"Error updating group info for {chat_title} ({chat_id}): {e}. (Tracking by @asbhaibsr)")
 
 
-async def update_user_info(user_id: int, username: str, first_name: str, is_active: bool = True):
+async def update_user_info(user_id: int, username: str, first_name: str):
     # User tracking logic by @asbhaibsr
     try:
         user_tracking_collection.update_one(
             {"_id": user_id},
-            {"$set": {"username": username, "first_name": first_name, "last_active": datetime.now(), "is_active": is_active},
+            {"$set": {"username": username, "first_name": first_name, "last_active": datetime.now()},
              "$setOnInsert": {"joined_on": datetime.now(), "credit": "by @asbhaibsr"}}, # Hidden Credit
             upsert=True
         )
-        logger.info(f"User info updated/inserted successfully for {first_name} ({user_id}). is_active: {is_active}. (Tracking by @asbhaibsr)")
+        logger.info(f"User info updated/inserted successfully for {first_name} ({user_id}). (Tracking by @asbhaibsr)")
     except Exception as e:
         logger.error(f"Error updating user info for {first_name} ({user_id}): {e}. (Tracking by @asbhaibsr)")
 
@@ -415,8 +367,9 @@ async def get_top_earning_users():
     pipeline = [
         {"$match": {"group_message_count": {"$gt": 0}}}, # Only users with more than 0 group messages
         {"$sort": {"group_message_count": -1}}, # Sort in descending order
-        # Removed $limit here so the function returns all active users.
+        # Remove limit here so the function returns all active users.
         # The display logic in top_users_command will take care of top 3.
+        # {"$limit": 3} 
     ]
 
     top_users_data = list(earning_tracking_collection.aggregate(pipeline))
@@ -444,11 +397,6 @@ async def reset_monthly_earnings_manual():
             {"$set": {"group_message_count": 0}}
         )
         logger.info("Monthly earning message counts reset successfully by manual command. (Earning system by @asbhaibsr)")
-
-        # Clear all pending withdrawal requests
-        # The prompt specifically says "pending" so we filter by status.
-        deleted_withdrawals_count = withdrawal_requests_collection.delete_many({"status": "pending"}).deleted_count 
-        logger.info(f"Cleared {deleted_withdrawals_count} pending withdrawal requests. (Earning system by @asbhaibsr)")
 
         # Update the reset date and month/year
         reset_status_collection.update_one(
@@ -493,7 +441,6 @@ async def start_private_command(client: Client, message: Message):
                 InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
             ],
             [
-                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo"),
                 InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") # New button for earning
             ]
         ]
@@ -506,7 +453,7 @@ async def start_private_command(client: Client, message: Message):
     )
     await store_message(message)
     if message.from_user:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True) # User is active if they start bot
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private start command processed for user {message.from_user.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("start") & filters.group)
@@ -536,7 +483,6 @@ async def start_group_command(client: Client, message: Message):
                 InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
             ],
             [
-                InlineKeyboardButton("🛒 Buy My Code", callback_data="buy_git_repo"),
                 InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") # New button for earning
             ]
         ]
@@ -553,155 +499,20 @@ async def start_group_command(client: Client, message: Message):
         logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.") # NEW DEBUG LOG
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True) # User is active if they start bot
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Group start command processed in chat {message.chat.id}. (Code by @asbhaibsr)")
 
 
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
     # Callback query handler. Developed by @asbhaibsr.
-    user_id = callback_query.from_user.id
-    user_first_name = callback_query.from_user.first_name
-    user_username = callback_query.from_user.username
-
-    if callback_query.data == "buy_git_repo":
-        await callback_query.message.reply_text(
-            f"💰 **Dosto, agar aapko is bot ka repo (yani Git Repository) chahiye, toh ₹1000 dekar hamare @{ASBHAI_USERNAME} par message karein.** Aapko ek `reply.py` file mil jayegi jisme mere jaise ek naya bot banane ke codes likhe hain. Use aap Git par nayi repository bana kar khud ka bot bana sakte hain. Isme koi credit nahi hai, bilkul fresh aur mast hai! **Message tabhi karein jab aapko lena ho, bina faltu ke message na karein.**",
-            quote=True
-        )
-        await callback_query.answer("Details mil gayi na? Ab jao, deal final karo! 😉", show_alert=False)
-        # Store button interaction
-        buttons_collection.insert_one({
-            "user_id": callback_query.from_user.id,
-            "username": callback_query.from_user.username,
-            "first_name": callback_query.from_user.first_name,
-            "button_data": callback_query.data,
-            "timestamp": datetime.now(),
-            "credit": "by @asbhaibsr"
-        })
-    elif callback_query.data == "show_earning_leaderboard": # New callback for earning button
+    if callback_query.data == "show_earning_leaderboard": # New callback for earning button
         # /topusers कमांड का लॉजिक यहाँ कॉल करें
+        # हमें इसे एक मैसेज ऑब्जेक्ट की तरह पास करना होगा
+        # reply_text, from_user, chat, command, etc. जैसे आवश्यक एट्रीब्यूट्स के साथ
+        # Changed: Passed original message for context and reply.
         await top_users_command(client, callback_query.message)
         await callback_query.answer("Earning Leaderboard dikha raha hoon! 💰", show_alert=False)
-    
-    # --- NEW: Withdrawal Request Callback ---
-    elif callback_query.data == "request_withdrawal":
-        top_users = await get_top_earning_users()
-        # Check if the user is in the top 3 (or whatever criteria you define for eligibility)
-        is_eligible_for_withdrawal = False
-        eligible_user_data = None
-        # Get top 3 eligible user IDs
-        eligible_user_ids = [user['user_id'] for user in top_users[:3]]
-
-        if user_id in eligible_user_ids:
-            is_eligible_for_withdrawal = True
-            # Find the user's data from the top_users list
-            eligible_user_data = next((user for user in top_users if user['user_id'] == user_id), None)
-            
-        if not is_eligible_for_withdrawal:
-            await callback_query.answer("🚫 Aapka name earning leaderboard mein nahi hai. Withdraw karne ke liye groups mein active rahen ya hamare @aschat_group par aakar bot se baatein karein!", show_alert=True)
-            return
-
-        # Check for existing pending withdrawal requests
-        existing_request = withdrawal_requests_collection.find_one({"user_id": user_id, "status": "pending"})
-        if existing_request:
-            await callback_query.answer("✅ Aapka withdrawal request pehle hi pending hai. Kripya intezaar karein.", show_alert=True)
-            return
-
-        # --- Send payment details to the user ---
-        payment_message = (
-            "✨ **Withdrawal Details** ✨\n\n"
-            "Aap apni payment yahan receive kar sakte hain:\n\n"
-            f"**UPI ID:** `{UPI_ID}`\n"
-            f"**Bank Account:** `{BANK_DETAILS}`\n\n"
-            f"**QR Code Link:** {QR_CODE_LINK}\n\n"
-            "💰 Ab aap jitna bhi withdraw karna chahte hain, utna amount upar di gayi details par transfer karein aur uska **screenshot ya proof yahan bot par bhej dein.**\n\n"
-            "Owner aapki request check karega aur approve hone par aapko notification mil jayegi. 👍\n\n"
-            "**Powered By:** @asbhaibsr"
-        )
-        await callback_query.message.reply_text(payment_message, disable_web_page_preview=False)
-        
-        # Store the withdrawal request as pending
-        withdrawal_requests_collection.insert_one({
-            "user_id": user_id,
-            "username": user_username,
-            "first_name": user_first_name,
-            "request_timestamp": datetime.now(),
-            "status": "pending",
-            "message_count_at_request": eligible_user_data['message_count'], # Store current message count
-            "owner_notified_message_id": None, # Will store the message ID sent to owner
-            "credit": "by @asbhaibsr"
-        })
-        logger.info(f"Withdrawal request initiated by user {user_id}. (Withdrawal system by @asbhaibsr)")
-
-        # Send notification to OWNER with a button to mark as completed
-        notification_to_owner = (
-            f"🔔 **New Withdrawal Request!**\n\n"
-            f"**User:** [{user_first_name}](tg://user?id={user_id}) "
-            f"{f'@{user_username}' if user_username else ''}\n"
-            f"**User ID:** `{user_id}`\n"
-            f"**Messages at Request:** {eligible_user_data['message_count']}\n"
-            f"**Request Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            "Kripya is user ki payment process karein aur jab ho jaye toh 'Payment Completed' button dabayen."
-        )
-        owner_keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✅ Payment Completed", callback_data=f"payment_completed_{user_id}")]]
-        )
-        try:
-            owner_msg = await client.send_message(chat_id=OWNER_ID, text=notification_to_owner, reply_markup=owner_keyboard)
-            # Update the stored request with the message ID sent to owner
-            withdrawal_requests_collection.update_one(
-                {"user_id": user_id, "status": "pending"},
-                {"$set": {"owner_notified_message_id": owner_msg.id}}
-            )
-            await callback_query.answer("Withdrawal request bhej diya gaya hai! Owner ko notify kar diya hai. 👍", show_alert=False)
-        except Exception as e:
-            logger.error(f"Error notifying owner about withdrawal from {user_id}: {e}. (Withdrawal system error by @asbhaibsr)")
-            await callback_query.answer("Withdrawal request bhejte samay error ho gayi. Kripya baad mein try karein.", show_alert=True)
-            # If owner notification fails, revert status to allow retrying
-            withdrawal_requests_collection.delete_one({"user_id": user_id, "status": "pending"})
-
-
-    # --- NEW: Payment Completed Callback (Owner Only) ---
-    elif callback_query.data.startswith("payment_completed_"):
-        # Convert OWNER_ID to str for comparison
-        if str(user_id) != str(OWNER_ID):
-            await callback_query.answer("🚫 Sorry, yeh button sirf owner ke liye hai!", show_alert=True)
-            return
-
-        target_user_id = int(callback_query.data.split('_')[2])
-        
-        # Find the pending request for this user
-        pending_request = withdrawal_requests_collection.find_one({"user_id": target_user_id, "status": "pending"})
-
-        if pending_request:
-            # Update status to completed
-            withdrawal_requests_collection.update_one(
-                {"_id": pending_request["_id"]},
-                {"$set": {"status": "completed", "completion_timestamp": datetime.now()}}
-            )
-            
-            # Notify the user that their payment is completed
-            user_notification_message = (
-                "✅ **Aapki Payment Safal Rahi!** 🎉\n\n"
-                "Aapka withdrawal process kar diya gaya hai. Kripya apna account check karein.\n\n"
-                "Aage bhi active rahen aur points kamate rahen! 😊\n\n"
-                "**Powered By:** @asbhaibsr"
-            )
-            try:
-                await client.send_message(chat_id=target_user_id, text=user_notification_message)
-                await callback_query.answer("✅ User ko payment completion notification bhej di gayi hai.", show_alert=True)
-                # Edit the owner's message to indicate completion and disable button
-                await callback_query.message.edit_text(
-                    f"{callback_query.message.text}\n\n**Status:** ✅ Payment Completed by Owner.",
-                    reply_markup=None # Remove the button
-                )
-                logger.info(f"Payment completed for user {target_user_id} by owner {user_id}. (Withdrawal system by @asbhaibsr)")
-            except Exception as e:
-                logger.error(f"Error notifying user {target_user_id} about payment completion: {e}. (Withdrawal system error by @asbhaibsr)")
-                await callback_query.answer("⚠️ User ko notify nahi kar paya, par payment request mark ho gayi hai.", show_alert=True)
-        else:
-            await callback_query.answer("🚫 Is user ke liye koi pending withdrawal request nahi mili.", show_alert=True)
 
     logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}. (Code by @asbhaibsr)")
 
@@ -725,14 +536,11 @@ async def top_users_command(client: Client, message: Message):
     prizes = {1: "₹30", 2: "₹15", 3: "₹5"} # Define prizes for top 3
     rank_symbols = {1: "🥇", 2: "🥈", 3: "🥉"}
 
-    # List of eligible user IDs for withdrawal (top 3)
-    eligible_withdrawal_user_ids = [user['user_id'] for user in top_users[:3]]
-
     # Limit to top 3 for display
     for i, user in enumerate(top_users[:3]): # Modified: Slicing to display only top 3
         rank = i + 1
         user_name = user.get('first_name', 'Unknown User')
-        username_str = f"@{user.get('username')}" if user.get('username') else "" # Empty if no username
+        username_str = f"@{user.get('username')}" if user.get('username') else "N/A"
         message_count = user.get('message_count', 0)
         prize_str = prizes.get(rank, "₹0")
         symbol = rank_symbols.get(rank, "🏅")
@@ -742,35 +550,7 @@ async def top_users_command(client: Client, message: Message):
             f"   •💬 Total Messages: **{message_count}**\n"
             f"   • 💸 Potential Earning: **{prize_str}**\n"
         )
-        # NEW: Show groups of top 3 users
-        user_id = user['user_id']
-        # Get distinct chat_ids where this user sent messages.
-        user_active_groups_ids = messages_collection.distinct("chat_id", {"user_id": user_id, "chat_type": {"$in": ["group", "supergroup"]}})
-        
-        group_links = []
-        for group_id in user_active_groups_ids:
-            # Fetch group title from group_tracking_collection
-            group_doc = group_tracking_collection.find_one({"_id": group_id})
-            if group_doc:
-                group_title = group_doc.get("title", f"Group ID: {group_id}")
-                try:
-                    chat_info = await client.get_chat(group_id)
-                    if chat_info.invite_link:
-                        group_links.append(f"[{group_title}]({chat_info.invite_link})")
-                    elif chat_info.username: # For public groups with a username
-                        group_links.append(f"[{group_title}](https://t.me/{chat_info.username})")
-                    else: # Fallback for private groups or those without invite links/usernames
-                         group_links.append(f"{group_title} (ID: `{group_id}`)") 
-                except Exception as e:
-                    logger.warning(f"Could not get chat info for group {group_id} ({group_title}): {e}")
-                    group_links.append(f"{group_title} (ID: `{group_id}`)") # Fallback
-
-        if group_links:
-            earning_messages.append(f"   • 🌐 Active In Groups: {', '.join(group_links)}\n")
-        else:
-            earning_messages.append("   • 🌐 Active In Groups: N/A\n")
-
-
+    
     earning_messages.append(
         "\n--- **Earning Rules** ---\n"
         "• 💬 **Group Conversations:** Points sirf group chats mein ki gayi genuine baaton par milenge.\n"
@@ -781,35 +561,18 @@ async def top_users_command(client: Client, message: Message):
         "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
 
-    # --- MODIFIED: Withdrawal Button Logic ---
-    # Only show withdraw button if the user is in the top 3
-    if message.from_user and message.from_user.id in eligible_withdrawal_user_ids:
-        keyboard = InlineKeyboardMarkup(
+    keyboard = InlineKeyboardMarkup(
+        [
             [
-                [
-                    InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", callback_data="request_withdrawal")
-                ]
+                InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", url=f"https://t.me/{ASBHAI_USERNAME}") # Direct link to owner
             ]
-        )
-    else:
-        # If user is not eligible, don't show the withdraw button,
-        # instead show a message suggesting them to be active in groups.
-        keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton("Join Group & Chat to Earn", url="https://t.me/aschat_group")
-                ]
-            ]
-        )
-        # The message about not being eligible is handled in the callback,
-        # but for visual clarity, we can provide a hint here.
-        # Alternatively, if you strictly want NO button for ineligible users, set keyboard = None.
-
+        ]
+    )
 
     await message.reply_text("\n".join(earning_messages), reply_markup=keyboard, quote=True, disable_web_page_preview=True)
     await store_message(message) # Store the command message itself
     if message.from_user:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True)
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Top users command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("broadcast") & filters.private)
@@ -864,21 +627,20 @@ async def stats_private_command(client: Client, message: Message):
         return
 
     total_messages = messages_collection.count_documents({})
-    # Only count active groups and users for stats display
-    unique_group_ids = group_tracking_collection.count_documents({}) 
-    num_active_users = user_tracking_collection.count_documents({"is_active": True}) # Count only active users
+    unique_group_ids = group_tracking_collection.count_documents({}) # Correctly counts documents in group_tracking_collection
+    num_users = user_tracking_collection.count_documents({})
 
     stats_text = (
         "📊 **Bot Statistics** 📊\n"
         f"• Jitne groups mein main hoon: **{unique_group_ids}** lovely groups!\n"
-        f"• Total active users jo maine observe kiye: **{num_active_users}** pyaare users!\n"
+        f"• Total users jo maine observe kiye: **{num_users}** pyaare users!\n"
         f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩\n\n"
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await message.reply_text(stats_text)
     await store_message(message)
     if message.from_user:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True)
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private stats command processed for user {message.from_user.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("stats") & filters.group)
@@ -894,12 +656,12 @@ async def stats_group_command(client: Client, message: Message):
 
     total_messages = messages_collection.count_documents({})
     unique_group_ids = group_tracking_collection.count_documents({})
-    num_active_users = user_tracking_collection.count_documents({"is_active": True}) # Count only active users
+    num_users = user_tracking_collection.count_documents({})
 
     stats_text = (
         "📊 **Bot Statistics** 📊\n"
         f"• Jitne groups mein main hoon: **{unique_group_ids}** lovely groups!\n"
-        f"• Total active users jo maine observe kiye: **{num_active_users}** pyaare users!\n"
+        f"• Total users jo maine observe kiye: **{num_users}** pyaare users!\n"
         f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩\n\n"
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
@@ -908,7 +670,7 @@ async def stats_group_command(client: Client, message: Message):
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True)
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Group stats command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
 
 # --- Group Management Commands ---
@@ -925,53 +687,25 @@ async def list_groups_command(client: Client, message: Message):
         await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
-    all_groups = list(group_tracking_collection.find({}))
-    
-    if not all_groups:
+    groups = list(group_tracking_collection.find({}))
+    if not groups:
         await message.reply_text("Main abhi kisi group mein nahi hoon. Akeli hoon, koi add kar lo na! 🥺 (Code by @asbhaibsr)")
         return
 
     group_list_text = "📚 **Groups Jahan Main Hoon** 📚\n\n"
-    found_any_group = False
-    for i, group in enumerate(all_groups):
+    for i, group in enumerate(groups):
+        title = group.get("title", "Unknown Group")
         group_id = group.get("_id")
+        added_on = group.get("added_on", "N/A").strftime("%Y-%m-%d %H:%M") if isinstance(group.get("added_on"), datetime) else "N/A"
         
-        try:
-            chat_info = await client.get_chat(group_id)
-            # Filter out private groups and channels
-            if chat_info.type == ChatType.PRIVATE or chat_info.type == ChatType.CHANNEL or chat_info.type == ChatType.BOT:
-                continue # Skip private chats and channels, and bots
-            
-            title = group.get("title", "Unknown Group")
-            username = chat_info.username
-            added_on = group.get("added_on", "N/A").strftime("%Y-%m-%d %H:%M") if isinstance(group.get("added_on"), datetime) else "N/A"
-            
-            group_list_text += f"{i+1}. **{title}** (`{group_id}`)\n"
-            if username:
-                group_list_text += f"   • Username: @{username}\n"
-            group_list_text += f"   • Joined: {added_on}\n"
-            found_any_group = True
-
-        except Exception as e:
-            logger.warning(f"Could not fetch chat info for group ID {group_id}: {e}")
-            # Even if chat_info fails, list it if it's in tracking, but mark as inaccessible
-            title = group.get("title", "Unknown Group")
-            added_on = group.get("added_on", "N/A").strftime("%Y-%m-%d %H:%M") if isinstance(group.get("added_on"), datetime) else "N/A"
-            group_list_text += f"{i+1}. **{title}** (`{group_id}`)\n"
-            group_list_text += f"   • Status: Inaccessible/Private (Details cannot be fetched)\n"
-            group_list_text += f"   • Joined: {added_on}\n"
-            found_any_group = True
-            continue # Continue to next group
-
-    if not found_any_group:
-        group_list_text = "Main abhi kisi public group mein nahi hoon. Akeli hoon, koi add kar lo na! 🥺 (Code by @asbhaibsr)"
-
+        group_list_text += f"{i+1}. **{title}** (`{group_id}`)\n"
+        group_list_text += f"   • Joined: {added_on}\n"
+        
     group_list_text += "\n_Yeh data tracking database se hai, bilkul secret!_ 🤫\n**Code & System By:** @asbhaibsr"
     await message.reply_text(group_list_text)
     await store_message(message)
-    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True)
+    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Groups list command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
-
 
 @app.on_message(filters.command("leavegroup") & filters.private)
 async def leave_group_command(client: Client, message: Message):
@@ -1001,8 +735,13 @@ async def leave_group_command(client: Client, message: Message):
         
         group_tracking_collection.delete_one({"_id": group_id})
         messages_collection.delete_many({"chat_id": group_id})
-        
-        logger.info(f"Left group {group_id} and cleared its related message data. (Code by @asbhaibsr)")
+        # New: Also clear earning data for users in this group (optional, but good for cleanup)
+        # Note: This would clear *all* messages for users who were *only* in this group.
+        # For more granular control, one might need to iterate through messages for this group ID.
+        # For simplicity and general cleanup, we'll assume it's fine for now.
+        # If a user is in multiple groups, their count across other groups would remain.
+        # For now, let's just log a message about potential cleanup for earning tracking
+        logger.info(f"Considered cleaning earning data for users from left group {group_id}. (Code by @asbhaibsr)")
 
         await message.reply_text(f"Safaltapoorvak group `{group_id}` se bahar aa gayi, aur uska sara data bhi clean kar diya! Bye-bye! 👋 (Code by @asbhaibsr)")
         logger.info(f"Left group {group_id} and cleared its data. (Code by @asbhaibsr)")
@@ -1014,7 +753,7 @@ async def leave_group_command(client: Client, message: Message):
         logger.error(f"Error leaving group {group_id_str}: {e}. (Code by @asbhaibsr)")
     
     await store_message(message)
-    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True)
+    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 # --- New Commands ---
 
@@ -1072,7 +811,7 @@ async def clear_data_command(client: Client, message: Message):
         await message.reply_text("Umm, kuch delete karne ke liye mila hi nahi. Lagta hai tumne pehle hi sab clean kar diya hai! 🤷‍♀️ (Code by @asbhaibsr)")
     
     await store_message(message)
-    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True)
+    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("deletemessage") & filters.private)
 async def delete_specific_message_command(client: Client, message: Message):
@@ -1110,10 +849,10 @@ async def delete_specific_message_command(client: Client, message: Message):
         else:
             await message.reply_text("Aww, yeh message to mujhe mila hi nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)")
     else:
-        await message.reply_text("Umm, mujhe tumhara yeh message to mila ही nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)")
+        await message.reply_text("Umm, mujhe tumhara yeh message to mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)")
     
     await store_message(message)
-    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True)
+    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("clearearning") & filters.private)
 async def clear_earning_command(client: Client, message: Message):
@@ -1128,11 +867,11 @@ async def clear_earning_command(client: Client, message: Message):
         return
 
     await reset_monthly_earnings_manual()
-    await message.reply_text("💰 **Earning data successfully cleared!** Ab sab phir se zero se shuru karenge! Aur saare pending withdrawal requests bhi hata diye gaye hain. 😉 (Code by @asbhaibsr)")
-    logger.info(f"Owner {message.from_user.id} manually triggered earning data reset and withdrawal request clear. (Code by @asbhaibsr)")
+    await message.reply_text("💰 **Earning data successfully cleared!** Ab sab phir se zero se shuru karenge! 😉 (Code by @asbhaibsr)")
+    logger.info(f"Owner {message.from_user.id} manually triggered earning data reset. (Code by @asbhaibsr)")
     
     await store_message(message)
-    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True)
+    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("restart") & filters.private)
 async def restart_command(client: Client, message: Message):
@@ -1152,63 +891,6 @@ async def restart_command(client: Client, message: Message):
     await asyncio.sleep(0.5) 
     os.execl(sys.executable, sys.executable, *sys.argv) # This will restart the script (Code by @asbhaibsr)
 
-# --- NEW: /chat on/off command ---
-@app.on_message(filters.command("chat") & filters.group)
-async def chat_toggle_command(client: Client, message: Message):
-    # Chat on/off command. Only for group admins.
-    if is_on_cooldown(message.from_user.id):
-        return
-    update_cooldown(message.from_user.id)
-
-    if not message.from_user:
-        return # Command not from a user
-
-    # Check if the user is an admin of the group
-    chat_member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    # Check for 'creator' or 'administrator' status OR specific admin rights (can_manage_chat / can_delete_messages for example)
-    # For robust admin check, you can check `chat_member.status` directly, or specific permissions like `chat_member.can_delete_messages`
-    # Let's assume 'creator' and 'administrator' cover most cases for basic toggling.
-    # If a user is an admin but their status isn't 'creator' or 'administrator',
-    # it means they have specific granular permissions. You can check for a common one, e.g., if they can delete messages.
-    
-    # Revised Admin Check:
-    is_admin = False
-    if chat_member.status in ["creator", "administrator"]:
-        is_admin = True
-    # You might consider adding a check for other specific admin permissions if your "admins" have limited roles
-    # For example, if any admin with ability to manage chat can toggle:
-    # elif chat_member.can_manage_chat: # This might be too broad depending on your setup
-    #     is_admin = True
-    # Let's stick to 'creator' and 'administrator' for simplicity and common practice unless explicitly needing granular checks.
-    
-    if not is_admin:
-        await message.reply_text("Oops! Yeh command sirf group admins hi use kar sakte hain. Sorry! 🙄 (Feature by @asbhaibsr)")
-        return
-
-    if len(message.command) < 2:
-        current_state = group_chat_states.get(message.chat.id, True) # Default to True
-        state_text = "ON" if current_state else "OFF"
-        await message.reply_text(f"Meri chat is group mein abhi **{state_text}** hai. Toggle karne ke liye `/chat on` ya `/chat off` use karein. (Feature by @asbhaibsr)")
-        return
-
-    action = message.command[1].lower()
-
-    if action == "on":
-        group_chat_states[message.chat.id] = True
-        await update_group_chat_state_in_db(message.chat.id, True)
-        await message.reply_text("🎉 **Chat ON!** Main ab is group mein sabhi messages ka jawab dungi. Chalo baatein karein! 😊 (Feature by @asbhaibsr)")
-        logger.info(f"Chat enabled for group {message.chat.id} by admin {message.from_user.id}. (Feature by @asbhaibsr)")
-    elif action == "off":
-        group_chat_states[message.chat.id] = False
-        await update_group_chat_state_in_db(message.chat.id, False)
-        await message.reply_text("😴 **Chat OFF!** Main ab is group mein messages ka jawab nahi dungi. Jab baat karni ho, `/chat on` kar dena. (Feature by @asbhaibsr)")
-        logger.info(f"Chat disabled for group {message.chat.id} by admin {message.from_user.id}. (Feature by @asbhaibsr)")
-    else:
-        await message.reply_text("Invalid command. Please use `/chat on` or `/chat off`. (Feature by @asbhaibsr)")
-    
-    await store_message(message)
-    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True)
-
 # --- New chat members and left chat members ---
 @app.on_message(filters.new_chat_members)
 async def new_member_handler(client: Client, message: Message):
@@ -1217,14 +899,11 @@ async def new_member_handler(client: Client, message: Message):
 
     for member in message.new_chat_members:
         logger.info(f"Processing new member: {member.id} ({member.first_name}) in chat {message.chat.id}. Is bot: {member.is_bot}. (Event handled by @asbhaibsr)")
-        
         # Check if the bot itself was added to a group
         if member.id == client.me.id:
             if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum here
                 logger.info(f"DEBUG: Bot {client.me.id} detected as new member in group {message.chat.id}. Calling update_group_info.") # NEW DEBUG LOG
                 await update_group_info(message.chat.id, message.chat.title)
-                # Set initial chat state to True (on) for new groups
-                group_chat_states[message.chat.id] = True 
                 logger.info(f"Bot joined new group: {message.chat.title} ({message.chat.id}). (Event handled by @asbhaibsr)")
                 
                 # Send notification to OWNER
@@ -1250,58 +929,57 @@ async def new_member_handler(client: Client, message: Message):
         # Check if a new user joined a private chat with the bot (i.e., started the bot)
         # Or if a new user joined a group where the bot is present
         if not member.is_bot: # Only for actual users, not other bots
-            user_exists_doc = user_tracking_collection.find_one({"_id": member.id})
+            user_exists = user_tracking_collection.find_one({"_id": member.id})
             
             # Condition for new user starting bot in private chat
-            if message.chat.type == ChatType.PRIVATE and member.id == message.from_user.id:
-                # Always update user_info, setting is_active to True
-                await update_user_info(member.id, member.username, member.first_name, is_active=True)
-                if not user_exists_doc or not user_exists_doc.get("is_active"): # Only notify if truly new or previously inactive
-                    user_name = member.first_name if member.first_name else "Naya User"
-                    user_username = f"@{member.username}" if member.username else "N/A"
-                    notification_message = (
-                        f"✨ **New User Alert!**\n"
-                        f"Ek naye user ne bot ko private mein start kiya hai.\n\n"
-                        f"**User Name:** {user_name}\n"
-                        f"**User ID:** `{member.id}`\n"
-                        f"**Username:** {user_username}\n"
-                        f"**Started On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                        f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
-                    )
-                    try:
-                        await client.send_message(chat_id=OWNER_ID, text=notification_message)
-                        logger.info(f"Owner notified about new private user: {user_name}. (Notification by @asbhaibsr)")
-                    except Exception as e:
-                        logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
+            # This logic needs to be careful: new_chat_members in private chat usually means the user themselves.
+            # However, the primary "start bot in private" is handled by the /start private command.
+            # This part primarily catches if someone *else* adds a user to a *private* bot chat (rare/edge case)
+            # or if a new user is added to a group.
+            if message.chat.type == ChatType.PRIVATE and member.id == message.from_user.id and not user_exists: # Use ChatType enum
+                user_name = member.first_name if member.first_name else "Naya User"
+                user_username = f"@{member.username}" if member.username else "N/A"
+                notification_message = (
+                    f"✨ **New User Alert!**\n"
+                    f"Ek naye user ne bot ko private mein start kiya hai.\n\n"
+                    f"**User Name:** {user_name}\n"
+                    f"**User ID:** `{member.id}`\n"
+                    f"**Username:** {user_username}\n"
+                    f"**Started On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+                )
+                try:
+                    await client.send_message(chat_id=OWNER_ID, text=notification_message)
+                    logger.info(f"Owner notified about new private user: {user_name}. (Notification by @asbhaibsr)")
+                except Exception as e:
+                    logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
                 
             # Condition for new user joining a group where the bot is present
-            elif message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-                # Always update user_info, setting is_active to True
-                await update_user_info(member.id, member.username, member.first_name, is_active=True)
-                if not user_exists_doc or not user_exists_doc.get("is_active"): # Only notify if truly new or previously inactive
-                    user_name = member.first_name if member.first_name else "Naya User"
-                    user_username = f"@{member.username}" if member.username else "N/A"
-                    group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
-                    notification_message = (
-                        f"👥 **New Group Member Alert!**\n"
-                        f"Ek naya user group mein add hua hai jahan bot bhi hai.\n\n"
-                        f"**User Name:** {user_name}\n"
-                        f"**User ID:** `{member.id}`\n"
-                        f"**Username:** {user_username}\n"
-                        f"**Group Name:** {group_title}\n"
-                        f"**Group ID:** `{message.chat.id}`\n"
-                        f"**Joined On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                        f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
-                    )
-                    try:
-                        await client.send_message(chat_id=OWNER_ID, text=notification_message)
-                        logger.info(f"Owner notified about new group member: {user_name} in {group_title}. (Notification by @asbhaibsr)")
-                    except Exception as e:
-                        logger.error(f"Could not notify owner about new group member {user_name} in {group_title}: {e}. (Notification error by @asbhaibsr)")
+            elif message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and not user_exists: # Use ChatType enum
+                user_name = member.first_name if member.first_name else "Naya User"
+                user_username = f"@{member.username}" if member.username else "N/A"
+                group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
+                notification_message = (
+                    f"👥 **New Group Member Alert!**\n"
+                    f"Ek naya user group mein add hua hai jahan bot bhi hai.\n\n"
+                    f"**User Name:** {user_name}\n"
+                    f"**User ID:** `{member.id}`\n"
+                    f"**Username:** {user_username}\n"
+                    f"**Group Name:** {group_title}\n"
+                    f"**Group ID:** `{message.chat.id}`\n"
+                    f"**Joined On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+                )
+                try:
+                    await client.send_message(chat_id=OWNER_ID, text=notification_message)
+                    logger.info(f"Owner notified about new group member: {user_name} in {group_title}. (Notification by @asbhaibsr)")
+                except Exception as e:
+                    logger.error(f"Could not notify owner about new group member {user_name} in {group_title}: {e}. (Notification error by @asbhaibsr)")
     
     # Store the new_chat_members event message itself (optional, but consistent with other message storage)
     await store_message(message)
-    # The `update_user_info` for `message.from_user` is handled by general message processing or start commands.
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
 @app.on_message(filters.left_chat_member)
@@ -1311,13 +989,15 @@ async def left_member_handler(client: Client, message: Message):
 
     if message.left_chat_member and message.left_chat_member.id == client.me.id:
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: # Use ChatType enum
-            # Clear group's data when bot leaves
             group_tracking_collection.delete_one({"_id": message.chat.id})
             messages_collection.delete_many({"chat_id": message.chat.id})
-            
-            # Remove chat state from local cache
-            if message.chat.id in group_chat_states:
-                del group_chat_states[message.chat.id]
+            earning_tracking_collection.update_many(
+                {"_id": {"$in": [user["_id"] for user in earning_tracking_collection.find({})]}}, # All users
+                {"$pull": {"groups": message.chat.id}} # Remove this group from user's group list (if you store one)
+            )
+            # More direct approach to reset counts for users specifically from this group if needed,
+            # but current earnings logic is global per user, not per group.
+            # So, general cleanup is enough.
 
             logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared. (Code by @asbhaibsr)")
             # Send notification to OWNER
@@ -1339,24 +1019,10 @@ async def left_member_handler(client: Client, message: Message):
                 logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}. (Notification error by @asbhaibsr)")
             return # No need to store message if bot left
 
-    # If a regular user leaves a group (or is removed)
-    if message.left_chat_member and not message.left_chat_member.is_bot:
-        user_id_left = message.left_chat_member.id
-        
-        # Keep message data for the user.
-        # Mark user as inactive in user_tracking_collection.
-        await update_user_info(user_id_left, message.left_chat_member.username, message.left_chat_member.first_name, is_active=False)
-        
-        # Log and optionally notify owner
-        logger.info(f"User {user_id_left} ({message.left_chat_member.first_name}) left group {message.chat.id}. Marked as inactive. (User tracking by @asbhaibsr)")
-        
-        # You might want to notify owner about important users leaving, or just log.
-        # For this request, we'll just mark as inactive and ensure they don't show in /stats or /groups (user list)
-        # unless they rejoin. The message data remains.
-
     # Store the left_chat_member event message itself
     await store_message(message)
-    # The `update_user_info` for `message.from_user` is handled by general message processing or start commands.
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
 @app.on_message(filters.text | filters.sticker)
@@ -1383,14 +1049,9 @@ async def handle_message_and_reply(client: Client, message: Message):
         logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.") # NEW DEBUG LOG
         await update_group_info(message.chat.id, message.chat.title)
     if message.from_user:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name, is_active=True)
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
     await store_message(message) # This is where the earning count increments
-
-    # NEW: Check if bot chat is disabled for this group
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and not group_chat_states.get(message.chat.id, True):
-        logger.info(f"Chat is OFF for group {message.chat.id}. Skipping reply generation. (Feature by @asbhaibsr)")
-        return # Do not generate reply if chat is off
 
     # Only attempt to generate a reply if it's not a command message
     if not message.text or not message.text.startswith('/'):
@@ -1420,12 +1081,10 @@ if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.start()
 
-    logger.info("Loading initial chat states... (Feature by @asbhaibsr)")
-    app.run(load_chat_states()) # Run this async function before starting the bot polling
-    
     logger.info("Starting Pyrogram bot... (Code by @asbhaibsr)")
     
     # Pyrogram app.run() मेथड को सीधे कॉल करें. यह Pyrogram को शुरू और आइडल रखेगा.
     app.run()
     
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
+
