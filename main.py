@@ -573,22 +573,27 @@ async def top_users_command(client: Client, message: Message):
         last_group_title = user.get('last_active_group_title', 'Unknown Group')
         last_group_username = user.get('last_active_group_username')
 
-        if last_group_id and not str(last_group_id).startswith("-100"): # Check if not a private group by ID
-             # Private chats IDs don't start with -100
-            chat_obj = None
+        # NEW LOGIC: Fetch actual group title and username if available, prioritize over stored
+        if last_group_id:
             try:
                 chat_obj = await client.get_chat(last_group_id)
+                if chat_obj and chat_obj.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+                    group_display_name = chat_obj.title if chat_obj.title else last_group_title
+                    group_username_display = f" (@{chat_obj.username})" if chat_obj.username else ""
+                    group_info = f"   • Last Active in: **{group_display_name}**{group_username_display}\n"
+                elif chat_obj and chat_obj.type == ChatType.PRIVATE:
+                    group_info = "   • Last Active in: **Private Chat** (N/A)\n"
+                else:
+                    # Fallback to stored if fetching failed or it's not a recognizable chat type
+                    group_username_display = f" (@{last_group_username})" if last_group_username else ""
+                    group_info = f"   • Last Active in: **{last_group_title}**{group_username_display}\n"
             except Exception as e:
-                logger.warning(f"Could not fetch chat info for group ID {last_group_id}: {e}")
-
-            if chat_obj and chat_obj.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-                group_display_name = chat_obj.title if chat_obj.title else last_group_title
-                group_username_display = f" (@{chat_obj.username})" if chat_obj.username else ""
-                group_info = f"   • Last Active in: **{group_display_name}**{group_username_display}\n"
-            else:
-                 # Fallback to stored if fetching failed or it's not a group/supergroup
+                logger.warning(f"Could not fetch chat info for group ID {last_group_id} for leaderboard: {e}")
+                # Fallback to stored if fetching failed
                 group_username_display = f" (@{last_group_username})" if last_group_username else ""
                 group_info = f"   • Last Active in: **{last_group_title}**{group_username_display}\n"
+        else:
+            group_info = "   • Last Active Group: **N/A** (Private Chat/No Group Activity)\n"
 
 
         earning_messages.append(
@@ -639,15 +644,21 @@ async def broadcast_command(client: Client, message: Message):
 
     broadcast_text = " ".join(message.command[1:])
     
-    unique_chat_ids = group_tracking_collection.distinct("_id") # Changed to use group_tracking_collection for groups
+    # Get all unique group IDs
+    group_chat_ids = group_tracking_collection.distinct("_id")
+    # Get all unique user IDs (private chat users)
+    private_chat_ids = user_tracking_collection.distinct("_id")
+    
+    all_target_ids = list(set(group_chat_ids + private_chat_ids)) # Combine and get unique IDs
     
     sent_count = 0
     failed_count = 0
-    logger.info(f"Starting broadcast to {len(unique_chat_ids)} chats. (Broadcast by @asbhaibsr)")
-    for chat_id in unique_chat_ids:
+    logger.info(f"Starting broadcast to {len(all_target_ids)} chats (groups and users). (Broadcast by @asbhaibsr)")
+    
+    for chat_id in all_target_ids:
         try:
-            # Avoid sending broadcast to the private chat where the command was issued
-            if chat_id == message.chat.id and message.chat.type == ChatType.PRIVATE: # Use ChatType enum
+            # Skip sending broadcast to the owner's private chat, if owner's chat_id is in the list of private_chat_ids
+            if chat_id == message.chat.id and message.chat.type == ChatType.PRIVATE:
                 continue 
             
             await client.send_message(chat_id, broadcast_text)
@@ -1173,3 +1184,4 @@ if __name__ == "__main__":
     app.run()
     
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
+
