@@ -3,9 +3,7 @@
 # 🤖 GROUP SMART CHAT BOT
 
 <div align="center">
-  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExdml2YTRnMHg0cDQzOHJ3Njk0NHdmYTVsOWdqYXZwZjRjYWh5d2txdCZlcD12MV9naWZzX3NlYXJjaCZjdD1n/Hj7eqz8DB3Lpu/giphy.gif" height="230" />
-  <br>
-  <strong>⚡ Group ke liye smart reply system | Admin control | Broadcast support</strong>
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=24&pause=1000&color=36BCF7&width=500&lines=👑+Created+and+Maintained+by+@asbhaibsr" alt="asbhaibsr animation" />
 </div>
 
 ---
