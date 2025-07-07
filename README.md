@@ -10,15 +10,9 @@
 
 ---
 
-## 🎬 <b><i>🔥 Bot Real Entry Animation – Click Below</i></b>
+### 🎬🔥 Bot Real Entry Animation – Click to Watch
 
-<div align="center">
-  <a href="https://t.me/asbhai_bsr/999">
-    <img src="https://i.giphy.com/media/xT9IgzoKnwFNmISR8I/giphy.webp" height="240" />
-  </a>
-  <br>
-  <b>🎥 Watch Full Real Style Demo</b>
-</div>
+👉 [Watch Bot Animation on Telegram](https://t.me/asbhai_bsr/999)
 
 ---
 
