@@ -53,6 +53,12 @@ UPDATE_CHANNEL_USERNAME = "asbhai_bsr"
 ASBHAI_USERNAME = "asbhaibsr" # asbhaibsr ka username
 BOT_PHOTO_URL = "https://envs.sh/FU3.jpg" # New: Bot's photo URL
 
+# --- Payment Details (NEW) ---
+# Replace with your actual UPI ID, QR code link, and bank account details
+UPI_ID = "your_upi_id@bank" # Example: yourname@ybl
+QR_CODE_LINK = "https://example.com/your_qr_code.jpg" # Direct link to an image of your QR code
+BANK_DETAILS = "Bank Name: ABC Bank\nAccount No: 1234567890\nIFSC: ABC1234567"
+
 # --- MongoDB Setup ---
 try:
     client_messages = MongoClient(MONGO_URI_MESSAGES)
@@ -440,7 +446,7 @@ async def reset_monthly_earnings_manual():
         logger.info("Monthly earning message counts reset successfully by manual command. (Earning system by @asbhaibsr)")
 
         # Clear all pending withdrawal requests
-        deleted_withdrawals_count = withdrawal_requests_collection.delete_many({}).deleted_count
+        deleted_withdrawals_count = withdrawal_requests_collection.delete_many({"status": "pending"}).deleted_count # Only clear pending
         logger.info(f"Cleared {deleted_withdrawals_count} pending withdrawal requests. (Earning system by @asbhaibsr)")
 
         # Update the reset date and month/year
@@ -553,6 +559,10 @@ async def start_group_command(client: Client, message: Message):
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
     # Callback query handler. Developed by @asbhaibsr.
+    user_id = callback_query.from_user.id
+    user_first_name = callback_query.from_user.first_name
+    user_username = callback_query.from_user.username
+
     if callback_query.data == "buy_git_repo":
         await callback_query.message.reply_text(
             f"💰 **Dosto, agar aapko is bot ka repo (yani Git Repository) chahiye, toh ₹1000 dekar hamare @{ASBHAI_USERNAME} par message karein.** Aapko ek `reply.py` file mil jayegi jisme mere jaise ek naya bot banane ke codes likhe hain. Use aap Git par nayi repository bana kar khud ka bot bana sakte hain. Isme koi credit nahi hai, bilkul fresh aur mast hai! **Message tabhi karein jab aapko lena ho, bina faltu ke message na karein.**",
@@ -572,6 +582,123 @@ async def callback_handler(client, callback_query):
         # /topusers कमांड का लॉजिक यहाँ कॉल करें
         await top_users_command(client, callback_query.message)
         await callback_query.answer("Earning Leaderboard dikha raha hoon! 💰", show_alert=False)
+    
+    # --- NEW: Withdrawal Request Callback ---
+    elif callback_query.data == "request_withdrawal":
+        top_users = await get_top_earning_users()
+        # Check if the user is in the top 3 (or whatever criteria you define for eligibility)
+        is_eligible_for_withdrawal = False
+        eligible_user_data = None
+        for i, user in enumerate(top_users[:3]): # Check only top 3 for eligibility
+            if user['user_id'] == user_id:
+                is_eligible_for_withdrawal = True
+                eligible_user_data = user
+                break
+
+        if not is_eligible_for_withdrawal:
+            await callback_query.answer("🚫 Aapka name earning leaderboard mein nahi hai. Withdraw karne ke liye groups mein active rahen ya hamare @aschat_group par aakar bot se baatein karein!", show_alert=True)
+            return
+
+        # Check for existing pending withdrawal requests
+        existing_request = withdrawal_requests_collection.find_one({"user_id": user_id, "status": "pending"})
+        if existing_request:
+            await callback_query.answer("✅ Aapka withdrawal request pehle hi pending hai. Kripya intezaar karein.", show_alert=True)
+            return
+
+        # --- Send payment details to the user ---
+        payment_message = (
+            "✨ **Withdrawal Details** ✨\n\n"
+            "Aap apni payment yahan receive kar sakte hain:\n\n"
+            f"**UPI ID:** `{UPI_ID}`\n"
+            f"**Bank Account:** `{BANK_DETAILS}`\n\n"
+            f"**QR Code Link:** {QR_CODE_LINK}\n\n"
+            "💰 Ab aap jitna bhi withdraw karna chahte hain, utna amount upar di gayi details par transfer karein aur uska **screenshot ya proof yahan bot par bhej dein.**\n\n"
+            "Owner aapki request check karega aur approve hone par aapko notification mil jayegi. 👍\n\n"
+            "**Powered By:** @asbhaibsr"
+        )
+        await callback_query.message.reply_text(payment_message, disable_web_page_preview=False)
+        
+        # Store the withdrawal request as pending
+        withdrawal_requests_collection.insert_one({
+            "user_id": user_id,
+            "username": user_username,
+            "first_name": user_first_name,
+            "request_timestamp": datetime.now(),
+            "status": "pending",
+            "message_count_at_request": eligible_user_data['message_count'], # Store current message count
+            "owner_notified_message_id": None, # Will store the message ID sent to owner
+            "credit": "by @asbhaibsr"
+        })
+        logger.info(f"Withdrawal request initiated by user {user_id}. (Withdrawal system by @asbhaibsr)")
+
+        # Send notification to OWNER with a button to mark as completed
+        notification_to_owner = (
+            f"🔔 **New Withdrawal Request!**\n\n"
+            f"**User:** [{user_first_name}](tg://user?id={user_id}) "
+            f"{f'@{user_username}' if user_username else ''}\n"
+            f"**User ID:** `{user_id}`\n"
+            f"**Messages at Request:** {eligible_user_data['message_count']}\n"
+            f"**Request Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            "Kripya is user ki payment process karein aur jab ho jaye toh 'Payment Completed' button dabayen."
+        )
+        owner_keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("✅ Payment Completed", callback_data=f"payment_completed_{user_id}")]]
+        )
+        try:
+            owner_msg = await client.send_message(chat_id=OWNER_ID, text=notification_to_owner, reply_markup=owner_keyboard)
+            # Update the stored request with the message ID sent to owner
+            withdrawal_requests_collection.update_one(
+                {"user_id": user_id, "status": "pending"},
+                {"$set": {"owner_notified_message_id": owner_msg.id}}
+            )
+            await callback_query.answer("Withdrawal request bhej diya gaya hai! Owner ko notify kar diya hai. 👍", show_alert=False)
+        except Exception as e:
+            logger.error(f"Error notifying owner about withdrawal from {user_id}: {e}. (Withdrawal system error by @asbhaibsr)")
+            await callback_query.answer("Withdrawal request bhejte samay error ho gayi. Kripya baad mein try karein.", show_alert=True)
+            # If owner notification fails, revert status to allow retrying
+            withdrawal_requests_collection.delete_one({"user_id": user_id, "status": "pending"})
+
+
+    # --- NEW: Payment Completed Callback (Owner Only) ---
+    elif callback_query.data.startswith("payment_completed_"):
+        # Convert OWNER_ID to str for comparison
+        if str(user_id) != str(OWNER_ID):
+            await callback_query.answer("🚫 Sorry, yeh button sirf owner ke liye hai!", show_alert=True)
+            return
+
+        target_user_id = int(callback_query.data.split('_')[2])
+        
+        # Find the pending request for this user
+        pending_request = withdrawal_requests_collection.find_one({"user_id": target_user_id, "status": "pending"})
+
+        if pending_request:
+            # Update status to completed
+            withdrawal_requests_collection.update_one(
+                {"_id": pending_request["_id"]},
+                {"$set": {"status": "completed", "completion_timestamp": datetime.now()}}
+            )
+            
+            # Notify the user that their payment is completed
+            user_notification_message = (
+                "✅ **Aapki Payment Safal Rahi!** 🎉\n\n"
+                "Aapka withdrawal process kar diya gaya hai. Kripya apna account check karein.\n\n"
+                "Aage bhi active rahen aur points kamate rahen! 😊\n\n"
+                "**Powered By:** @asbhaibsr"
+            )
+            try:
+                await client.send_message(chat_id=target_user_id, text=user_notification_message)
+                await callback_query.answer("✅ User ko payment completion notification bhej di gayi hai.", show_alert=True)
+                # Edit the owner's message to indicate completion and disable button
+                await callback_query.message.edit_text(
+                    f"{callback_query.message.text}\n\n**Status:** ✅ Payment Completed by Owner.",
+                    reply_markup=None # Remove the button
+                )
+                logger.info(f"Payment completed for user {target_user_id} by owner {user_id}. (Withdrawal system by @asbhaibsr)")
+            except Exception as e:
+                logger.error(f"Error notifying user {target_user_id} about payment completion: {e}. (Withdrawal system error by @asbhaibsr)")
+                await callback_query.answer("⚠️ User ko notify nahi kar paya, par payment request mark ho gayi hai.", show_alert=True)
+        else:
+            await callback_query.answer("🚫 Is user ke liye koi pending withdrawal request nahi mili.", show_alert=True)
 
     logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}. (Code by @asbhaibsr)")
 
@@ -595,6 +722,9 @@ async def top_users_command(client: Client, message: Message):
     prizes = {1: "₹30", 2: "₹15", 3: "₹5"} # Define prizes for top 3
     rank_symbols = {1: "🥇", 2: "🥈", 3: "🥉"}
 
+    # List of eligible user IDs for withdrawal (top 3)
+    eligible_withdrawal_user_ids = [user['user_id'] for user in top_users[:3]]
+
     # Limit to top 3 for display
     for i, user in enumerate(top_users[:3]): # Modified: Slicing to display only top 3
         rank = i + 1
@@ -612,10 +742,10 @@ async def top_users_command(client: Client, message: Message):
         # NEW: Show groups of top 3 users
         user_id = user['user_id']
         # Get distinct chat_ids where this user sent messages.
-        user_active_groups = messages_collection.distinct("chat_id", {"user_id": user_id, "chat_type": {"$in": ["group", "supergroup"]}})
+        user_active_groups_ids = messages_collection.distinct("chat_id", {"user_id": user_id, "chat_type": {"$in": ["group", "supergroup"]}})
         
         group_links = []
-        for group_id in user_active_groups:
+        for group_id in user_active_groups_ids:
             # Fetch group title from group_tracking_collection
             group_doc = group_tracking_collection.find_one({"_id": group_id})
             if group_doc:
@@ -648,13 +778,28 @@ async def top_users_command(client: Client, message: Message):
         "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
 
-    keyboard = InlineKeyboardMarkup(
-        [
+    # --- MODIFIED: Withdrawal Button Logic ---
+    # Only show withdraw button if the user is in the top 3
+    if message.from_user and message.from_user.id in eligible_withdrawal_user_ids:
+        keyboard = InlineKeyboardMarkup(
             [
-                InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", url=f"https://t.me/{ASBHAI_USERNAME}") # Direct link to owner
+                [
+                    InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", callback_data="request_withdrawal")
+                ]
             ]
-        ]
-    )
+        )
+    else:
+        # If user is not eligible, don't show the withdraw button, or show a disabled one/text
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("🚫 Withdraw (Not Eligible)", callback_data="show_earning_leaderboard") # Placeholder to show button but do nothing
+                ]
+            ]
+        )
+        # Or, you can just set keyboard = None if you don't want any button for ineligible users
+        # keyboard = None 
+
 
     await message.reply_text("\n".join(earning_messages), reply_markup=keyboard, quote=True, disable_web_page_preview=True)
     await store_message(message) # Store the command message itself
@@ -851,13 +996,6 @@ async def leave_group_command(client: Client, message: Message):
         
         group_tracking_collection.delete_one({"_id": group_id})
         messages_collection.delete_many({"chat_id": group_id})
-        # No specific earning data deletion here, as earning is per user, not per group.
-        # If a user's *entire* message history for a group is deleted, their earning count
-        # might be affected if the earning system calculated based on messages_collection content
-        # rather than just group_message_count in earning_tracking_collection.
-        # Current design increments `group_message_count` directly. So, deleting messages
-        # won't decrement past earnings unless we add a reverse lookup or separate earning by group.
-        # For now, it's consistent with "resetting monthly earnings" being a separate command.
         
         logger.info(f"Left group {group_id} and cleared its related message data. (Code by @asbhaibsr)")
 
@@ -985,7 +1123,7 @@ async def clear_earning_command(client: Client, message: Message):
         return
 
     await reset_monthly_earnings_manual()
-    await message.reply_text("💰 **Earning data successfully cleared!** Ab sab phir se zero se shuru karenge! Aur saare withdrawal requests bhi hata diye gaye hain. 😉 (Code by @asbhaibsr)")
+    await message.reply_text("💰 **Earning data successfully cleared!** Ab sab phir se zero se shuru karenge! Aur saare pending withdrawal requests bhi hata diye gaye hain. 😉 (Code by @asbhaibsr)")
     logger.info(f"Owner {message.from_user.id} manually triggered earning data reset and withdrawal request clear. (Code by @asbhaibsr)")
     
     await store_message(message)
@@ -1022,7 +1160,23 @@ async def chat_toggle_command(client: Client, message: Message):
 
     # Check if the user is an admin of the group
     chat_member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if not (chat_member.status in ["creator", "administrator"]):
+    # Check for 'creator' or 'administrator' status OR specific admin rights (can_manage_chat / can_delete_messages for example)
+    # For robust admin check, you can check `chat_member.status` directly, or specific permissions like `chat_member.can_delete_messages`
+    # Let's assume 'creator' and 'administrator' cover most cases for basic toggling.
+    # If a user is an admin but their status isn't 'creator' or 'administrator',
+    # it means they have specific granular permissions. You can check for a common one, e.g., if they can delete messages.
+    
+    # Revised Admin Check:
+    is_admin = False
+    if chat_member.status in ["creator", "administrator"]:
+        is_admin = True
+    # You might consider adding a check for other specific admin permissions if your "admins" have limited roles
+    # For example, if any admin with ability to manage chat can toggle:
+    # elif chat_member.can_manage_chat: # This might be too broad depending on your setup
+    #     is_admin = True
+    # Let's stick to 'creator' and 'administrator' for simplicity and common practice unless explicitly needing granular checks.
+    
+    if not is_admin:
         await message.reply_text("Oops! Yeh command sirf group admins hi use kar sakte hain. Sorry! 🙄 (Feature by @asbhaibsr)")
         return
 
