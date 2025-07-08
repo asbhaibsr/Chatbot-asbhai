@@ -40,7 +40,7 @@ MONGO_URI_MESSAGES = os.getenv("MONGO_URI_MESSAGES")
 MONGO_URI_BUTTONS = os.getenv("MONGO_URI_BUTTONS")
 MONGO_URI_TRACKING = os.getenv("MONGO_URI_TRACKING")
 
-OWNER_ID = os.getenv("OWNER_ID")
+OWNER_ID = int(os.getenv("OWNER_ID")) # Ensure OWNER_ID is an integer for comparison
 
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
@@ -54,8 +54,6 @@ BOT_PHOTO_URL = "https://envs.sh/FU3.jpg"
 REPO_LINK = "https://github.com/asbhaibsr/Chatbot-asbhai.git"
 
 # Regex for common URL patterns including t.me and typical link formats
-# This regex is broad to catch various forms of links
-# NOTE: This is a global pattern now, used by contains_link and also implicitly for biolink checking.
 URL_PATTERN = re.compile(r"(?:https?://|www\.|t\.me/)[^\s/$.?#].[^\s]*", re.IGNORECASE)
 
 
@@ -77,7 +75,6 @@ try:
     user_tracking_collection = db_tracking.users_data
     earning_tracking_collection = db_tracking.monthly_earnings_data
     reset_status_collection = db_tracking.reset_status
-    # NEW: Collection for biolink exceptions
     biolink_exceptions_collection = db_tracking.biolink_exceptions
     logger.info("MongoDB (Tracking, Earning & Biolink Exceptions) connection successful. Credit: @asbhaibsr")
 
@@ -173,10 +170,10 @@ async def prune_old_messages():
     else:
         logger.info("Message threshold not reached. No pruning needed. (System by @asbhaibsr)")
 
-# NEW: Admin Check Utility
+# Admin Check Utility
 async def is_admin_or_owner(client: Client, chat_id: int, user_id: int):
     # Check if the user is the bot owner
-    if str(user_id) == str(OWNER_ID):
+    if user_id == OWNER_ID:
         return True
 
     # Check if the user is an admin in the group
@@ -188,13 +185,13 @@ async def is_admin_or_owner(client: Client, chat_id: int, user_id: int):
         logger.error(f"Error checking admin status for user {user_id} in chat {chat_id}: {e}")
     return False
 
-# NEW: Function to check for links in message text (Uses global URL_PATTERN)
+# Function to check for links in message text (Uses global URL_PATTERN)
 def contains_link(text: str):
     if not text:
         return False
     return bool(URL_PATTERN.search(text))
 
-# NEW: Function to check for @mentions in message text
+# Function to check for @mentions in message text
 def contains_mention(text: str):
     if not text:
         return False
@@ -432,6 +429,60 @@ async def reset_monthly_earnings_manual():
 
 # --- Pyrogram Event Handlers ---
 
+async def send_and_auto_delete_reply(message: Message, text: str = None, photo: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: str = None):
+    """Sends a reply and schedules it for deletion after 3 minutes, unless it's a /start command."""
+    if message.command and message.command[0] == "start":
+        sent_message = await message.reply_photo(
+            photo=photo,
+            caption=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        ) if photo else await message.reply_text(
+            text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        )
+        return sent_message # Don't delete /start messages
+
+    user_info_str = ""
+    if message.from_user:
+        if message.from_user.username:
+            user_info_str = f" (द्वारा: @{message.from_user.username})"
+        else:
+            user_info_str = f" (द्वारा: {message.from_user.first_name})"
+
+    # Add user info to the reply text
+    if text and message.command: # Only add for command replies
+        command_name = message.command[0]
+        text_with_user = f"**कमांड:** `{command_name}`{user_info_str}\n\n{text}"
+    else:
+        text_with_user = text
+
+    sent_message = await message.reply_photo(
+        photo=photo,
+        caption=text_with_user,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode
+    ) if photo else await message.reply_text(
+        text_with_user,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode
+    )
+
+    # Schedule deletion after 3 minutes (180 seconds)
+    async def delete_after_delay():
+        await asyncio.sleep(180)
+        try:
+            await sent_message.delete()
+            # Optionally, delete the user's original command message too
+            # await message.delete()
+        except Exception as e:
+            logger.warning(f"Failed to delete message {sent_message.id} in chat {sent_message.chat.id}: {e}")
+
+    asyncio.create_task(delete_after_delay())
+    return sent_message
+
+
 @app.on_message(filters.command("start") & filters.private)
 async def start_private_command(client: Client, message: Message):
     if is_on_cooldown(message.from_user.id):
@@ -440,28 +491,34 @@ async def start_private_command(client: Client, message: Message):
 
     user_name = message.from_user.first_name if message.from_user else "Dost"
 
-    welcome_message = f"Hello **{user_name}!** 👋 Main aa gayi hoon. Chalo, baatein karte hain! 😊"
+    welcome_message = (
+        f"🌟 हे **{user_name}** जानू! आपका स्वागत है! 🌟\n\n"
+        "मैं आपकी मदद करने के लिए तैयार हूँ।\n"
+        "अपनी सभी कमांड्स देखने के लिए नीचे दिए गए 'सहायता' बटन पर क्लिक करें।"
+    )
 
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("➕ Add Me to Your Group", url=f"https://t.me/{client.me.username}?startgroup=true")
+                InlineKeyboardButton("➕ मुझे ग्रुप में जोड़ें", url=f"https://t.me/{client.me.username}?startgroup=true")
             ],
             [
                 InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
                 InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
             ],
             [
-                InlineKeyboardButton("ℹ️ Help", callback_data="show_help_menu"),
+                InlineKeyboardButton("ℹ️ सहायता ❓", callback_data="show_help_menu"),
                 InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard")
             ]
         ]
     )
 
-    await message.reply_photo(
+    await send_and_auto_delete_reply(
+        message,
+        text=welcome_message,
         photo=BOT_PHOTO_URL,
-        caption=welcome_message,
-        reply_markup=keyboard
+        reply_markup=keyboard,
+        parse_mode="Markdown"
     )
     await store_message(message)
     if message.from_user:
@@ -476,25 +533,34 @@ async def start_group_command(client: Client, message: Message):
 
     user_name = message.from_user.first_name if message.from_user else "Dost"
 
-    welcome_message = f"Hello **{user_name}!** 👋 Main aa gayi hoon. Group ki baatein sunne ko taiyar hoon! 😊"
+    welcome_message = (
+        f"🌟 हे **{user_name}** जानू! आपका स्वागत है! 🌟\n\n"
+        "मैं ग्रुप की सभी बातें सुनने और सीखने के लिए तैयार हूँ।\n"
+        "अपनी सभी कमांड्स देखने के लिए नीचे दिए गए 'सहायता' बटन पर क्लिक करें।"
+    )
 
     keyboard = InlineKeyboardMarkup(
         [
+            [
+                InlineKeyboardButton("➕ मुझे ग्रुप में जोड़ें", url=f"https://t.me/{client.me.username}?startgroup=true")
+            ],
             [
                 InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
                 InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
             ],
             [
-                InlineKeyboardButton("ℹ️ Help", callback_data="show_help_menu"),
+                InlineKeyboardButton("ℹ️ सहायता ❓", callback_data="show_help_menu"),
                 InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard")
             ]
         ]
     )
 
-    await message.reply_photo(
+    await send_and_auto_delete_reply(
+        message,
+        text=welcome_message,
         photo=BOT_PHOTO_URL,
-        caption=welcome_message,
-        reply_markup=keyboard
+        reply_markup=keyboard,
+        parse_mode="Markdown"
     )
     await store_message(message)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
@@ -507,12 +573,15 @@ async def start_group_command(client: Client, message: Message):
 
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
+    # Answer the callback query immediately to remove loading state
+    await callback_query.answer()
+
     if callback_query.data == "buy_git_repo":
-        await callback_query.message.reply_text(
-            f"🤩 Agar aapko mere jaisa khud ka bot banwana hai, toh aapko ₹500 dene honge. Iske liye **@{ASBHAI_USERNAME}** se contact karein aur unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group",
-            quote=True
+        await send_and_auto_delete_reply(
+            callback_query.message,
+            text=f"🤩 अगर आपको मेरे जैसा खुद का bot बनवाना है, तो आपको ₹500 देने होंगे. इसके लिए **@{ASBHAI_USERNAME}** से contact करें और unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group",
+            parse_mode="Markdown"
         )
-        await callback_query.answer("Details mil gayi na? Ab jao, deal final karo! 😉", show_alert=False)
         buttons_collection.insert_one({
             "user_id": callback_query.from_user.id,
             "username": callback_query.from_user.username,
@@ -522,38 +591,43 @@ async def callback_handler(client, callback_query):
             "credit": "by @asbhaibsr"
         })
     elif callback_query.data == "show_earning_leaderboard":
-        await top_users_command(client, callback_query.message)
-        await callback_query.answer("Earning Leaderboard dikha raha hoon! 💰", show_alert=False)
+        await top_users_command(client, callback_query.message) # Pass the original message object
+        buttons_collection.insert_one({
+            "user_id": callback_query.from_user.id,
+            "username": callback_query.from_user.username,
+            "first_name": callback_query.from_user.first_name,
+            "button_data": callback_query.data,
+            "timestamp": datetime.now(),
+            "credit": "by @asbhaibsr"
+        })
     elif callback_query.data == "show_help_menu":
         help_text = (
             "💡 **Main Kaise Kaam Karti Hoon?**\n\n"
             "Main ek self-learning bot hoon jo conversations se seekhti hai. Aap groups mein ya mujhse private mein baat kar sakte hain, aur main aapke messages ko yaad rakhti hoon. Jab koi user similar baat karta hai, toh main usse seekhe hue reply deti hoon.\n\n"
-            "**✨ Mere Functions:**\n"
-            "• **Conversation:** Groups aur private chat mein baat karti hoon.\n"
-            "• **Seekhna:** Aapki baaton se naye replies generate karna seekhti hoon.\n"
-            "• **Commands:** Kuch khaas commands hain jo aap use kar sakte hain:\n"
-            "  • `/start`: Mujhse baat shuru karne ke liye.\n"
-            "  • `/help`: Yeh menu dekhne ke liye (jo aap abhi dekh rahe hain!).\n"
-            "  • `/topusers`: Sabse active users ka leaderboard dekhne ke liye.\n"
-            "  • `/chat on/off`: (Sirf Group Admins ke liye) Group mein meri messages band/chalu karne ke liye.\n"
-            "  • `/groups`: (Sirf Owner ke liye) Jin groups mein main hoon, unki list dekhne ke liye.\n"
-            "  • `/stats check`: Bot ke statistics dekhne ke liye.\n"
-            "  • `/cleardata <percentage>`: (Sirf Owner ke liye) Database se data delete karne ke liye.\n"
-            "  • `/deletemessage <content>`: (Sirf Owner ke liye) Specific message delete karne ke liye.\n"
-            "  • `/clearearning`: (Sirf Owner ke liye) Earning data reset karne ke liye.\n"
-            "  • `/leavegroup <group_id>`: (Sirf Owner ke liye) Kisi group ko chhodne ke liye.\n"
-            "  • `/broadcast <message>`: (Sirf Owner ke liye) Sabhi groups mein message bhejne ke liye.\n"
-            "  • `/restart`: (Sirf Owner ke liye) Bot ko restart karne ke liye.\n"
-            "  • `/linkdel on/off`: (Sirf Group Admins ke liye) Group mein **sabhi prakar ke links** delete/allow karne ke liye.\n"
-            "  • `/biolinkdel on/off`: (Sirf Group Admins ke liye) Group mein **users ke bio mein `t.me` aur `http/https` links** wale messages ko delete/allow karne ke liye.\n" # UPDATED DESCRIPTION
-            "  • `/biolink <userid>`: (Sirf Group Admins ke liye) `biolinkdel` on hone par bhi kisi user ko **bio mein `t.me` aur `http/https` links** रखने की permission dene ke liye.\n" # UPDATED DESCRIPTION
-            "  • `/usernamedel on/off`: (Sirf Group Admins ke liye) Group mein **'@' mentions** allow ya delete karne ke liye.\n\n"
+            "**✨ Meri Commands:**\n"
+            "• `/start`: Mujhse baat shuru karne ke liye.\n"
+            "• `/help`: Yeh menu dekhne ke liye (jo aap abhi dekh rahe hain!).\n"
+            "• `/topusers`: Sabse active users ka leaderboard dekhne ke liye.\n"
+            "• `/clearmydata`: Apni saari baatein (jo maine store ki hain) delete karne ke liye.\n"
+            "• `/chat on/off`: (Sirf Group Admins ke liye) Group mein meri messages band/chalu karne ke liye.\n"
+            "• `/groups`: (Sirf Owner ke liye) Jin groups mein main hoon, unki list dekhne ke liye.\n"
+            "• `/stats check`: Bot ke statistics dekhne ke liye.\n"
+            "• `/cleardata <percentage>`: (Sirf Owner ke liye) Database se data delete karne ke liye.\n"
+            "• `/deletemessage <content>`: (Sirf Owner ke liye) Specific message delete karne ke liye.\n"
+            "• `/clearearning`: (Sirf Owner ke liye) Earning data reset karne ke liye.\n"
+            "• `/clearall`: (Sirf Owner ke liye) Saara database (3 DBs) clear karne ke liye. **(Dhyan se!)**\n"
+            "• `/leavegroup <group_id>`: (Sirf Owner ke liye) Kisi group ko chhodne ke liye.\n"
+            "• `/broadcast <message>`: (Sirf Owner ke liye) Sabhi groups mein message bhejne ke liye.\n"
+            "• `/restart`: (Sirf Owner ke liye) Bot ko restart karne ke liye.\n"
+            "• `/linkdel on/off`: (Sirf Group Admins ke liye) Group mein **sabhi prakar ke links** delete/allow karne ke liye.\n"
+            "• `/biolinkdel on/off`: (Sirf Group Admins ke liye) Group mein **users ke bio mein `t.me` aur `http/https` links** wale messages ko delete/allow karne ke liye.\n"
+            "• `/biolink <userid>`: (Sirf Group Admins ke liye) `biolinkdel` on hone par bhi kisi user ko **bio mein `t.me` aur `http/https` links** रखने की permission dene ke liye.\n"
+            "• `/usernamedel on/off`: (Sirf Group Admins ke liye) Group mein **'@' mentions** allow ya delete karne ke liye.\n\n"
             "**🔗 Mera Code (GitHub Repository):**\n"
             f"[**{REPO_LINK}**]({REPO_LINK})\n\n"
             "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
         )
-        await callback_query.message.reply_text(help_text, quote=True, disable_web_page_preview=True)
-        await callback_query.answer("Help menu dikha raha hoon! 😊", show_alert=False)
+        await send_and_auto_delete_reply(callback_query.message, text=help_text, parse_mode="Markdown", disable_web_page_preview=True)
         buttons_collection.insert_one({
             "user_id": callback_query.from_user.id,
             "username": callback_query.from_user.username,
@@ -574,58 +648,53 @@ async def top_users_command(client: Client, message: Message):
     top_users = await get_top_earning_users()
 
     if not top_users:
-        await message.reply_text("😢 Abhi koi user leaderboard par nahi hai. Baatein karo aur pehle ban jao! ✨\n\n**Powered By:** @asbhaibsr", quote=True)
+        await send_and_auto_delete_reply(message, text="😢 Abhi koi user leaderboard par nahi hai. Baatein karo aur pehle ban jao! ✨\n\n**Powered By:** @asbhaibsr", parse_mode="Markdown")
         return
 
     earning_messages = [
-        "💰 **Top 3 Active Users (This Month)** 💰\n\n"
+        "💰 **Top Active Users - ✨ VIP Leaderboard! ✨** 💰\n\n"
     ]
 
-    prizes = {1: "₹30", 2: "₹15", 3: "₹5"}
+    prizes = {1: "💎 ₹30", 2: "🏆 ₹15", 3: "🏅 ₹5"} # More stylish prizes
 
     for i, user in enumerate(top_users[:3]):
         rank = i + 1
         user_name = user.get('first_name', 'Unknown User')
         username_str = f"@{user.get('username')}" if user.get('username') else "N/A"
         message_count = user.get('message_count', 0)
-        prize_str = prizes.get(rank, "₹0")
+        prize_str = prizes.get(rank, "🎁 ₹0") # Default to a gift emoji if rank > 3
 
         group_info = ""
         last_group_id = user.get('last_active_group_id')
         last_group_title = user.get('last_active_group_title', 'Unknown Group')
-        last_group_username = user.get('last_active_group_username')
 
         if last_group_id:
             try:
-                # Try to get chat object for a more accurate display, especially for private chats
                 chat_obj = await client.get_chat(last_group_id)
                 if chat_obj and chat_obj.type == ChatType.PRIVATE:
-                    # If it's a private chat, provide a direct link to the user
-                    group_info = f"   • Last Active in: **Private Chat (N/A)**\n" # Modified to reflect it's private chat
+                    group_info = f"   • Last Active in: **Private Chat (N/A)**\n"
                 elif chat_obj and chat_obj.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
                     group_display_name = chat_obj.title if chat_obj.title else last_group_title
-                    group_username_display = f" (@{chat_obj.username})" if chat_obj.username else ""
-                    # Provide a direct link to the group if username is available
                     group_link = f"https://t.me/{chat_obj.username}" if chat_obj.username else "N/A"
-                    group_info = f"   • Last Active in: **[{group_display_name}]({group_link})**{group_username_display}\n"
+                    group_info = f"   • Last Active in: **[{group_display_name}]({group_link})**\n"
                 else:
-                    # Fallback if chat_obj not found or type is unexpected, but we have stored data
-                    group_username_display = f" (@{last_group_username})" if last_group_username else ""
-                    group_link = f"https://t.me/{last_group_username}" if last_group_username else "N/A"
-                    group_info = f"   • Last Active in: **[{last_group_title}]({group_link})**{group_username_display}\n"
+                    group_link = "N/A"
+                    if user.get('last_active_group_username'):
+                         group_link = f"https://t.me/{user.get('last_active_group_username')}"
+                    group_info = f"   • Last Active in: **[{last_group_title}]({group_link})**\n"
             except Exception as e:
                 logger.warning(f"Could not fetch chat info for group ID {last_group_id} for leaderboard: {e}")
-                # Fallback if API call fails
-                group_username_display = f" (@{last_group_username})" if last_group_username else ""
-                group_link = f"https://t.me/{last_group_username}" if last_group_username else "N/A"
-                group_info = f"   • Last Active in: **[{last_group_title}]({group_link})**{group_username_display}\n"
+                group_link = "N/A"
+                if user.get('last_active_group_username'):
+                    group_link = f"https://t.me/{user.get('last_active_group_username')}"
+                group_info = f"   • Last Active in: **[{last_group_title}]({group_link})**\n"
         else:
             group_info = "   • Last Active Group: **N/A** (Private Chat/No Group Activity)\n"
 
 
         earning_messages.append(
-            f"**Rank {rank}:** {user_name} ({username_str})\n"
-            f"   • Total Messages: **{message_count}**\n"
+            f"**Rank {rank}:** ✨ {user_name} ({username_str}) ✨\n"
+            f"   • Total Messages: **{message_count} 💬**\n"
             f"   • Potential Earning: **{prize_str}**\n"
             f"{group_info}"
         )
@@ -647,7 +716,7 @@ async def top_users_command(client: Client, message: Message):
         ]
     )
 
-    await message.reply_text("\n".join(earning_messages), reply_markup=keyboard, quote=True, disable_web_page_preview=True) # Added disable_web_page_preview
+    await send_and_auto_delete_reply(message, text="\n".join(earning_messages), reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -659,12 +728,12 @@ async def broadcast_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
+    if message.from_user.id != OWNER_ID:
+        await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Hey, broadcast karne ke liye kuch likho toh sahi! 🙄 Jaise: `/broadcast Aapka message yahan` (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Hey, broadcast karne ke liye kuch likho toh sahi! 🙄 Jaise: `/broadcast Aapka message yahan` (Code by @asbhaibsr)", parse_mode="Markdown")
         return
 
     broadcast_text = " ".join(message.command[1:])
@@ -690,7 +759,7 @@ async def broadcast_command(client: Client, message: Message):
             logger.error(f"Failed to send broadcast to chat {chat_id}: {e}. (Broadcast by @asbhaibsr)")
             failed_count += 1
 
-    await message.reply_text(f"Broadcast ho gaya, darling! ✨ **{sent_count}** chats tak pahunchi, aur **{failed_count}** tak nahi. Koi nahi, next time! 😉 (System by @asbhaibsr)")
+    await send_and_auto_delete_reply(message, text=f"Broadcast ho gaya, darling! ✨ **{sent_count}** chats tak pahunchi, aur **{failed_count}** tak nahi. Koi nahi, next time! 😉 (System by @asbhaibsr)", parse_mode="Markdown")
     await store_message(message)
     logger.info(f"Broadcast command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
 
@@ -701,7 +770,7 @@ async def stats_private_command(client: Client, message: Message):
     update_cooldown(message.from_user.id)
 
     if len(message.command) < 2 or message.command[1].lower() != "check":
-        await message.reply_text("Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)", parse_mode="Markdown")
         return
 
     total_messages = messages_collection.count_documents({})
@@ -715,7 +784,7 @@ async def stats_private_command(client: Client, message: Message):
         f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩\n\n"
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
-    await message.reply_text(stats_text)
+    await send_and_auto_delete_reply(message, text=stats_text, parse_mode="Markdown")
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -728,7 +797,7 @@ async def stats_group_command(client: Client, message: Message):
     update_cooldown(message.from_user.id)
 
     if len(message.command) < 2 or message.command[1].lower() != "check":
-        await message.reply_text("Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)", parse_mode="Markdown")
         return
 
     total_messages = messages_collection.count_documents({})
@@ -742,7 +811,7 @@ async def stats_group_command(client: Client, message: Message):
         f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩\n\n"
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
-    await message.reply_text(stats_text)
+    await send_and_auto_delete_reply(message, text=stats_text, parse_mode="Markdown")
     await store_message(message)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
@@ -758,52 +827,48 @@ async def list_groups_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
+    if message.from_user.id != OWNER_ID:
+        await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
     groups = list(group_tracking_collection.find({}))
     if not groups:
-        await message.reply_text("Main abhi kisi group mein nahi hoon. Akeli hoon, koi add kar lo na! 🥺 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Main abhi kisi group mein nahi hoon. Akeli hoon, koi add kar lo na! 🥺 (Code by @asbhaibsr)")
         return
 
     group_list_text = "📚 **Groups Jahan Main Hoon** 📚\n\n"
     for i, group in enumerate(groups):
         title = group.get("title", "Unknown Group")
         group_id = group.get("_id")
-        group_username_from_db = group.get("username") # Get username directly from DB
+        group_username_from_db = group.get("username")
         added_on = group.get("added_on", "N/A").strftime("%Y-%m-%d %H:%M") if isinstance(group.get("added_on"), datetime) else "N/A"
 
         member_count = "N/A"
-        group_link_display = "" # Default empty
+        group_link_display = ""
         try:
             chat_obj = await client.get_chat(group_id)
             member_count = await client.get_chat_members_count(group_id)
-            if chat_obj.username: # If a public username exists, create a direct link
+            if chat_obj.username:
                 group_link_display = f" ([@{chat_obj.username}](https://t.me/{chat_obj.username}))"
-            else: # If no public username, try to get a private invite link (might fail if bot can't create one)
+            else:
                 try:
                     invite_link = await client.export_chat_invite_link(group_id)
                     group_link_display = f" ([Invite Link]({invite_link}))"
                 except Exception as e:
                     logger.warning(f"Could not get invite link for private group {group_id}: {e}")
-                    group_link_display = " (Private Group)" # Fallback for private groups
+                    group_link_display = " (Private Group)"
         except Exception as e:
             logger.warning(f"Could not fetch chat info for group {group_id}: {e}")
-            group_link_display = " (Info N/A)" # Fallback if chat object can't be fetched
-
-        # Prioritize the actual username if available in DB, otherwise use fetched one, if available
-        # The title itself can be linked if a username is available.
-        group_title_link = f"[{title}]({group_link_display.replace(' ([', 'https://t.me/').replace('])', '')})" if group_link_display and "@" in group_link_display else title
+            group_link_display = " (Info N/A)"
 
         group_list_text += (
-            f"{i+1}. **{group_title_link}** (`{group_id}`){group_link_display}\n"
+            f"{i+1}. **{title}** (`{group_id}`){group_link_display}\n"
             f"   • Joined: {added_on}\n"
             f"   • Members: {member_count}\n"
         )
 
     group_list_text += "\n_Yeh data tracking database se hai, bilkul secret!_ 🤫\n**Code & System By:** @asbhaibsr"
-    await message.reply_text(group_list_text, disable_web_page_preview=True) # Disable preview for links
+    await send_and_auto_delete_reply(message, text=group_list_text, parse_mode="Markdown", disable_web_page_preview=True)
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Groups list command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
@@ -814,18 +879,18 @@ async def leave_group_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
+    if message.from_user.id != OWNER_ID:
+        await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Kripya group ID dein jisse aap mujhe hatana chahte hain. Upyog: `/leavegroup -1001234567890` (aise, darling!) (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Kripya group ID dein jisse aap mujhe hatana chahte hain. Upyog: `/leavegroup -1001234567890` (aise, darling!) (Code by @asbhaibsr)", parse_mode="Markdown")
         return
 
     try:
         group_id_str = message.command[1]
         if not group_id_str.startswith('-100'):
-            await message.reply_text("Aapne galat Group ID format diya hai. Group ID `-100...` se shuru hoti hai. Thoda dhyaan se! 😊 (Code by @asbhaibsr)")
+            await send_and_auto_delete_reply(message, text="Aapne galat Group ID format diya hai. Group ID `-100...` se shuru hoti hai. Thoda dhyaan se! 😊 (Code by @asbhaibsr)", parse_mode="Markdown")
             return
 
         group_id = int(group_id_str)
@@ -836,13 +901,13 @@ async def leave_group_command(client: Client, message: Message):
         messages_collection.delete_many({"chat_id": group_id})
         logger.info(f"Considered cleaning earning data for users from left group {group_id}. (Code by @asbhaibsr)")
 
-        await message.reply_text(f"Safaltapoorvak group `{group_id}` se bahar aa gayi, aur uska sara data bhi clean kar diya! Bye-bye! 👋 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text=f"Safaltapoorvak group `{group_id}` se bahar aa gayi, aur uska sara data bhi clean kar diya! Bye-bye! 👋 (Code by @asbhaibsr)", parse_mode="Markdown")
         logger.info(f"Left group {group_id} and cleared its data. (Code by @asbhaibsr)")
 
     except ValueError:
-        await message.reply_text("Invalid group ID format. Kripya ek valid numeric ID dein. Thoda number check kar lo! 😉 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Invalid group ID format. Kripya ek valid numeric ID dein. Thoda number check kar lo! 😉 (Code by @asbhaibsr)")
     except Exception as e:
-        await message.reply_text(f"Group se bahar nikalte samay galti ho gayi: {e}. Oh no! 😢 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text=f"Group se bahar nikalte samay galti ho gayi: {e}. Oh no! 😢 (Code by @asbhaibsr)")
         logger.error(f"Error leaving group {group_id_str}: {e}. (Code by @asbhaibsr)")
 
     await store_message(message)
@@ -856,35 +921,35 @@ async def clear_data_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🤫 (Code by @asbhaibsr)")
+    if message.from_user.id != OWNER_ID:
+        await send_and_auto_delete_reply(message, text="Sorry, darling! Yeh command sirf mere boss ke liye hai. 🤫 (Code by @asbhaibsr)")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Kitna data clean karna hai? Percentage batao na, jaise: `/cleardata 10%` ya `/cleardata 100%`! 🧹 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Kitna data clean karna hai? Percentage batao na, jaise: `/cleardata 10%` ya `/cleardata 100%`! 🧹 (Code by @asbhaibsr)", parse_mode="Markdown")
         return
 
     percentage_str = message.command[1].strip('%')
     try:
         percentage = int(percentage_str)
         if not (1 <= percentage <= 100):
-            await message.reply_text("Percentage 1 se 100 ke beech mein hona chahiye. Thoda dhyan se! 🤔 (Code by @asbhaibsr)")
+            await send_and_auto_delete_reply(message, text="Percentage 1 se 100 ke beech mein hona chahiye. Thoda dhyan se! 🤔 (Code by @asbhaibsr)")
             return
     except ValueError:
-        await message.reply_text("Invalid percentage format. Percentage number mein hona chahiye, jaise `10` ya `50`. Fir se try karo!💖 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Invalid percentage format. Percentage number mein hona chahiye, jaise `10` ya `50`. Fir se try karo!💖 (Code by @asbhaibsr)")
         return
 
     total_messages = messages_collection.count_documents({})
     if total_messages == 0:
-        await message.reply_text("Mere paas abhi koi data nahi hai delete karne ke liye. Sab clean-clean hai! ✨ (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Mere paas abhi koi data nahi hai delete karne ke liye. Sab clean-clean hai! ✨ (Code by @asbhaibsr)")
         return
 
     messages_to_delete_count = int(total_messages * (percentage / 100))
     if messages_to_delete_count == 0 and percentage > 0:
-        await message.reply_text(f"Itna kam data hai ki {percentage}% delete karne se kuch fark nahi padega! 😂 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text=f"Itna kam data hai ki {percentage}% delete karne se kuch fark nahi padega! 😂 (Code by @asbhaibsr)")
         return
     elif messages_to_delete_count == 0 and percentage == 0:
-        await message.reply_text("Zero percent? That means no deletion! 😉 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Zero percent? That means no deletion! 😉 (Code by @asbhaibsr)")
         return
 
 
@@ -896,10 +961,10 @@ async def clear_data_command(client: Client, message: Message):
 
     if oldest_message_ids:
         delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
-        await message.reply_text(f"Wow! 🤩 Maine aapka **{percentage}%** data, yaani **{delete_result.deleted_count}** messages, successfully delete kar diye! Ab main thodi light feel kar rahi hoon. ✨ (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text=f"Wow! 🤩 Maine aapka **{percentage}%** data, yaani **{delete_result.deleted_count}** messages, successfully delete kar diye! Ab main thodi light feel kar rahi hoon. ✨ (Code by @asbhaibsr)", parse_mode="Markdown")
         logger.info(f"Cleared {delete_result.deleted_count} messages based on {percentage}% request. (Code by @asbhaibsr)")
     else:
-        await message.reply_text("Umm, kuch delete karne ke liye mila hi nahi. Lagta hai tumne pehle hi sab clean kar diya hai! 🤷‍♀️ (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Umm, kuch delete karne ke liye mila hi nahi. Lagta hai tumne pehle hi sab clean kar diya hai! 🤷‍♀️ (Code by @asbhaibsr)")
 
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -910,12 +975,12 @@ async def delete_specific_message_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)")
+    if message.from_user.id != OWNER_ID:
+        await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("Kaun sa message delete karna hai, batao toh sahi! Jaise: `/deletemessage hello` ya `/deletemessage 'kya haal hai'` 👻 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Kaun sa message delete karna hai, batao toh sahi! Jaise: `/deletemessage hello` ya `/deletemessage 'kya haal hai'` 👻 (Code by @asbhaibsr)", parse_mode="Markdown")
         return
 
     search_query = " ".join(message.command[1:])
@@ -928,12 +993,12 @@ async def delete_specific_message_command(client: Client, message: Message):
     if message_to_delete:
         delete_result = messages_collection.delete_one({"_id": message_to_delete["_id"]})
         if delete_result.deleted_count > 0:
-            await message.reply_text(f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' wale message ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)")
+            await send_and_auto_delete_reply(message, text=f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' wale message ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)")
             logger.info(f"Deleted message with content: '{search_query}'. (Code by @asbhaibsr)")
         else:
-            await message.reply_text("Aww, yeh message to mujhe mila ही nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)")
+            await send_and_auto_delete_reply(message, text="Aww, yeh message to mujhe mila ही nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)")
     else:
-        await message.reply_text("Umm, mujhe tumhara yeh message to mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text="Umm, mujhe tumhara yeh message to mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)")
 
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -944,12 +1009,12 @@ async def clear_earning_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Sorry darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)")
+    if message.from_user.id != OWNER_ID:
+        await send_and_auto_delete_reply(message, text="Sorry darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)")
         return
 
     await reset_monthly_earnings_manual()
-    await message.reply_text("💰 **Earning data successfully cleared!** Ab sab phir se zero se shuru karenge! 😉 (Code by @asbhaibsr)")
+    await send_and_auto_delete_reply(message, text="💰 **Earning data successfully cleared!** Ab sab phir se zero se shuru karenge! 😉 (Code by @asbhaibsr)", parse_mode="Markdown")
     logger.info(f"Owner {message.from_user.id} manually triggered earning data reset. (Code by @asbhaibsr)")
 
     await store_message(message)
@@ -961,11 +1026,11 @@ async def restart_command(client: Client, message: Message):
         return
     update_cooldown(message.from_user.id)
 
-    if str(message.from_user.id) != str(OWNER_ID):
-        await message.reply_text("Sorry, darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)")
+    if message.from_user.id != OWNER_ID:
+        await send_and_auto_delete_reply(message, text="Sorry, darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)")
         return
 
-    await message.reply_text("Okay, darling! Main abhi ek chhota sa nap le rahi hoon aur phir wapas aa jaungi, bilkul fresh aur energetic! Thoda wait karna, theek hai? ✨ (System by @asbhaibsr)")
+    await send_and_auto_delete_reply(message, text="Okay, darling! Main abhi ek chhota sa nap le rahi hoon aur phir wapas aa jaungi, bilkul fresh aur energetic! Thoda wait karna, theek hai? ✨ (System by @asbhaibsr)")
     logger.info("Bot is restarting... (System by @asbhaibsr)")
     await asyncio.sleep(0.5)
     os.execl(sys.executable, sys.executable, *sys.argv)
@@ -978,19 +1043,19 @@ async def toggle_chat_command(client: Client, message: Message):
     update_cooldown(message.from_user.id)
 
     if not message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        await message.reply_text("Yeh command sirf groups mein kaam karti hai, darling! 😉")
+        await send_and_auto_delete_reply(message, text="Yeh command sirf groups mein kaam karti hai, darling! 😉")
         return
 
     member = await client.get_chat_member(message.chat.id, message.from_user.id)
     if member.status not in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR]:
-        await message.reply_text("Maaf karna, yeh command sirf group admins hi use kar sakte hain. 🤷‍♀️")
+        await send_and_auto_delete_reply(message, text="Maaf karna, yeh command sirf group admins hi use kar sakte hain. 🤷‍♀️")
         return
 
     if len(message.command) < 2:
         current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
         current_status = current_status_doc.get("bot_enabled", True) if current_status_doc else True
         status_text = "chaalu hai (ON)" if current_status else "band hai (OFF)"
-        await message.reply_text(f"Main abhi is group mein **{status_text}** hoon. Use `/chat on` ya `/chat off` control karne ke liye. (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text=f"Main abhi is group mein **{status_text}** hoon. Use `/chat on` ya `/chat off` control karne ke liye. (Code by @asbhaibsr)", parse_mode="Markdown")
         return
 
     action = message.command[1].lower()
@@ -1000,17 +1065,17 @@ async def toggle_chat_command(client: Client, message: Message):
             {"_id": message.chat.id},
             {"$set": {"bot_enabled": True}}
         )
-        await message.reply_text("🚀 Main phir se aa gayi! Ab main is group mein baatein karungi aur seekhungi. 😊")
+        await send_and_auto_delete_reply(message, text="🚀 Main phir se aa gayi! Ab main is group mein baatein karungi aur seekhungi. 😊")
         logger.info(f"Bot enabled in group {message.chat.id} by admin {message.from_user.id}. (Code by @asbhaibsr)")
     elif action == "off":
         group_tracking_collection.update_one(
             {"_id": message.chat.id},
             {"$set": {"bot_enabled": False}}
         )
-        await message.reply_text("😴 Main abhi thodi der ke liye chup ho rahi hoon. Jab meri zaroorat ho, `/chat on` karke bula lena. Bye-bye! 👋")
+        await send_and_auto_delete_reply(message, text="😴 Main abhi thodi der ke liye chup ho rahi hoon. Jab meri zaroorat ho, `/chat on` karke bula lena. Bye-bye! 👋", parse_mode="Markdown")
         logger.info(f"Bot disabled in group {message.chat.id} by admin {message.from_user.id}. (Code by @asbhaibsr)")
     else:
-        await message.reply_text("Galat command, darling! `/chat on` ya `/chat off` use karo. 😉")
+        await send_and_auto_delete_reply(message, text="Galat command, darling! `/chat on` ya `/chat off` use karo. 😉", parse_mode="Markdown")
 
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -1025,14 +1090,14 @@ async def toggle_linkdel_command(client: Client, message: Message):
     update_cooldown(message.from_user.id)
 
     if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
-        await message.reply_text("माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", quote=True)
+        await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️")
         return
 
     if len(message.command) < 2:
         current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
         current_status = current_status_doc.get("linkdel_enabled", False) if current_status_doc else False
         status_text = "चालू है (ON)" if current_status else "बंद है (OFF)"
-        await message.reply_text(f"मेरी 'लिंक जादू' की छड़ी अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/linkdel on` या `/linkdel off` यूज़ करो. 😉", quote=True)
+        await send_and_auto_delete_reply(message, text=f"मेरी 'लिंक जादू' की छड़ी अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/linkdel on` या `/linkdel off` यूज़ करो. 😉", parse_mode="Markdown")
         return
 
     action = message.command[1].lower()
@@ -1042,7 +1107,7 @@ async def toggle_linkdel_command(client: Client, message: Message):
             {"$set": {"linkdel_enabled": True}},
             upsert=True
         )
-        await message.reply_text("ही ही ही! 🤭 अब कोई भी शरारती लिंक भेजेगा, तो मैं उसे जादू से गायब कर दूंगी! 🪄 ग्रुप को एकदम साफ़-सुथरा रखना है न! 😉", quote=True)
+        await send_and_auto_delete_reply(message, text="ही ही ही! 🤭 अब कोई भी शरारती लिंक भेजेगा, तो मैं उसे जादू से गायब कर दूंगी! 🪄 ग्रुप को एकदम साफ़-सुथरा रखना है न! 😉")
         logger.info(f"Link deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
     elif action == "off":
         group_tracking_collection.update_one(
@@ -1050,10 +1115,10 @@ async def toggle_linkdel_command(client: Client, message: Message):
             {"$set": {"linkdel_enabled": False}},
             upsert=True
         )
-        await message.reply_text("ठीक है, ठीक है! मैंने अपनी 'लिंक जादू' की छड़ी रख दी है! 😇 अब आप जो चाहे लिंक भेज सकते हैं! पर ध्यान से, ओके?", quote=True)
+        await send_and_auto_delete_reply(message, text="ठीक है, ठीक है! मैंने अपनी 'लिंक जादू' की छड़ी रख दी है! 😇 अब आप जो चाहे लिंक भेज सकते हैं! पर ध्यान से, ओके?")
         logger.info(f"Link deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
     else:
-        await message.reply_text("उम्म... मुझे समझ नहीं आया! 😕 `/linkdel on` या `/linkdel off` यूज़ करो, प्लीज़! ✨", quote=True)
+        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/linkdel on` या `/linkdel off` यूज़ करो, प्लीज़! ✨", parse_mode="Markdown")
 
     await store_message(message)
 
@@ -1065,14 +1130,14 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
     update_cooldown(message.from_user.id)
 
     if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
-        await message.reply_text("माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", quote=True)
+        await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️")
         return
 
     if len(message.command) < 2:
         current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
         current_status = current_status_doc.get("biolinkdel_enabled", False) if current_status_doc else False
         status_text = "चालू है (ON)" if current_status else "बंद है (OFF)"
-        await message.reply_text(f"मेरी 'बायो-लिंक पुलिस' अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/biolinkdel on` या `/biolinkdel off` यूज़ करो. 👮‍♀️", quote=True)
+        await send_and_auto_delete_reply(message, text=f"मेरी 'बायो-लिंक पुलिस' अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/biolinkdel on` या `/biolinkdel off` यूज़ करो. 👮‍♀️", parse_mode="Markdown")
         return
 
     action = message.command[1].lower()
@@ -1082,8 +1147,7 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
             {"$set": {"biolinkdel_enabled": True}},
             upsert=True
         )
-        # Modified message to clarify it checks USER BIO, not message content
-        await message.reply_text("हम्म... 😼 अब से जो भी **यूज़र अपनी बायो में `t.me` या `http/https` लिंक रखेगा**, मैं उसके **मैसेज को चुपचाप हटा दूंगी!** (अगर उसे `/biolink` से छूट नहीं मिली है). ग्रुप में कोई मस्ती नहीं! 🤫", quote=True)
+        await send_and_auto_delete_reply(message, text="हम्म... 😼 अब से जो भी **यूज़र अपनी बायो में `t.me` या `http/https` लिंक रखेगा**, मैं उसके **मैसेज को चुपचाप हटा दूंगी!** (अगर उसे `/biolink` से छूट नहीं मिली है). ग्रुप में कोई मस्ती नहीं! 🤫", parse_mode="Markdown")
         logger.info(f"Biolink deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
     elif action == "off":
         group_tracking_collection.update_one(
@@ -1091,10 +1155,10 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
             {"$set": {"biolinkdel_enabled": False}},
             upsert=True
         )
-        await message.reply_text("ओके डार्लिंग्स! 😇 अब मैं यूज़र्स की बायो में `t.me` और `http/https` लिंक्स को चेक करना बंद कर रही हूँ! सब फ्री-फ्री! 🎉", quote=True) # Modified message
+        await send_and_auto_delete_reply(message, text="ओके डार्लिंग्स! 😇 अब मैं यूज़र्स की बायो में `t.me` और `http/https` लिंक्स को चेक करना बंद कर रही हूँ! सब फ्री-फ्री! 🎉", parse_mode="Markdown")
         logger.info(f"Biolink deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
     else:
-        await message.reply_text("उम्म... मुझे समझ नहीं आया! 😕 `/biolinkdel on` या `/biolinkdel off` यूज़ करो, प्लीज़! ✨", quote=True)
+        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/biolinkdel on` या `/biolinkdel off` यूज़ करो, प्लीज़! ✨", parse_mode="Markdown")
 
     await store_message(message)
 
@@ -1106,11 +1170,11 @@ async def allow_biolink_user_command(client: Client, message: Message):
     update_cooldown(message.from_user.id)
 
     if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
-        await message.reply_text("माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", quote=True)
+        await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️")
         return
 
     if len(message.command) < 2:
-        await message.reply_text("किस यूज़र को बायो-लिंक की छूट देनी है? मुझे उसकी User ID दो ना, जैसे: `/biolink 123456789` या `/biolink remove 123456789`! 😉", quote=True)
+        await send_and_auto_delete_reply(message, text="किस यूज़र को बायो-लिंक की छूट देनी है? मुझे उसकी User ID दो ना, जैसे: `/biolink 123456789` या `/biolink remove 123456789`! 😉", parse_mode="Markdown")
         return
 
     action_or_user_id = message.command[1].lower()
@@ -1120,10 +1184,10 @@ async def allow_biolink_user_command(client: Client, message: Message):
         try:
             target_user_id = int(message.command[2])
             biolink_exceptions_collection.delete_one({"_id": target_user_id})
-            await message.reply_text(f"ओके! ✨ यूज़र `{target_user_id}` को अब बायो में लिंक रखने की छूट नहीं मिलेगी! बाय-बाय परमिशन! 👋", quote=True) # Modified message
+            await send_and_auto_delete_reply(message, text=f"ओके! ✨ यूज़र `{target_user_id}` को अब बायो में लिंक रखने की छूट नहीं मिलेगी! बाय-बाय परमिशन! 👋", parse_mode="Markdown")
             logger.info(f"Removed user {target_user_id} from biolink exceptions in group {message.chat.id}.")
         except ValueError:
-            await message.reply_text("उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", quote=True)
+            await send_and_auto_delete_reply(message, text="उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉")
     else:
         try:
             target_user_id = int(action_or_user_id)
@@ -1132,10 +1196,10 @@ async def allow_biolink_user_command(client: Client, message: Message):
                 {"$set": {"allowed_by_admin": True, "added_on": datetime.now(), "credit": "by @asbhaibsr"}},
                 upsert=True
             )
-            await message.reply_text(f"याय! 🎉 मैंने यूज़र `{target_user_id}` को स्पेशल परमिशन दे दी है! अब ये **अपनी बायो में `t.me` या `http/https` लिंक्स** रख पाएंगे और उनके मैसेज डिलीट नहीं होंगे! क्यूंकि एडमिन ने बोला, तो बोला! 👑", quote=True) # Modified message
+            await send_and_auto_delete_reply(message, text=f"याय! 🎉 मैंने यूज़र `{target_user_id}` को स्पेशल परमिशन दे दी है! अब ये **अपनी बायो में `t.me` या `http/https` लिंक्स** रख पाएंगे और उनके मैसेज डिलीट नहीं होंगे! क्यूंकि एडमिन ने बोला, तो बोला! 👑", parse_mode="Markdown")
             logger.info(f"Added user {target_user_id} to biolink exceptions in group {message.chat.id}.")
         except ValueError:
-            await message.reply_text("उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", quote=True)
+            await send_and_auto_delete_reply(message, text="उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉")
 
     await store_message(message)
 
@@ -1147,14 +1211,14 @@ async def toggle_usernamedel_command(client: Client, message: Message):
     update_cooldown(message.from_user.id)
 
     if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
-        await message.reply_text("माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", quote=True)
+        await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️")
         return
 
     if len(message.command) < 2:
         current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
         current_status = current_status_doc.get("usernamedel_enabled", False) if current_status_doc else False
         status_text = "चालू है (ON)" if current_status else "बंद है (OFF)"
-        await message.reply_text(f"मेरी '@' टैग पुलिस अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/usernamedel on` या `/usernamedel off` यूज़ करो. 🚨", quote=True)
+        await send_and_auto_delete_reply(message, text=f"मेरी '@' टैग पुलिस अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/usernamedel on` या `/usernamedel off` यूज़ करो. 🚨", parse_mode="Markdown")
         return
 
     action = message.command[1].lower()
@@ -1164,7 +1228,7 @@ async def toggle_usernamedel_command(client: Client, message: Message):
             {"$set": {"usernamedel_enabled": True}},
             upsert=True
         )
-        await message.reply_text("चीं-चीं! 🐦 अब से कोई भी `@` करके किसी को भी परेशान नहीं कर पाएगा! जो करेगा, उसका मैसेज मैं फट से उड़ा दूंगी! 💨 मुझे डिस्टर्बेंस पसंद नहीं! 😠", quote=True)
+        await send_and_auto_delete_reply(message, text="चीं-चीं! 🐦 अब से कोई भी `@` करके किसी को भी परेशान नहीं कर पाएगा! जो करेगा, उसका मैसेज मैं फट से उड़ा दूंगी! 💨 मुझे डिस्टर्बेंस पसंद नहीं! 😠")
         logger.info(f"Username deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
     elif action == "off":
         group_tracking_collection.update_one(
@@ -1172,12 +1236,136 @@ async def toggle_usernamedel_command(client: Client, message: Message):
             {"$set": {"usernamedel_enabled": False}},
             upsert=True
         )
-        await message.reply_text("ठीक है! आज से मेरी @ वाली आंखें बंद! 😴 अब आप जो चाहे @ करो! पर ज़्यादा तंग मत करना किसी को! 🥺", quote=True)
+        await send_and_auto_delete_reply(message, text="ठीक है! आज से मेरी @ वाली आंखें बंद! 😴 अब आप जो चाहे @ करो! पर ज़्यादा तंग मत करना किसी को! 🥺")
         logger.info(f"Username deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
     else:
-        await message.reply_text("उम्म... मुझे समझ नहीं आया! 😕 `/usernamedel on` या `/usernamedel off` यूज़ करो, प्लीज़! ✨", quote=True)
+        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/usernamedel on` या `/usernamedel off` यूज़ करो, प्लीज़! ✨", parse_mode="Markdown")
 
     await store_message(message)
+
+# --- NEW: /clearall command (Owner-Only, with confirmation) ---
+@app.on_message(filters.command("clearall") & filters.private)
+async def clear_all_dbs_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return
+    update_cooldown(message.from_user.id)
+
+    if message.from_user.id != OWNER_ID:
+        await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस के लिए है। 🚫")
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("हाँ, डिलीट करें ⚠️", callback_data='confirm_clearall_dbs'),
+                InlineKeyboardButton("नहीं, रहने दें ✅", callback_data='cancel_clearall_dbs')
+            ]
+        ]
+    )
+
+    await send_and_auto_delete_reply(
+        message,
+        text="⚠️ **चेतावनी:** क्या आप वाकई अपनी सभी MongoDB डेटाबेस (Messages, Buttons, Tracking) का **सारा डेटा** डिलीट करना चाहते हैं?\n\n"
+             "यह कार्रवाई **अपरिवर्तनीय (irreversible)** है और आपका सारा डेटा हमेशा के लिए हट जाएगा।\n\n"
+             "सोच समझकर चुनें!",
+        reply_markup=keyboard,
+        parse_mode='Markdown'
+    )
+    logger.info(f"Owner {message.from_user.id} initiated /clearall command. Waiting for confirmation.")
+    await store_message(message) # Store the command itself
+
+@app.on_callback_query(filters.regex("^(confirm_clearall_dbs|cancel_clearall_dbs)$"))
+async def handle_clearall_dbs_callback(client: Client, callback_query):
+    query = callback_query
+
+    # Answer the callback query immediately to remove loading state
+    await query.answer()
+
+    if query.from_user.id != OWNER_ID:
+        await query.edit_message_text("आप इस कार्रवाई को अधिकृत नहीं हैं।")
+        return
+
+    if query.data == 'confirm_clearall_dbs':
+        await query.edit_message_text("डेटा डिलीट किया जा रहा है... कृपया प्रतीक्षा करें। ⏳")
+        try:
+            # Drop all databases for client_messages
+            for db_name in client_messages.list_database_names():
+                if db_name not in ["admin", "local", "config"]:
+                    client_messages.drop_database(db_name)
+            logger.info("Messages DBs dropped.")
+
+            # Drop all databases for client_buttons
+            for db_name in client_buttons.list_database_names():
+                if db_name not in ["admin", "local", "config"]:
+                    client_buttons.drop_database(db_name)
+            logger.info("Buttons DBs dropped.")
+
+            # Drop all databases for client_tracking
+            for db_name in client_tracking.list_database_names():
+                if db_name not in ["admin", "local", "config"]:
+                    client_tracking.drop_database(db_name)
+            logger.info("Tracking DBs dropped.")
+
+            await query.edit_message_text("✅ **सफलतापूर्वक:** आपकी सभी MongoDB डेटाबेस का सारा डेटा डिलीट कर दिया गया है। बॉट अब बिल्कुल नया हो गया है! ✨")
+            logger.info(f"Owner {query.from_user.id} confirmed and successfully cleared all MongoDB databases.")
+        except Exception as e:
+            await query.edit_message_text(f"❌ **त्रुटि:** डेटा डिलीट करने में समस्या आई: {e}\n\nकृपया लॉग्स चेक करें।")
+            logger.error(f"Error during /clearall confirmation and deletion: {e}")
+    elif query.data == 'cancel_clearall_dbs':
+        await query.edit_message_text("कार्यवाही रद्द कर दी गई है। आपका डेटा सुरक्षित है। ✅")
+        logger.info(f"Owner {query.from_user.id} cancelled /clearall operation.")
+
+# --- NEW: /clearmydata command ---
+@app.on_message(filters.command("clearmydata"))
+async def clear_my_data_command(client: Client, message: Message):
+    if is_on_cooldown(message.from_user.id):
+        return
+    update_cooldown(message.from_user.id)
+
+    target_user_id = None
+    if len(message.command) > 1 and message.from_user.id == OWNER_ID:
+        try:
+            target_user_id = int(message.command[1])
+            # Ensure owner is not trying to delete bot's own data or system data
+            if target_user_id == client.me.id:
+                await send_and_auto_delete_reply(message, text="आप मेरे डेटा को डिलीट नहीं कर सकते, बॉस! 😅")
+                return
+        except ValueError:
+            await send_and_auto_delete_reply(message, text="गलत User ID फ़ॉर्मेट। कृपया एक वैध संख्यात्मक ID दें।")
+            return
+    elif len(message.command) > 1 and message.from_user.id != OWNER_ID:
+        await send_and_auto_delete_reply(message, text="यह कमांड ऐसे उपयोग करने के लिए आप अधिकृत नहीं हैं। यह सुविधा केवल मेरे बॉस के लिए है।")
+        return
+    else:
+        target_user_id = message.from_user.id
+
+    if not target_user_id:
+        await send_and_auto_delete_reply(message, text="मुझे पता नहीं चल रहा कि किसका डेटा डिलीट करना है। 😕")
+        return
+
+    try:
+        deleted_count = messages_collection.delete_many({"user_id": target_user_id}).deleted_count
+        earning_tracking_collection.delete_one({"_id": target_user_id}) # Also clear earning data for that user
+
+        if deleted_count > 0:
+            if target_user_id == message.from_user.id:
+                await send_and_auto_delete_reply(message, text=f"वाह! ✨ मैंने आपकी `{deleted_count}` बातचीत के मैसेज और अर्निंग डेटा डिलीट कर दिए हैं। अब आप बिल्कुल फ्रेश हो! 😊")
+                logger.info(f"User {target_user_id} successfully cleared their data.")
+            else: # Owner deleting another user's data
+                await send_and_auto_delete_reply(message, text=f"बॉस का ऑर्डर! 👑 मैंने यूजर `{target_user_id}` के `{deleted_count}` बातचीत के मैसेज और अर्निंग डेटा डिलीट कर दिए हैं। 😉")
+                logger.info(f"Owner {message.from_user.id} cleared data for user {target_user_id}.")
+        else:
+            if target_user_id == message.from_user.id:
+                await send_and_auto_delete_reply(message, text="आपके पास कोई डेटा स्टोर नहीं है जिसे डिलीट किया जा सके। मेरा डेटाबेस तो एकदम खाली है आपके लिए! 🤷‍♀️")
+            else:
+                await send_and_auto_delete_reply(message, text=f"यूजर `{target_user_id}` का कोई डेटा नहीं मिला जिसे डिलीट किया जा सके।")
+    except Exception as e:
+        await send_and_auto_delete_reply(message, text=f"डेटा डिलीट करने में कुछ गड़बड़ हो गई: {e}. ओह नो! 😱")
+        logger.error(f"Error clearing data for user {target_user_id}: {e}")
+    await store_message(message)
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
 
 # --- New chat members and left chat members ---
 @app.on_message(filters.new_chat_members)
@@ -1308,11 +1496,12 @@ async def handle_message_and_reply(client: Client, message: Message):
             logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling. (Code by @asbhaibsr)")
             return
 
-    if message.from_user and is_on_cooldown(message.from_user.id):
-        logger.debug(f"User {message.from_user.id} is on cooldown. Skipping message. (Cooldown by @asbhaibsr)")
-        return
-    if message.from_user:
-        update_cooldown(message.from_user.id)
+    # No cooldown for general messages, only for commands to prevent spam.
+    # if message.from_user and is_on_cooldown(message.from_user.id):
+    #     logger.debug(f"User {message.from_user.id} is on cooldown. Skipping message. (Cooldown by @asbhaibsr)")
+    #     return
+    # if message.from_user:
+    #     update_cooldown(message.from_user.id)
 
     logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}). (Handle message by @asbhaibsr)")
 
@@ -1327,7 +1516,6 @@ async def handle_message_and_reply(client: Client, message: Message):
         current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
         user_id = message.from_user.id if message.from_user else None
 
-        # Always check if the sender is an admin/owner first
         is_sender_admin = False
         if user_id:
             is_sender_admin = await is_admin_or_owner(client, message.chat.id, user_id)
@@ -1337,9 +1525,11 @@ async def handle_message_and_reply(client: Client, message: Message):
             if contains_link(message.text) and not is_sender_admin:
                 try:
                     await message.delete()
-                    await message.reply_text("ओहो, ये क्या भेज दिया? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया! 💨 अब से ध्यान रखना, हाँ?", quote=True)
+                    sent_delete_alert = await message.reply_text("ओहो, ये क्या भेज दिया? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया! 💨 अब से ध्यान रखना, हाँ?", quote=True, parse_mode="Markdown")
+                    # Schedule deletion of the bot's alert message
+                    asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                     logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return # Stop further processing as message is deleted
+                    return
                 except Exception as e:
                     logger.error(f"Error deleting link message {message.id}: {e}")
             elif contains_link(message.text) and is_sender_admin:
@@ -1348,23 +1538,24 @@ async def handle_message_and_reply(client: Client, message: Message):
         # 2. Biolink Deletion Check (links in user's BIO)
         if current_group_settings and current_group_settings.get("biolinkdel_enabled", False) and user_id:
             try:
-                # Fetch user's chat object to access their bio
                 user_chat_obj = await client.get_chat(user_id)
-                user_bio = user_chat_obj.bio or "" # Get bio, default to empty string if not set
+                user_bio = user_chat_obj.bio or ""
 
                 is_biolink_exception = biolink_exceptions_collection.find_one({"_id": user_id})
 
-                if not is_sender_admin and not is_biolink_exception: # If user is not admin AND not in exception list
-                    if URL_PATTERN.search(user_bio): # Check if user's bio contains any link
+                if not is_sender_admin and not is_biolink_exception:
+                    if URL_PATTERN.search(user_bio):
                         try:
                             await message.delete()
-                            await message.reply_text(
+                            sent_delete_alert = await message.reply_text(
                                 "अरे बाबा रे! 😲 आपकी **बायो में लिंक है!** इसीलिए आपका मैसेज गायब हो गया! 👻\n"
                                 "कृपया अपनी बायो से लिंक हटाएँ। यदि आपको यह अनुमति चाहिए, तो कृपया एडमिन से संपर्क करें और उन्हें `/biolink आपका_यूजरआईडी` कमांड देने को कहें।",
-                                quote=True
+                                quote=True, parse_mode="Markdown"
                             )
+                            # Schedule deletion of the bot's alert message
+                            asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                             logger.info(f"Deleted message {message.id} from user {user_id} due to link in bio in chat {message.chat.id}.")
-                            return # Stop further processing as message is deleted
+                            return
                         except Exception as e:
                             logger.error(f"Error deleting message {message.id} due to bio link: {e}")
                 elif (is_sender_admin or is_biolink_exception) and URL_PATTERN.search(user_bio):
@@ -1372,17 +1563,17 @@ async def handle_message_and_reply(client: Client, message: Message):
 
             except Exception as e:
                 logger.error(f"Error checking user bio for user {user_id} in chat {message.chat.id}: {e}")
-                # Don't return here; just log the error and continue, as inability to check bio
-                # should not prevent the bot from processing other message types.
 
         # 3. Username Deletion Check (@mentions in message content)
         if current_group_settings and current_group_settings.get("usernamedel_enabled", False) and message.text:
             if contains_mention(message.text) and not is_sender_admin:
                 try:
                     await message.delete()
-                    await message.reply_text("टच-टच! 😬 आपने `@` का इस्तेमाल किया! सॉरी, वो मैसेज तो चला गया आसमान में! 🚀 अगली बार से ध्यान रखना, हाँ? 😉", quote=True)
+                    sent_delete_alert = await message.reply_text("टच-टच! 😬 आपने `@` का इस्तेमाल किया! सॉरी, वो मैसेज तो चला गया आसमान में! 🚀 अगली बार से ध्यान रखना, हाँ? 😉", quote=True, parse_mode="Markdown")
+                    # Schedule deletion of the bot's alert message
+                    asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                     logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return # Stop further processing as message is deleted
+                    return
                 except Exception as e:
                     logger.error(f"Error deleting username message {message.id}: {e}")
             elif contains_mention(message.text) and is_sender_admin:
@@ -1410,6 +1601,14 @@ async def handle_message_and_reply(client: Client, message: Message):
                 logger.error(f"Error sending reply for message {message.id}: {e}. (System by @asbhaibsr)")
         else:
             logger.info("No suitable reply found. (System by @asbhaibsr)")
+
+async def delete_after_delay_for_message(message_obj: Message, delay: int):
+    """Utility to delete a specific message after a delay."""
+    await asyncio.sleep(delay)
+    try:
+        await message_obj.delete()
+    except Exception as e:
+        logger.warning(f"Failed to delete message {message_obj.id} in chat {message_obj.chat.id}: {e}")
 
 
 # --- Main entry point ---
