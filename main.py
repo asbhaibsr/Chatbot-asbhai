@@ -15,7 +15,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
-from pyrogram.enums import ChatType, ChatMemberStatus, ParseMode # <-- यहाँ ParseMode इम्पोर्ट किया गया है
+from pyrogram.enums import ChatType, ChatMemberStatus, ParseMode
 
 from pymongo import MongoClient
 from datetime import datetime, timedelta
@@ -128,18 +128,34 @@ def health_check():
 def run_flask_app():
     flask_app.run(host='0.0.0.0', port=os.environ.get('PORT', 8000), debug=False)
 
-# --- Cooldown dictionary ---
+# --- Cooldown dictionary (for commands) ---
 user_cooldowns = {}
-COOLDOWN_TIME = 3 # seconds
+COMMAND_COOLDOWN_TIME = 3 # seconds (for commands like /start, /topusers)
 
-def is_on_cooldown(user_id):
+def is_on_command_cooldown(user_id):
     last_command_time = user_cooldowns.get(user_id)
     if last_command_time is None:
         return False
-    return (time.time() - last_command_time) < COOLDOWN_TIME
+    return (time.time() - last_command_time) < COMMAND_COOLDOWN_TIME
 
-def update_cooldown(user_id):
+def update_command_cooldown(user_id):
     user_cooldowns[user_id] = time.time()
+
+# --- Message Reply Cooldown (for general messages) ---
+# Stores the timestamp when a user's *last* general message was processed/replied to.
+# Bot will wait 5 seconds after this timestamp before processing another general message from the same user.
+user_message_cooldowns = {}
+MESSAGE_REPLY_COOLDOWN_TIME = 5 # seconds
+
+async def can_reply_to_user(user_id):
+    last_reply_time = user_message_cooldowns.get(user_id)
+    if last_reply_time is None:
+        return True
+    return (time.time() - last_reply_time) >= MESSAGE_REPLY_COOLDOWN_TIME
+
+def update_message_reply_cooldown(user_id):
+    user_message_cooldowns[user_id] = time.time()
+
 
 # --- Utility Functions ---
 def extract_keywords(text):
@@ -489,15 +505,15 @@ async def send_and_auto_delete_reply(message: Message, text: str = None, photo: 
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_private_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     user_name = message.from_user.first_name if message.from_user else "Dost"
 
     welcome_message = (
         f"🌟 हे **{user_name}** जानू! आपका स्वागत है! 🌟\n\n"
-        "मैं आपकी मदद करने के लिए तैयार हूँ।\n"
+        "मैं आपकी मदद करने के लिए तैयार हूँ!\n"
         "अपनी सभी कमांड्स देखने के लिए नीचे दिए गए 'सहायता' बटन पर क्लिक करें।"
     )
 
@@ -531,15 +547,15 @@ async def start_private_command(client: Client, message: Message):
 
 @app.on_message(filters.command("start") & filters.group)
 async def start_group_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     user_name = message.from_user.first_name if message.from_user else "Dost"
 
     welcome_message = (
         f"🌟 हे **{user_name}** जानू! आपका स्वागत है! 🌟\n\n"
-        "मैं ग्रुप की सभी बातें सुनने और सीखने के लिए तैयार हूँ।\n"
+        "मैं ग्रुप की सभी बातें सुनने और सीखने के लिए तैयार हूँ!\n"
         "अपनी सभी कमांड्स देखने के लिए नीचे दिए गए 'सहायता' बटन पर क्लिक करें।"
     )
 
@@ -641,33 +657,72 @@ async def callback_handler(client, callback_query):
             "timestamp": datetime.now(),
             "credit": "by @asbhaibsr"
         })
+    elif callback_query.data == "show_earning_rules":
+        earning_rules_text = (
+            "👑 **Earning Rules - VIP Guide!** 👑\n\n"
+            "यहाँ बताया गया है कि आप मेरे साथ कैसे कमाई कर सकते हैं:\n\n"
+            "**1. सक्रिय रहें (Be Active):**\n"
+            "   • आपको ग्रुप में **वास्तविक और सार्थक बातचीत** करनी होगी।\n"
+            "   • बेतरतीब मैसेज, स्पैमिंग, या सिर्फ़ इमोजी भेजने से आपकी रैंकिंग नहीं बढ़ेगी और आप अयोग्य भी हो सकते हैं।\n"
+            "   • जितनी ज़्यादा अच्छी बातचीत, उतनी ज़्यादा कमाई के अवसर!\n\n"
+            "**2. क्या करें, क्या न करें (Do's and Don'ts):**\n"
+            "   • **करें:** सवालों के जवाब दें, चर्चा में भाग लें, नए विषय शुरू करें, अन्य सदस्यों के साथ इंटरैक्ट करें।\n"
+            "   • **न करें:** बार-बार एक ही मैसेज भेजें, सिर्फ़ स्टिकर या GIF भेजें, असंबद्ध सामग्री पोस्ट करें, या ग्रुप के नियमों का उल्लंघन करें।\n\n"
+            "**3. कमाई का समय (Earning Period):**\n"
+            "   • कमाई हर **महीने** के पहले दिन रीसेट होगी। इसका मतलब है कि हर महीने आपके पास टॉप पर आने का एक नया मौका होगा!\n\n"
+            "**4. अयोग्य होना (Disqualification):**\n"
+            "   • यदि आप स्पैमिंग करते हुए पाए जाते हैं, या किसी भी तरह से सिस्टम का दुरुपयोग करने की कोशिश करते हैं, तो आपको लीडरबोर्ड से हटा दिया जाएगा और आप भविष्य की कमाई के लिए अयोग्य घोषित हो सकते हैं।\n"
+            "   • ग्रुप के नियमों का पालन करना अनिवार्य है।\n\n"
+            "**5. विथड्रावल (Withdrawal):**\n"
+            "   • विथड्रावल हर महीने के **पहले हफ़्ते** में होगा।\n"
+            "   • अपनी कमाई निकालने के लिए, आपको मुझे `@asbhaibsr` पर DM (डायरेक्ट मैसेज) करना होगा।\n\n"
+            "**शुभकामनाएँ!** 🍀\n"
+            "मुझे आशा है कि आप सक्रिय रहेंगे और हमारी कम्युनिटी में योगदान देंगे।\n\n"
+            "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+        )
+        await send_and_auto_delete_reply(callback_query.message, text=earning_rules_text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+        buttons_collection.insert_one({
+            "user_id": callback_query.from_user.id,
+            "username": callback_query.from_user.username,
+            "first_name": callback_query.from_user.first_name,
+            "button_data": callback_query.data,
+            "timestamp": datetime.now(),
+            "credit": "by @asbhaibsr"
+        })
 
     logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("topusers") & (filters.private | filters.group))
 async def top_users_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     top_users = await get_top_earning_users()
 
     if not top_users:
-        await send_and_auto_delete_reply(message, text="😢 Abhi koi user leaderboard par nahi hai. Baatein karo aur pehle ban jao! ✨\n\n**Powered By:** @asbhaibsr", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="😢 अब तक कोई भी उपयोगकर्ता लीडरबोर्ड पर नहीं है! सक्रिय होकर पहले बनें! ✨\n\n**Powered By:** @asbhaibsr", parse_mode=ParseMode.MARKDOWN)
         return
 
     earning_messages = [
-        "💰 **Top Active Users - ✨ VIP Leaderboard! ✨** 💰\n\n"
+        "👑 **Top Active Users - ✨ VIP Leaderboard! ✨** 👑\n\n"
     ]
 
-    prizes = {1: "💎 ₹30", 2: "🏆 ₹15", 3: "🏅 ₹5"} # More stylish prizes
+    prizes = {
+        1: "💰 ₹50",
+        2: "💸 ₹30",
+        3: "🎁 ₹20",
+        4: "🎬 @asfilter_bot का 1 हफ़्ते का प्रीमियम प्लान"
+    }
 
-    for i, user in enumerate(top_users[:3]):
+    for i, user in enumerate(top_users[:5]): # Display top 5 users
         rank = i + 1
         user_name = user.get('first_name', 'Unknown User')
-        username_str = f"@{user.get('username')}" if user.get('username') else "N/A"
+        username_str = f"@{user.get('username')}" if user.get('username') else f"ID: `{user.get('user_id')}`"
         message_count = user.get('message_count', 0)
-        prize_str = prizes.get(rank, "🎁 ₹0") # Default to a gift emoji if rank > 3
+        
+        # Determine prize string
+        prize_str = prizes.get(rank, "🏅 कोई पुरस्कार नहीं") # Default for ranks > 4
 
         group_info = ""
         last_group_id = user.get('last_active_group_id')
@@ -676,47 +731,43 @@ async def top_users_command(client: Client, message: Message):
         if last_group_id:
             try:
                 chat_obj = await client.get_chat(last_group_id)
-                if chat_obj and chat_obj.type == ChatType.PRIVATE:
-                    group_info = f"   • Last Active in: **Private Chat (N/A)**\n"
-                elif chat_obj and chat_obj.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-                    group_display_name = chat_obj.title if chat_obj.title else last_group_title
-                    group_link = f"https://t.me/{chat_obj.username}" if chat_obj.username else "N/A"
-                    group_info = f"   • Last Active in: **[{group_display_name}]({group_link})**\n"
+                if chat_obj.type == ChatType.PRIVATE:
+                    group_info = f"   • सक्रिय था: **[निजी चैट में](tg://user?id={user.get('user_id')})**\n"
+                elif chat_obj.username:
+                    group_info = f"   • सक्रिय था: **[{chat_obj.title}](https://t.me/{chat_obj.username})**\n"
                 else:
-                    group_link = "N/A"
-                    if user.get('last_active_group_username'):
-                         group_link = f"https://t.me/{user.get('last_active_group_username')}"
-                    group_info = f"   • Last Active in: **[{last_group_title}]({group_link})**\n"
+                    # If no public username, try to get an invite link (only for supergroups/channels)
+                    try:
+                        # Note: export_chat_invite_link might not work if bot is not admin or for basic groups
+                        invite_link = await client.export_chat_invite_link(last_group_id)
+                        group_info = f"   • सक्रिय था: **[{chat_obj.title}]({invite_link})**\n"
+                    except Exception:
+                        group_info = f"   • सक्रिय था: **{chat_obj.title}** (निजी ग्रुप)\n"
             except Exception as e:
                 logger.warning(f"Could not fetch chat info for group ID {last_group_id} for leaderboard: {e}")
-                group_link = "N/A"
-                if user.get('last_active_group_username'):
-                    group_link = f"https://t.me/{user.get('last_active_group_username')}"
-                group_info = f"   • Last Active in: **[{last_group_title}]({group_link})**\n"
+                group_info = f"   • सक्रिय था: **{last_group_title}** (जानकारी उपलब्ध नहीं)\n"
         else:
-            group_info = "   • Last Active Group: **N/A** (Private Chat/No Group Activity)\n"
+            group_info = "   • सक्रिय था: **कोई ग्रुप गतिविधि नहीं**\n"
 
 
         earning_messages.append(
-            f"**Rank {rank}:** ✨ {user_name} ({username_str}) ✨\n"
-            f"   • Total Messages: **{message_count} 💬**\n"
-            f"   • Potential Earning: **{prize_str}**\n"
+            f"**{rank}.** 🌟 **{user_name}** ({username_str}) 🌟\n"
+            f"   • कुल मैसेज: **{message_count} 💬**\n"
+            f"   • संभावित पुरस्कार: **{prize_str}**\n"
             f"{group_info}"
         )
-
+    
     earning_messages.append(
-        "\n**Earning Rules:**\n"
-        "• Earning will be based solely on **conversation (messages) within group chats.**\n"
-        "• **Spamming or sending a high volume of messages in quick succession will not be counted.** Only genuine, relevant conversation will be considered.\n"
-        "• Please ensure your conversations are **meaningful and engaging.**\n"
-        "• This leaderboard can be **reset manually by the owner using /clearearning command.**\n\n"
-        "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+        "\n_हर महीने की पहली तारीख को यह सिस्टम रीसेट होता है!_\n"
+        "_ग्रुप के नियमों को जानने के लिए `/help` का उपयोग करें।_"
     )
+
 
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", url=f"https://t.me/{ASBHAI_USERNAME}")
+                InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", url=f"https://t.me/{ASBHAI_USERNAME}"),
+                InlineKeyboardButton("💰 Earning Rules", callback_data="show_earning_rules")
             ]
         ]
     )
@@ -729,9 +780,9 @@ async def top_users_command(client: Client, message: Message):
 
 @app.on_message(filters.command("broadcast") & filters.private)
 async def broadcast_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -770,9 +821,9 @@ async def broadcast_command(client: Client, message: Message):
 
 @app.on_message(filters.command("stats") & filters.private)
 async def stats_private_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if len(message.command) < 2 or message.command[1].lower() != "check":
         await send_and_auto_delete_reply(message, text="Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -797,9 +848,9 @@ async def stats_private_command(client: Client, message: Message):
 
 @app.on_message(filters.command("stats") & filters.group)
 async def stats_group_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if len(message.command) < 2 or message.command[1].lower() != "check":
         await send_and_auto_delete_reply(message, text="Umm, stats check karne ke liye theek se likho na! `/stats check` aise. 😊 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -822,15 +873,14 @@ async def stats_group_command(client: Client, message: Message):
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Group stats command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
 
 # --- Group Management Commands ---
 
 @app.on_message(filters.command("groups") & filters.private)
 async def list_groups_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -880,9 +930,9 @@ async def list_groups_command(client: Client, message: Message):
 
 @app.on_message(filters.command("leavegroup") & filters.private)
 async def leave_group_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. Tumhe permission nahi hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -922,9 +972,9 @@ async def leave_group_command(client: Client, message: Message):
 
 @app.on_message(filters.command("cleardata") & filters.private)
 async def clear_data_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="Sorry, darling! Yeh command sirf mere boss ke liye hai. 🤫 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -976,9 +1026,9 @@ async def clear_data_command(client: Client, message: Message):
 
 @app.on_message(filters.command("deletemessage") & filters.private)
 async def delete_specific_message_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -1010,9 +1060,9 @@ async def delete_specific_message_command(client: Client, message: Message):
 
 @app.on_message(filters.command("clearearning") & filters.private)
 async def clear_earning_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="Sorry darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -1027,9 +1077,9 @@ async def clear_earning_command(client: Client, message: Message):
 
 @app.on_message(filters.command("restart") & filters.private)
 async def restart_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="Sorry, darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -1043,9 +1093,9 @@ async def restart_command(client: Client, message: Message):
 # --- /chat on/off command ---
 @app.on_message(filters.command("chat") & filters.group)
 async def toggle_chat_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if not message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await send_and_auto_delete_reply(message, text="Yeh command sirf groups mein kaam karti hai, darling! 😉", parse_mode=ParseMode.MARKDOWN)
@@ -1090,9 +1140,9 @@ async def toggle_chat_command(client: Client, message: Message):
 
 @app.on_message(filters.command("linkdel") & filters.group)
 async def toggle_linkdel_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
         await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
@@ -1130,9 +1180,9 @@ async def toggle_linkdel_command(client: Client, message: Message):
 
 @app.on_message(filters.command("biolinkdel") & filters.group)
 async def toggle_biolinkdel_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
         await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
@@ -1170,9 +1220,9 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
 
 @app.on_message(filters.command("biolink") & filters.group)
 async def allow_biolink_user_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
         await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
@@ -1211,9 +1261,9 @@ async def allow_biolink_user_command(client: Client, message: Message):
 
 @app.on_message(filters.command("usernamedel") & filters.group)
 async def toggle_usernamedel_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
         await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
@@ -1223,7 +1273,7 @@ async def toggle_usernamedel_command(client: Client, message: Message):
         current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
         current_status = current_status_doc.get("usernamedel_enabled", False) if current_status_doc else False
         status_text = "चालू है (ON)" if current_status else "बंद है (OFF)"
-        await send_and_auto_delete_reply(message, text=f"मेरी '@' टैग पुलिस अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/usernamedel on` या `/usernamedel off` यूज़ करो. 🚨", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text=f"मेरी '@' टैग पुलिस अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/usernamedel on` या `/usernamedel off` यूज़ करो.🚨", parse_mode=ParseMode.MARKDOWN)
         return
 
     action = message.command[1].lower()
@@ -1251,9 +1301,9 @@ async def toggle_usernamedel_command(client: Client, message: Message):
 # --- NEW: /clearall command (Owner-Only, with confirmation) ---
 @app.on_message(filters.command("clearall") & filters.private)
 async def clear_all_dbs_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस के लिए है। 🚫", parse_mode=ParseMode.MARKDOWN)
@@ -1323,9 +1373,9 @@ async def handle_clearall_dbs_callback(client: Client, callback_query):
 # --- NEW: /clearmydata command ---
 @app.on_message(filters.command("clearmydata"))
 async def clear_my_data_command(client: Client, message: Message):
-    if is_on_cooldown(message.from_user.id):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_cooldown(message.from_user.id)
+    update_command_cooldown(message.from_user.id)
 
     target_user_id = None
     if len(message.command) > 1 and message.from_user.id == OWNER_ID:
@@ -1501,12 +1551,13 @@ async def handle_message_and_reply(client: Client, message: Message):
             logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling. (Code by @asbhaibsr)")
             return
 
-    # No cooldown for general messages, only for commands to prevent spam.
-    # if message.from_user and is_on_cooldown(message.from_user.id):
-    #     logger.debug(f"User {message.from_user.id} is on cooldown. Skipping message. (Cooldown by @asbhaibsr)")
-    #     return
-    # if message.from_user:
-    #     update_cooldown(message.from_user.id)
+    # Apply 5-second cooldown for general messages (not commands)
+    if message.from_user and not message.text.startswith('/'): # Only apply to non-command messages
+        user_id = message.from_user.id
+        if not await can_reply_to_user(user_id):
+            logger.info(f"User {user_id} is on message reply cooldown. Skipping message {message.id}.")
+            return # Skip processing and replying to this message
+        update_message_reply_cooldown(user_id) # Update cooldown after processing this message
 
     logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}). (Handle message by @asbhaibsr)")
 
@@ -1627,3 +1678,4 @@ if __name__ == "__main__":
     app.run()
 
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
+
