@@ -53,6 +53,12 @@ ASBHAI_USERNAME = "asbhaibsr"
 BOT_PHOTO_URL = "https://envs.sh/FU3.jpg"
 REPO_LINK = "https://github.com/asbhaibsr/Chatbot-asbhai.git"
 
+# Regex for common URL patterns including t.me and typical link formats
+# This regex is broad to catch various forms of links
+# NOTE: This is a global pattern now, used by contains_link and also implicitly for biolink checking.
+URL_PATTERN = re.compile(r"(?:https?://|www\.|t\.me/)[^\s/$.?#].[^\s]*", re.IGNORECASE)
+
+
 # --- MongoDB Setup ---
 try:
     client_messages = MongoClient(MONGO_URI_MESSAGES)
@@ -182,16 +188,13 @@ async def is_admin_or_owner(client: Client, chat_id: int, user_id: int):
         logger.error(f"Error checking admin status for user {user_id} in chat {chat_id}: {e}")
     return False
 
-# NEW: Function to check for links in message text (Improved Regex)
+# NEW: Function to check for links in message text (Uses global URL_PATTERN)
 def contains_link(text: str):
     if not text:
         return False
-    # Regex for common URL patterns including t.me and typical link formats
-    # This regex is broad to catch various forms of links
-    url_pattern = r"(?:https?://|www\.|t\.me/)[^\s/$.?#].[^\s]*"
-    return bool(re.search(url_pattern, text, re.IGNORECASE))
+    return bool(URL_PATTERN.search(text))
 
-# NEW: Function to check for @mentions in message text (Improved Regex)
+# NEW: Function to check for @mentions in message text
 def contains_mention(text: str):
     if not text:
         return False
@@ -542,8 +545,8 @@ async def callback_handler(client, callback_query):
             "  • `/broadcast <message>`: (Sirf Owner ke liye) Sabhi groups mein message bhejne ke liye.\n"
             "  • `/restart`: (Sirf Owner ke liye) Bot ko restart karne ke liye.\n"
             "  • `/linkdel on/off`: (Sirf Group Admins ke liye) Group mein **sabhi prakar ke links** delete/allow karne ke liye.\n"
-            "  • `/biolinkdel on/off`: (Sirf Group Admins ke liye) Group mein **`t.me` aur `http/https` links** wale messages ko delete/allow karne ke liye.\n"
-            "  • `/biolink <userid>`: (Sirf Group Admins ke liye) `biolinkdel` on hone par bhi kisi user ko `t.me` aur `http/https` links भेजने की permission dene ke liye.\n"
+            "  • `/biolinkdel on/off`: (Sirf Group Admins ke liye) Group mein **users ke bio mein `t.me` aur `http/https` links** wale messages ko delete/allow karne ke liye.\n" # UPDATED DESCRIPTION
+            "  • `/biolink <userid>`: (Sirf Group Admins ke liye) `biolinkdel` on hone par bhi kisi user ko **bio mein `t.me` aur `http/https` links** रखने की permission dene ke liye.\n" # UPDATED DESCRIPTION
             "  • `/usernamedel on/off`: (Sirf Group Admins ke liye) Group mein **'@' mentions** allow ya delete karne ke liye.\n\n"
             "**🔗 Mera Code (GitHub Repository):**\n"
             f"[**{REPO_LINK}**]({REPO_LINK})\n\n"
@@ -928,7 +931,7 @@ async def delete_specific_message_command(client: Client, message: Message):
             await message.reply_text(f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' wale message ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)")
             logger.info(f"Deleted message with content: '{search_query}'. (Code by @asbhaibsr)")
         else:
-            await message.reply_text("Aww, yeh message to mujhe mila hi nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)")
+            await message.reply_text("Aww, yeh message to mujhe mila ही nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)")
     else:
         await message.reply_text("Umm, mujhe tumhara yeh message to mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)")
 
@@ -1013,7 +1016,7 @@ async def toggle_chat_command(client: Client, message: Message):
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
-# --- NEW: Group Management Commands ---
+# --- NEW: Group Moderation Commands ---
 
 @app.on_message(filters.command("linkdel") & filters.group)
 async def toggle_linkdel_command(client: Client, message: Message):
@@ -1079,7 +1082,8 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
             {"$set": {"biolinkdel_enabled": True}},
             upsert=True
         )
-        await message.reply_text("हम्म... 😼 अब से जो भी **t.me या http/https लिंक** भेजेगा (अगर उसे `/biolink` से छूट नहीं मिली है), मैं उसका मैसेज चुपचाप हटा दूंगी! ग्रुप में कोई मस्ती नहीं! 🤫", quote=True)
+        # Modified message to clarify it checks USER BIO, not message content
+        await message.reply_text("हम्म... 😼 अब से जो भी **यूज़र अपनी बायो में `t.me` या `http/https` लिंक रखेगा**, मैं उसके **मैसेज को चुपचाप हटा दूंगी!** (अगर उसे `/biolink` से छूट नहीं मिली है). ग्रुप में कोई मस्ती नहीं! 🤫", quote=True)
         logger.info(f"Biolink deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
     elif action == "off":
         group_tracking_collection.update_one(
@@ -1087,7 +1091,7 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
             {"$set": {"biolinkdel_enabled": False}},
             upsert=True
         )
-        await message.reply_text("ओके डार्लिंग्स! 😇 अब मैं `t.me` और `http/https` लिंक्स को चेक करना बंद कर रही हूँ! सब फ्री-फ्री! 🎉", quote=True)
+        await message.reply_text("ओके डार्लिंग्स! 😇 अब मैं यूज़र्स की बायो में `t.me` और `http/https` लिंक्स को चेक करना बंद कर रही हूँ! सब फ्री-फ्री! 🎉", quote=True) # Modified message
         logger.info(f"Biolink deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
     else:
         await message.reply_text("उम्म... मुझे समझ नहीं आया! 😕 `/biolinkdel on` या `/biolinkdel off` यूज़ करो, प्लीज़! ✨", quote=True)
@@ -1116,7 +1120,7 @@ async def allow_biolink_user_command(client: Client, message: Message):
         try:
             target_user_id = int(message.command[2])
             biolink_exceptions_collection.delete_one({"_id": target_user_id})
-            await message.reply_text(f"ओके! ✨ यूज़र `{target_user_id}` को अब बायो-लिंक की छूट नहीं मिलेगी! बाय-बाय परमिशन! 👋", quote=True)
+            await message.reply_text(f"ओके! ✨ यूज़र `{target_user_id}` को अब बायो में लिंक रखने की छूट नहीं मिलेगी! बाय-बाय परमिशन! 👋", quote=True) # Modified message
             logger.info(f"Removed user {target_user_id} from biolink exceptions in group {message.chat.id}.")
         except ValueError:
             await message.reply_text("उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", quote=True)
@@ -1128,7 +1132,7 @@ async def allow_biolink_user_command(client: Client, message: Message):
                 {"$set": {"allowed_by_admin": True, "added_on": datetime.now(), "credit": "by @asbhaibsr"}},
                 upsert=True
             )
-            await message.reply_text(f"याय! 🎉 मैंने यूज़र `{target_user_id}` को स्पेशल परमिशन दे दी है! अब ये `t.me` या `http/https` लिंक्स भेजकर भी मैसेज कर पाएंगे! क्यूंकि एडमिन ने बोला, तो बोला! 👑", quote=True)
+            await message.reply_text(f"याय! 🎉 मैंने यूज़र `{target_user_id}` को स्पेशल परमिशन दे दी है! अब ये **अपनी बायो में `t.me` या `http/https` लिंक्स** रख पाएंगे और उनके मैसेज डिलीट नहीं होंगे! क्यूंकि एडमिन ने बोला, तो बोला! 👑", quote=True) # Modified message
             logger.info(f"Added user {target_user_id} to biolink exceptions in group {message.chat.id}.")
         except ValueError:
             await message.reply_text("उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", quote=True)
@@ -1290,13 +1294,15 @@ async def left_member_handler(client: Client, message: Message):
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
-@app.on_message(filters.text | filters.sticker)
+@app.on_message(filters.text | filters.sticker | filters.photo | filters.video | filters.document) # Added more filters for comprehensive handling
 async def handle_message_and_reply(client: Client, message: Message):
     if message.from_user and message.from_user.is_bot:
         logger.debug(f"Skipping message from bot user: {message.from_user.id}. (Handle message by @asbhaibsr)")
         return
 
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+    is_group_chat = message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]
+
+    if is_group_chat:
         group_status = group_tracking_collection.find_one({"_id": message.chat.id})
         if group_status and not group_status.get("bot_enabled", True):
             logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling. (Code by @asbhaibsr)")
@@ -1310,14 +1316,14 @@ async def handle_message_and_reply(client: Client, message: Message):
 
     logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}). (Handle message by @asbhaibsr)")
 
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+    if is_group_chat:
         logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.")
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
     # --- NEW: Check for /linkdel, /biolinkdel, /usernamedel conditions ---
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+    if is_group_chat:
         current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
         user_id = message.from_user.id if message.from_user else None
 
@@ -1326,7 +1332,7 @@ async def handle_message_and_reply(client: Client, message: Message):
         if user_id:
             is_sender_admin = await is_admin_or_owner(client, message.chat.id, user_id)
 
-        # Link Deletion Check
+        # 1. Link Deletion Check (any link in message content)
         if current_group_settings and current_group_settings.get("linkdel_enabled", False) and message.text:
             if contains_link(message.text) and not is_sender_admin:
                 try:
@@ -1339,30 +1345,37 @@ async def handle_message_and_reply(client: Client, message: Message):
             elif contains_link(message.text) and is_sender_admin:
                 logger.info(f"Admin's link message {message.id} was not deleted in chat {message.chat.id}.")
 
-        # Biolink Deletion Check (Updated Logic)
-        # This now targets t.me and general http/https links directly within the message content
-        if current_group_settings and current_group_settings.get("biolinkdel_enabled", False) and message.text and user_id:
-            is_biolink_exception = biolink_exceptions_collection.find_one({"_id": user_id})
+        # 2. Biolink Deletion Check (links in user's BIO)
+        if current_group_settings and current_group_settings.get("biolinkdel_enabled", False) and user_id:
+            try:
+                # Fetch user's chat object to access their bio
+                user_chat_obj = await client.get_chat(user_id)
+                user_bio = user_chat_obj.bio or "" # Get bio, default to empty string if not set
 
-            if not is_sender_admin and not is_biolink_exception: # If user is not admin AND not in exception list
-                # Check for t.me links or general http/https links in the message text
-                if contains_link(message.text) and ("t.me" in message.text or "http" in message.text or "https" in message.text):
-                    try:
-                        await message.delete()
-                        await message.reply_text(
-                            "अरे बाबा रे! 😲 आपने `t.me` या `http/https` लिंक भेजा! इसीलिए आपका मैसेज गायब हो गया! 👻\n"
-                            "अगर आपको यह अनुमति चाहिए, तो कृपया एडमिन से संपर्क करें और उन्हें `/biolink आपका_यूजरआईडी` कमांड देने को कहें।",
-                            quote=True
-                        )
-                        logger.info(f"Deleted t.me/http/https link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                        return # Stop further processing as message is deleted
-                    except Exception as e:
-                        logger.error(f"Error deleting t.me/http/https link message {message.id}: {e}")
-            elif (is_sender_admin or is_biolink_exception) and contains_link(message.text) and ("t.me" in message.text or "http" in message.text or "https" in message.text):
-                logger.info(f"Admin's or excepted user's t.me/http/https link message {message.id} was not deleted in chat {message.chat.id}.")
+                is_biolink_exception = biolink_exceptions_collection.find_one({"_id": user_id})
 
+                if not is_sender_admin and not is_biolink_exception: # If user is not admin AND not in exception list
+                    if URL_PATTERN.search(user_bio): # Check if user's bio contains any link
+                        try:
+                            await message.delete()
+                            await message.reply_text(
+                                "अरे बाबा रे! 😲 आपकी **बायो में लिंक है!** इसीलिए आपका मैसेज गायब हो गया! 👻\n"
+                                "कृपया अपनी बायो से लिंक हटाएँ। यदि आपको यह अनुमति चाहिए, तो कृपया एडमिन से संपर्क करें और उन्हें `/biolink आपका_यूजरआईडी` कमांड देने को कहें।",
+                                quote=True
+                            )
+                            logger.info(f"Deleted message {message.id} from user {user_id} due to link in bio in chat {message.chat.id}.")
+                            return # Stop further processing as message is deleted
+                        except Exception as e:
+                            logger.error(f"Error deleting message {message.id} due to bio link: {e}")
+                elif (is_sender_admin or is_biolink_exception) and URL_PATTERN.search(user_bio):
+                    logger.info(f"Admin's or excepted user's bio link was ignored for message {message.id} in chat {message.chat.id}.")
 
-        # Username Deletion Check
+            except Exception as e:
+                logger.error(f"Error checking user bio for user {user_id} in chat {message.chat.id}: {e}")
+                # Don't return here; just log the error and continue, as inability to check bio
+                # should not prevent the bot from processing other message types.
+
+        # 3. Username Deletion Check (@mentions in message content)
         if current_group_settings and current_group_settings.get("usernamedel_enabled", False) and message.text:
             if contains_mention(message.text) and not is_sender_admin:
                 try:
