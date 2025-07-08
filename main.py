@@ -15,7 +15,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
-from pyrogram.enums import ChatType, ChatMemberStatus 
+from pyrogram.enums import ChatType, ChatMemberStatus
 
 from pymongo import MongoClient
 from datetime import datetime, timedelta
@@ -24,7 +24,7 @@ import re
 import random
 import sys
 
-import pytz 
+import pytz
 
 # Flask imports
 from flask import Flask, request, jsonify
@@ -38,9 +38,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 MONGO_URI_MESSAGES = os.getenv("MONGO_URI_MESSAGES")
 MONGO_URI_BUTTONS = os.getenv("MONGO_URI_BUTTONS")
-MONGO_URI_TRACKING = os.getenv("MONGO_URI_TRACKING") 
+MONGO_URI_TRACKING = os.getenv("MONGO_URI_TRACKING")
 
-OWNER_ID = os.getenv("OWNER_ID") 
+OWNER_ID = os.getenv("OWNER_ID")
 
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
@@ -49,9 +49,9 @@ API_HASH = os.getenv("API_HASH")
 MAX_MESSAGES_THRESHOLD = 100000
 PRUNE_PERCENTAGE = 0.30
 UPDATE_CHANNEL_USERNAME = "asbhai_bsr"
-ASBHAI_USERNAME = "asbhaibsr" 
-BOT_PHOTO_URL = "https://envs.sh/FU3.jpg" 
-REPO_LINK = "https://github.com/asbhaibsr/Chatbot-asbhai.git" 
+ASBHAI_USERNAME = "asbhaibsr"
+BOT_PHOTO_URL = "https://envs.sh/FU3.jpg"
+REPO_LINK = "https://github.com/asbhaibsr/Chatbot-asbhai.git"
 
 # --- MongoDB Setup ---
 try:
@@ -59,12 +59,12 @@ try:
     db_messages = client_messages.bot_database_messages
     messages_collection = db_messages.messages
     logger.info("MongoDB (Messages) connection successful. Credit: @asbhaibsr")
-    
+
     client_buttons = MongoClient(MONGO_URI_BUTTONS)
     db_buttons = client_buttons.bot_button_data
     buttons_collection = db_buttons.button_interactions
     logger.info("MongoDB (Buttons) connection successful. Credit: @asbhaibsr")
-    
+
     client_tracking = MongoClient(MONGO_URI_TRACKING)
     db_tracking = client_tracking.bot_tracking_data
     group_tracking_collection = db_tracking.groups_data
@@ -105,14 +105,14 @@ except Exception as e:
 
 # --- Pyrogram Client ---
 app = Client(
-    "self_learning_bot", 
+    "self_learning_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
 
 # --- Flask App Setup ---
-flask_app = Flask(__name__) 
+flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
@@ -126,7 +126,7 @@ def run_flask_app():
     flask_app.run(host='0.0.0.0', port=os.environ.get('PORT', 8000), debug=False)
 
 # --- Cooldown dictionary ---
-user_cooldowns = {} 
+user_cooldowns = {}
 COOLDOWN_TIME = 3 # seconds
 
 def is_on_cooldown(user_id):
@@ -172,7 +172,7 @@ async def is_admin_or_owner(client: Client, chat_id: int, user_id: int):
     # Check if the user is the bot owner
     if str(user_id) == str(OWNER_ID):
         return True
-    
+
     # Check if the user is an admin in the group
     try:
         member = await client.get_chat_member(chat_id, user_id)
@@ -182,29 +182,16 @@ async def is_admin_or_owner(client: Client, chat_id: int, user_id: int):
         logger.error(f"Error checking admin status for user {user_id} in chat {chat_id}: {e}")
     return False
 
-# NEW: Function to check user bio for links (requires fetching user profile)
-async def has_bio_link(client: Client, user_id: int):
-    try:
-        user_info = await client.get_users(user_id)
-        if user_info and user_info.bio:
-            # Simple regex to detect common link patterns in bio
-            link_pattern = r"(?:https?://|www\.)\S+"
-            if re.search(link_pattern, user_info.bio, re.IGNORECASE):
-                return True
-    except Exception as e:
-        # This can happen if user's privacy settings prevent fetching bio
-        logger.warning(f"Could not fetch bio for user {user_id}: {e}")
-    return False
-
-# NEW: Function to check for links in message text
+# NEW: Function to check for links in message text (Improved Regex)
 def contains_link(text: str):
     if not text:
         return False
-    # Regex for common URL patterns
-    url_pattern = r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
-    return bool(re.search(url_pattern, text))
+    # Regex for common URL patterns including t.me and typical link formats
+    # Updated to be more comprehensive for various link types
+    url_pattern = r"(?:https?://|www\.)[^\s/$.?#].[^\s]*|t\.me/[\w/]+"
+    return bool(re.search(url_pattern, text, re.IGNORECASE))
 
-# NEW: Function to check for @mentions in message text
+# NEW: Function to check for @mentions in message text (Improved Regex)
 def contains_mention(text: str):
     if not text:
         return False
@@ -229,8 +216,8 @@ async def store_message(message: Message):
             "chat_type": message.chat.type.name,
             "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
             "timestamp": datetime.now(),
-            "is_bot_observed_pair": False, 
-            "credits": "Code by @asbhaibsr, Support: @aschat_group" 
+            "is_bot_observed_pair": False,
+            "credits": "Code by @asbhaibsr, Support: @aschat_group"
         }
 
         if message.text:
@@ -252,14 +239,14 @@ async def store_message(message: Message):
             message_data["is_reply"] = True
             message_data["replied_to_message_id"] = message.reply_to_message.id
             message_data["replied_to_user_id"] = message.reply_to_message.from_user.id if message.reply_to_message.from_user else None
-            
+
             # Extract content of the message being replied to
             replied_content = None
             if message.reply_to_message.text:
                 replied_content = message.reply_to_message.text
             elif message.reply_to_message.sticker:
                 replied_content = message.reply_to_message.sticker.emoji if message.reply_to_message.emoji else ""
-            
+
             message_data["replied_to_content"] = replied_content
 
             # Check if the reply was to the bot itself
@@ -274,30 +261,30 @@ async def store_message(message: Message):
                     logger.debug(f"Marked bot's original message {message.reply_to_message.id} as observed pair. (System by @asbhaibsr)")
 
         messages_collection.insert_one(message_data)
-        logger.info(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)") 
-        
-        logger.debug(f"DEBUG: Checking earning condition in store_message: chat_type={message.chat.type.name}, is_from_user={bool(message.from_user)}, is_not_bot={not message.from_user.is_bot if message.from_user else 'N/A'}") 
-        
+        logger.info(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
+
+        logger.debug(f"DEBUG: Checking earning condition in store_message: chat_type={message.chat.type.name}, is_from_user={bool(message.from_user)}, is_not_bot={not message.from_user.is_bot if message.from_user else 'N/A'}")
+
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and message.from_user and not message.from_user.is_bot:
             user_id_to_track = message.from_user.id
             username_to_track = message.from_user.username
             first_name_to_track = message.from_user.first_name
             current_group_id = message.chat.id
             current_group_title = message.chat.title
-            current_group_username = message.chat.username 
+            current_group_username = message.chat.username
 
-            logger.info(f"DEBUG: Attempting to update earning count for user {user_id_to_track} ({first_name_to_track}) in chat {message.chat.id}.") 
+            logger.info(f"DEBUG: Attempting to update earning count for user {user_id_to_track} ({first_name_to_track}) in chat {message.chat.id}.")
 
             try:
                 earning_tracking_collection.update_one(
                     {"_id": user_id_to_track},
                     {"$inc": {"group_message_count": 1},
-                     "$set": {"username": username_to_track, 
-                              "first_name": first_name_to_track, 
+                     "$set": {"username": username_to_track,
+                              "first_name": first_name_to_track,
                               "last_active_group_message": datetime.now(),
-                              "last_active_group_id": current_group_id, 
-                              "last_active_group_title": current_group_title, 
-                              "last_active_group_username": current_group_username 
+                              "last_active_group_id": current_group_id,
+                              "last_active_group_title": current_group_title,
+                              "last_active_group_username": current_group_username
                               },
                      "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
                     upsert=True
@@ -335,11 +322,11 @@ async def generate_reply(message: Message):
         return
 
     potential_replies = []
-    
+
     observed_replies_cursor = messages_collection.find({
-        "is_bot_observed_pair": True, 
+        "is_bot_observed_pair": True,
         "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"},
-        "user_id": app.me.id 
+        "user_id": app.me.id
     })
     for doc in observed_replies_cursor:
         potential_replies.append(doc)
@@ -352,7 +339,7 @@ async def generate_reply(message: Message):
     logger.info(f"No direct observed reply for: '{query_content}'. Falling back to keyword search. (Logic by @asbhaibsr)")
 
     keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
-    
+
     general_replies_cursor = messages_collection.find({
         "type": {"$in": ["text", "sticker"]},
         "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
@@ -366,17 +353,17 @@ async def generate_reply(message: Message):
         chosen_reply = random.choice(potential_replies)
         logger.info(f"Keyword-based reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}. (Logic by @asbhaibsr)")
         return chosen_reply
-    
+
     logger.info(f"No suitable reply found for: '{query_content}'. (Logic by @asbhaibsr)")
     return None
 
 # --- Tracking Functions ---
-async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None): 
+async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None):
     try:
         group_tracking_collection.update_one(
             {"_id": chat_id},
-            {"$set": {"title": chat_title, "username": chat_username, "last_updated": datetime.now()}, 
-             "$setOnInsert": {"added_on": datetime.now(), "member_count": 0, "bot_enabled": True, "credit": "by @asbhaibsr"}}, 
+            {"$set": {"title": chat_title, "username": chat_username, "last_updated": datetime.now()},
+             "$setOnInsert": {"added_on": datetime.now(), "member_count": 0, "bot_enabled": True, "credit": "by @asbhaibsr"}},
             upsert=True
         )
         logger.info(f"Group info updated/inserted successfully for {chat_title} ({chat_id}). (Tracking by @asbhaibsr)")
@@ -389,7 +376,7 @@ async def update_user_info(user_id: int, username: str, first_name: str):
         user_tracking_collection.update_one(
             {"_id": user_id},
             {"$set": {"username": username, "first_name": first_name, "last_active": datetime.now()},
-             "$setOnInsert": {"joined_on": datetime.now(), "credit": "by @asbhaibsr"}}, 
+             "$setOnInsert": {"joined_on": datetime.now(), "credit": "by @asbhaibsr"}},
             upsert=True
         )
         logger.info(f"User info updated/inserted successfully for {first_name} ({user_id}). (Tracking by @asbhaibsr)")
@@ -399,8 +386,8 @@ async def update_user_info(user_id: int, username: str, first_name: str):
 # --- Earning System Functions ---
 async def get_top_earning_users():
     pipeline = [
-        {"$match": {"group_message_count": {"$gt": 0}}}, 
-        {"$sort": {"group_message_count": -1}}, 
+        {"$match": {"group_message_count": {"$gt": 0}}},
+        {"$sort": {"group_message_count": -1}},
     ]
 
     top_users_data = list(earning_tracking_collection.aggregate(pipeline))
@@ -413,25 +400,25 @@ async def get_top_earning_users():
             "first_name": user_data.get("first_name", "Unknown User"),
             "username": user_data.get("username"),
             "message_count": user_data["group_message_count"],
-            "last_active_group_id": user_data.get("last_active_group_id"), 
-            "last_active_group_title": user_data.get("last_active_group_title"), 
-            "last_active_group_username": user_data.get("last_active_group_username") 
+            "last_active_group_id": user_data.get("last_active_group_id"),
+            "last_active_group_title": user_data.get("last_active_group_title"),
+            "last_active_group_username": user_data.get("last_active_group_username")
         })
     return top_users_details
 
 async def reset_monthly_earnings_manual():
     logger.info("Manually resetting monthly earnings...")
-    now = datetime.now(pytz.timezone('Asia/Kolkata')) 
+    now = datetime.now(pytz.timezone('Asia/Kolkata'))
 
     try:
         earning_tracking_collection.update_many(
-            {}, 
+            {},
             {"$set": {"group_message_count": 0}}
         )
         logger.info("Monthly earning message counts reset successfully by manual command. (Earning system by @asbhaibsr)")
 
         reset_status_collection.update_one(
-            {"_id": "last_manual_reset_date"}, 
+            {"_id": "last_manual_reset_date"},
             {"$set": {"last_reset_timestamp": now}},
             upsert=True
         )
@@ -449,9 +436,9 @@ async def start_private_command(client: Client, message: Message):
     update_cooldown(message.from_user.id)
 
     user_name = message.from_user.first_name if message.from_user else "Dost"
-    
+
     welcome_message = f"Hello **{user_name}!** 👋 Main aa gayi hoon. Chalo, baatein karte hain! 😊"
-    
+
     keyboard = InlineKeyboardMarkup(
         [
             [
@@ -462,8 +449,8 @@ async def start_private_command(client: Client, message: Message):
                 InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
             ],
             [
-                InlineKeyboardButton("ℹ️ Help", callback_data="show_help_menu"), 
-                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") 
+                InlineKeyboardButton("ℹ️ Help", callback_data="show_help_menu"),
+                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard")
             ]
         ]
     )
@@ -485,7 +472,7 @@ async def start_group_command(client: Client, message: Message):
     update_cooldown(message.from_user.id)
 
     user_name = message.from_user.first_name if message.from_user else "Dost"
-    
+
     welcome_message = f"Hello **{user_name}!** 👋 Main aa gayi hoon. Group ki baatein sunne ko taiyar hoon! 😊"
 
     keyboard = InlineKeyboardMarkup(
@@ -495,8 +482,8 @@ async def start_group_command(client: Client, message: Message):
                 InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
             ],
             [
-                InlineKeyboardButton("ℹ️ Help", callback_data="show_help_menu"), 
-                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard") 
+                InlineKeyboardButton("ℹ️ Help", callback_data="show_help_menu"),
+                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard")
             ]
         ]
     )
@@ -507,9 +494,9 @@ async def start_group_command(client: Client, message: Message):
         reply_markup=keyboard
     )
     await store_message(message)
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: 
-        logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.") 
-        await update_group_info(message.chat.id, message.chat.title, message.chat.username) 
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.")
+        await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Group start command processed in chat {message.chat.id}. (Code by @asbhaibsr)")
@@ -517,7 +504,7 @@ async def start_group_command(client: Client, message: Message):
 
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
-    if callback_query.data == "buy_git_repo": 
+    if callback_query.data == "buy_git_repo":
         await callback_query.message.reply_text(
             f"🤩 Agar aapko mere jaisa khud ka bot banwana hai, toh aapko ₹500 dene honge. Iske liye **@{ASBHAI_USERNAME}** se contact karein aur unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group",
             quote=True
@@ -531,10 +518,10 @@ async def callback_handler(client, callback_query):
             "timestamp": datetime.now(),
             "credit": "by @asbhaibsr"
         })
-    elif callback_query.data == "show_earning_leaderboard": 
+    elif callback_query.data == "show_earning_leaderboard":
         await top_users_command(client, callback_query.message)
         await callback_query.answer("Earning Leaderboard dikha raha hoon! 💰", show_alert=False)
-    elif callback_query.data == "show_help_menu": 
+    elif callback_query.data == "show_help_menu":
         help_text = (
             "💡 **Main Kaise Kaam Karti Hoon?**\n\n"
             "Main ek self-learning bot hoon jo conversations se seekhti hai. Aap groups mein ya mujhse private mein baat kar sakte hain, aur main aapke messages ko yaad rakhti hoon. Jab koi user similar baat karta hai, toh main usse seekhe hue reply deti hoon.\n\n"
@@ -554,10 +541,10 @@ async def callback_handler(client, callback_query):
             "  • `/leavegroup <group_id>`: (Sirf Owner ke liye) Kisi group ko chhodne ke liye.\n"
             "  • `/broadcast <message>`: (Sirf Owner ke liye) Sabhi groups mein message bhejne ke liye.\n"
             "  • `/restart`: (Sirf Owner ke liye) Bot ko restart karne ke liye.\n"
-            "  • `/linkdel on/off`: (Sirf Group Admins ke liye) Group mein links allow ya delete karne ke liye.\n"
-            "  • `/biolinkdel on/off`: (Sirf Group Admins ke liye) Group mein biolink wale users ke messages ko delete/allow karne ke liye.\n"
-            "  • `/biolink <userid>`: (Sirf Group Admins ke liye) Biolinkdel on hone par bhi kisi user ko message karne ki permission dene ke liye.\n"
-            "  • `/usernamedel on/off`: (Sirf Group Admins ke liye) Group mein '@' mentions allow ya delete karne ke liye.\n\n"
+            "  • `/linkdel on/off`: (Sirf Group Admins ke liye) Group mein **sabhi prakar ke links** delete/allow karne ke liye.\n"
+            "  • `/biolinkdel on/off`: (Sirf Group Admins ke liye) Group mein **forwarded channel links aur @usernames** wale messages ko delete/allow karne ke liye.\n"
+            "  • `/biolink <userid>`: (Sirf Group Admins ke liye) `biolinkdel` on hone par bhi kisi user ko message karne ki permission dene ke liye.\n"
+            "  • `/usernamedel on/off`: (Sirf Group Admins ke liye) Group mein **'@' mentions** allow ya delete karne ke liye.\n\n"
             "**🔗 Mera Code (GitHub Repository):**\n"
             f"[**{REPO_LINK}**]({REPO_LINK})\n\n"
             "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
@@ -575,7 +562,7 @@ async def callback_handler(client, callback_query):
 
     logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}. (Code by @asbhaibsr)")
 
-@app.on_message(filters.command("topusers") & (filters.private | filters.group)) 
+@app.on_message(filters.command("topusers") & (filters.private | filters.group))
 async def top_users_command(client: Client, message: Message):
     if is_on_cooldown(message.from_user.id):
         return
@@ -591,9 +578,9 @@ async def top_users_command(client: Client, message: Message):
         "💰 **Top 3 Active Users (This Month)** 💰\n\n"
     ]
 
-    prizes = {1: "₹30", 2: "₹15", 3: "₹5"} 
+    prizes = {1: "₹30", 2: "₹15", 3: "₹5"}
 
-    for i, user in enumerate(top_users[:3]): 
+    for i, user in enumerate(top_users[:3]):
         rank = i + 1
         user_name = user.get('first_name', 'Unknown User')
         username_str = f"@{user.get('username')}" if user.get('username') else "N/A"
@@ -607,20 +594,28 @@ async def top_users_command(client: Client, message: Message):
 
         if last_group_id:
             try:
+                # Try to get chat object for a more accurate display, especially for private chats
                 chat_obj = await client.get_chat(last_group_id)
-                if chat_obj and chat_obj.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+                if chat_obj and chat_obj.type == ChatType.PRIVATE:
+                    # If it's a private chat, provide a direct link to the user
+                    group_info = f"   • Last Active in: **[Private Chat with User](tg://user?id={user.get('user_id')})**\n"
+                elif chat_obj and chat_obj.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
                     group_display_name = chat_obj.title if chat_obj.title else last_group_title
                     group_username_display = f" (@{chat_obj.username})" if chat_obj.username else ""
-                    group_info = f"   • Last Active in: **{group_display_name}**{group_username_display}\n"
-                elif chat_obj and chat_obj.type == ChatType.PRIVATE:
-                    group_info = "   • Last Active in: **Private Chat** (N/A)\n"
+                    # Provide a direct link to the group if username is available
+                    group_link = f"https://t.me/{chat_obj.username}" if chat_obj.username else "N/A"
+                    group_info = f"   • Last Active in: **[{group_display_name}]({group_link})**{group_username_display}\n"
                 else:
+                    # Fallback if chat_obj not found or type is unexpected, but we have stored data
                     group_username_display = f" (@{last_group_username})" if last_group_username else ""
-                    group_info = f"   • Last Active in: **{last_group_title}**{group_username_display}\n"
+                    group_link = f"https://t.me/{last_group_username}" if last_group_username else "N/A"
+                    group_info = f"   • Last Active in: **[{last_group_title}]({group_link})**{group_username_display}\n"
             except Exception as e:
                 logger.warning(f"Could not fetch chat info for group ID {last_group_id} for leaderboard: {e}")
+                # Fallback if API call fails
                 group_username_display = f" (@{last_group_username})" if last_group_username else ""
-                group_info = f"   • Last Active in: **{last_group_title}**{group_username_display}\n"
+                group_link = f"https://t.me/{last_group_username}" if last_group_username else "N/A"
+                group_info = f"   • Last Active in: **[{last_group_title}]({group_link})**{group_username_display}\n"
         else:
             group_info = "   • Last Active Group: **N/A** (Private Chat/No Group Activity)\n"
 
@@ -629,28 +624,28 @@ async def top_users_command(client: Client, message: Message):
             f"**Rank {rank}:** {user_name} ({username_str})\n"
             f"   • Total Messages: **{message_count}**\n"
             f"   • Potential Earning: **{prize_str}**\n"
-            f"{group_info}" 
+            f"{group_info}"
         )
-    
+
     earning_messages.append(
         "\n**Earning Rules:**\n"
         "• Earning will be based solely on **conversation (messages) within group chats.**\n"
         "• **Spamming or sending a high volume of messages in quick succession will not be counted.** Only genuine, relevant conversation will be considered.\n"
         "• Please ensure your conversations are **meaningful and engaging.**\n"
-        "• This leaderboard can be **reset manually by the owner using /clearearning command.**\n\n" 
+        "• This leaderboard can be **reset manually by the owner using /clearearning command.**\n\n"
         "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
 
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", url=f"https://t.me/{ASBHAI_USERNAME}") 
+                InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", url=f"https://t.me/{ASBHAI_USERNAME}")
             ]
         ]
     )
 
-    await message.reply_text("\n".join(earning_messages), reply_markup=keyboard, quote=True)
-    await store_message(message) 
+    await message.reply_text("\n".join(earning_messages), reply_markup=keyboard, quote=True, disable_web_page_preview=True) # Added disable_web_page_preview
+    await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Top users command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
@@ -670,28 +665,28 @@ async def broadcast_command(client: Client, message: Message):
         return
 
     broadcast_text = " ".join(message.command[1:])
-    
+
     group_chat_ids = group_tracking_collection.distinct("_id")
     private_chat_ids = user_tracking_collection.distinct("_id")
-    
-    all_target_ids = list(set(group_chat_ids + private_chat_ids)) 
-    
+
+    all_target_ids = list(set(group_chat_ids + private_chat_ids))
+
     sent_count = 0
     failed_count = 0
     logger.info(f"Starting broadcast to {len(all_target_ids)} chats (groups and users). (Broadcast by @asbhaibsr)")
-    
+
     for chat_id in all_target_ids:
         try:
             if chat_id == message.chat.id and message.chat.type == ChatType.PRIVATE:
-                continue 
-            
+                continue
+
             await client.send_message(chat_id, broadcast_text)
             sent_count += 1
-            await asyncio.sleep(0.1) 
+            await asyncio.sleep(0.1)
         except Exception as e:
             logger.error(f"Failed to send broadcast to chat {chat_id}: {e}. (Broadcast by @asbhaibsr)")
             failed_count += 1
-    
+
     await message.reply_text(f"Broadcast ho gaya, darling! ✨ **{sent_count}** chats tak pahunchi, aur **{failed_count}** tak nahi. Koi nahi, next time! 😉 (System by @asbhaibsr)")
     await store_message(message)
     logger.info(f"Broadcast command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
@@ -707,7 +702,7 @@ async def stats_private_command(client: Client, message: Message):
         return
 
     total_messages = messages_collection.count_documents({})
-    unique_group_ids = group_tracking_collection.count_documents({}) 
+    unique_group_ids = group_tracking_collection.count_documents({})
     num_users = user_tracking_collection.count_documents({})
 
     stats_text = (
@@ -746,8 +741,8 @@ async def stats_group_command(client: Client, message: Message):
     )
     await message.reply_text(stats_text)
     await store_message(message)
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: 
-        await update_group_info(message.chat.id, message.chat.title, message.chat.username) 
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Group stats command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
@@ -773,26 +768,40 @@ async def list_groups_command(client: Client, message: Message):
     for i, group in enumerate(groups):
         title = group.get("title", "Unknown Group")
         group_id = group.get("_id")
-        group_username = group.get("username", "N/A") 
+        group_username = group.get("username") # Get username directly from DB
         added_on = group.get("added_on", "N/A").strftime("%Y-%m-%d %H:%M") if isinstance(group.get("added_on"), datetime) else "N/A"
-        
+
         member_count = "N/A"
+        group_link_display = "" # Default empty
         try:
             chat_obj = await client.get_chat(group_id)
             member_count = await client.get_chat_members_count(group_id)
+            if chat_obj.username: # If a public username exists, create a direct link
+                group_link_display = f" (@[{chat_obj.username}](https://t.me/{chat_obj.username}))"
+            else: # If no public username, try to get a private invite link (might fail if bot can't create one)
+                try:
+                    invite_link = await client.export_chat_invite_link(group_id)
+                    group_link_display = f" ([Invite Link]({invite_link}))"
+                except Exception as e:
+                    logger.warning(f"Could not get invite link for private group {group_id}: {e}")
+                    group_link_display = " (Private Group)" # Fallback for private groups
         except Exception as e:
-            logger.warning(f"Could not fetch member count for group {group_id}: {e}")
+            logger.warning(f"Could not fetch chat info for group {group_id}: {e}")
+            group_link_display = " (Info N/A)" # Fallback if chat object can't be fetched
 
-        username_display = f" (@{group_username})" if group_username != "N/A" else ""
-        
+        # Prioritize the actual username if available in DB, otherwise use fetched one, if available
+        display_username = f"@{group_username}" if group_username else "N/A"
+        # If the group has a username (public), use it in the title link
+        group_title_link = f"[{title}](https://t.me/{group_username})" if group_username else title
+
         group_list_text += (
-            f"{i+1}. **{title}**{username_display} (`{group_id}`)\n"
+            f"{i+1}. **{group_title_link}** (`{group_id}`){group_link_display}\n"
             f"   • Joined: {added_on}\n"
-            f"   • Members: {member_count}\n" 
+            f"   • Members: {member_count}\n"
         )
-        
+
     group_list_text += "\n_Yeh data tracking database se hai, bilkul secret!_ 🤫\n**Code & System By:** @asbhaibsr"
-    await message.reply_text(group_list_text)
+    await message.reply_text(group_list_text, disable_web_page_preview=True) # Disable preview for links
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Groups list command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
@@ -818,9 +827,9 @@ async def leave_group_command(client: Client, message: Message):
             return
 
         group_id = int(group_id_str)
-        
+
         await client.leave_chat(group_id)
-        
+
         group_tracking_collection.delete_one({"_id": group_id})
         messages_collection.delete_many({"chat_id": group_id})
         logger.info(f"Considered cleaning earning data for users from left group {group_id}. (Code by @asbhaibsr)")
@@ -833,7 +842,7 @@ async def leave_group_command(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"Group se bahar nikalte samay galti ho gayi: {e}. Oh no! 😢 (Code by @asbhaibsr)")
         logger.error(f"Error leaving group {group_id_str}: {e}. (Code by @asbhaibsr)")
-    
+
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -889,7 +898,7 @@ async def clear_data_command(client: Client, message: Message):
         logger.info(f"Cleared {delete_result.deleted_count} messages based on {percentage}% request. (Code by @asbhaibsr)")
     else:
         await message.reply_text("Umm, kuch delete karne ke liye mila hi nahi. Lagta hai tumne pehle hi sab clean kar diya hai! 🤷‍♀️ (Code by @asbhaibsr)")
-    
+
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -908,7 +917,7 @@ async def delete_specific_message_command(client: Client, message: Message):
         return
 
     search_query = " ".join(message.command[1:])
-    
+
     message_to_delete = messages_collection.find_one({"chat_id": message.chat.id, "content": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
 
     if not message_to_delete:
@@ -923,7 +932,7 @@ async def delete_specific_message_command(client: Client, message: Message):
             await message.reply_text("Aww, yeh message to mujhe mila hi nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)")
     else:
         await message.reply_text("Umm, mujhe tumhara yeh message to mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)")
-    
+
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -940,7 +949,7 @@ async def clear_earning_command(client: Client, message: Message):
     await reset_monthly_earnings_manual()
     await message.reply_text("💰 **Earning data successfully cleared!** Ab sab phir se zero se shuru karenge! 😉 (Code by @asbhaibsr)")
     logger.info(f"Owner {message.from_user.id} manually triggered earning data reset. (Code by @asbhaibsr)")
-    
+
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -956,8 +965,8 @@ async def restart_command(client: Client, message: Message):
 
     await message.reply_text("Okay, darling! Main abhi ek chhota sa nap le rahi hoon aur phir wapas aa jaungi, bilkul fresh aur energetic! Thoda wait karna, theek hai? ✨ (System by @asbhaibsr)")
     logger.info("Bot is restarting... (System by @asbhaibsr)")
-    await asyncio.sleep(0.5) 
-    os.execl(sys.executable, sys.executable, *sys.argv) 
+    await asyncio.sleep(0.5)
+    os.execl(sys.executable, sys.executable, *sys.argv)
 
 # --- /chat on/off command ---
 @app.on_message(filters.command("chat") & filters.group)
@@ -1000,7 +1009,7 @@ async def toggle_chat_command(client: Client, message: Message):
         logger.info(f"Bot disabled in group {message.chat.id} by admin {message.from_user.id}. (Code by @asbhaibsr)")
     else:
         await message.reply_text("Galat command, darling! `/chat on` ya `/chat off` use karo. 😉")
-    
+
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -1043,7 +1052,7 @@ async def toggle_linkdel_command(client: Client, message: Message):
         logger.info(f"Link deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
     else:
         await message.reply_text("उम्म... मुझे समझ नहीं आया! 😕 `/linkdel on` या `/linkdel off` यूज़ करो, प्लीज़! ✨", quote=True)
-    
+
     await store_message(message)
 
 
@@ -1061,7 +1070,7 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
         current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
         current_status = current_status_doc.get("biolinkdel_enabled", False) if current_status_doc else False
         status_text = "चालू है (ON)" if current_status else "बंद है (OFF)"
-        await message.reply_text(f"मेरी 'बायो-लिंक पुलिस' अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/biolinkdel on` या `/biolinkdel del off` यूज़ करो. 👮‍♀️", quote=True)
+        await message.reply_text(f"मेरी 'बायो-लिंक पुलिस' अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/biolinkdel on` या `/biolinkdel off` यूज़ करो. 👮‍♀️", quote=True)
         return
 
     action = message.command[1].lower()
@@ -1071,7 +1080,7 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
             {"$set": {"biolinkdel_enabled": True}},
             upsert=True
         )
-        await message.reply_text("हम्म... 😼 अब से जिसकी बायो में लिंक दिखेगा ना, उसका मैसेज मैं चुपचाप हटा दूंगी! ग्रुप में कोई मस्ती नहीं! 🤫", quote=True)
+        await message.reply_text("हम्म... 😼 अब से जिसकी बायो में लिंक हो सकता है या **चैनल/ग्रुप लिंक्स फॉरवर्ड** करेगा, उसका मैसेज मैं चुपचाप हटा दूंगी! ग्रुप में कोई मस्ती नहीं! 🤫", quote=True)
         logger.info(f"Biolink deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
     elif action == "off":
         group_tracking_collection.update_one(
@@ -1083,7 +1092,7 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
         logger.info(f"Biolink deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
     else:
         await message.reply_text("उम्म... मुझे समझ नहीं आया! 😕 `/biolinkdel on` या `/biolinkdel off` यूज़ करो, प्लीज़! ✨", quote=True)
-    
+
     await store_message(message)
 
 
@@ -1100,7 +1109,7 @@ async def allow_biolink_user_command(client: Client, message: Message):
     if len(message.command) < 2:
         await message.reply_text("किस यूज़र को बायो-लिंक की छूट देनी है? मुझे उसकी User ID दो ना, जैसे: `/biolink 123456789` या `/biolink remove 123456789`! 😉", quote=True)
         return
-    
+
     action_or_user_id = message.command[1].lower()
     target_user_id = None
 
@@ -1120,11 +1129,11 @@ async def allow_biolink_user_command(client: Client, message: Message):
                 {"$set": {"allowed_by_admin": True, "added_on": datetime.now(), "credit": "by @asbhaibsr"}},
                 upsert=True
             )
-            await message.reply_text(f"याय! 🎉 मैंने यूज़र `{target_user_id}` को स्पेशल परमिशन दे दी है! अब ये अपनी बायो में लिंक रखकर भी मैसेज कर पाएंगे! क्यूंकि एडमिन ने बोला, तो बोला! 👑", quote=True)
+            await message.reply_text(f"याय! 🎉 मैंने यूज़र `{target_user_id}` को स्पेशल परमिशन दे दी है! अब ये अपनी बायो में लिंक रखकर या फॉरवर्डेड लिंक्स भेजकर भी मैसेज कर पाएंगे! क्यूंकि एडमिन ने बोला, तो बोला! 👑", quote=True)
             logger.info(f"Added user {target_user_id} to biolink exceptions in group {message.chat.id}.")
         except ValueError:
             await message.reply_text("उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", quote=True)
-    
+
     await store_message(message)
 
 
@@ -1164,7 +1173,7 @@ async def toggle_usernamedel_command(client: Client, message: Message):
         logger.info(f"Username deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
     else:
         await message.reply_text("उम्म... मुझे समझ नहीं आया! 😕 `/usernamedel on` या `/usernamedel off` यूज़ करो, प्लीज़! ✨", quote=True)
-    
+
     await store_message(message)
 
 # --- New chat members and left chat members ---
@@ -1175,11 +1184,11 @@ async def new_member_handler(client: Client, message: Message):
     for member in message.new_chat_members:
         logger.info(f"Processing new member: {member.id} ({member.first_name}) in chat {message.chat.id}. Is bot: {member.is_bot}. (Event handled by @asbhaibsr)")
         if member.id == client.me.id:
-            if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: 
-                logger.info(f"DEBUG: Bot {client.me.id} detected as new member in group {message.chat.id}. Calling update_group_info.") 
-                await update_group_info(message.chat.id, message.chat.title, message.chat.username) 
+            if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+                logger.info(f"DEBUG: Bot {client.me.id} detected as new member in group {message.chat.id}. Calling update_group_info.")
+                await update_group_info(message.chat.id, message.chat.title, message.chat.username)
                 logger.info(f"Bot joined new group: {message.chat.title} ({message.chat.id}). (Event handled by @asbhaibsr)")
-                
+
                 group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
                 added_by_user = message.from_user.first_name if message.from_user else "Unknown User"
                 notification_message = (
@@ -1196,11 +1205,11 @@ async def new_member_handler(client: Client, message: Message):
                     logger.info(f"Owner notified about new group: {group_title}. (Notification by @asbhaibsr)")
                 except Exception as e:
                     logger.error(f"Could not notify owner about new group {group_title}: {e}. (Notification error by @asbhaibsr)")
-            return 
+            return
 
-        if not member.is_bot: 
+        if not member.is_bot:
             user_exists = user_tracking_collection.find_one({"_id": member.id})
-            
+
             if message.chat.type == ChatType.PRIVATE and member.id == message.from_user.id and not user_exists:
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
@@ -1218,7 +1227,7 @@ async def new_member_handler(client: Client, message: Message):
                     logger.info(f"Owner notified about new private user: {user_name}. (Notification by @asbhaibsr)")
                 except Exception as e:
                     logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
-                
+
             elif message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and not user_exists:
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
@@ -1239,7 +1248,7 @@ async def new_member_handler(client: Client, message: Message):
                     logger.info(f"Owner notified about new group member: {user_name} in {group_title}. (Notification by @asbhaibsr)")
                 except Exception as e:
                     logger.error(f"Could not notify owner about new group member {user_name} in {group_title}: {e}. (Notification error by @asbhaibsr)")
-    
+
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -1250,12 +1259,12 @@ async def left_member_handler(client: Client, message: Message):
     logger.info(f"Left chat member detected in chat {message.chat.id}. Left member ID: {message.left_chat_member.id}. Bot ID: {client.me.id}. (Event handled by @asbhaibsr)")
 
     if message.left_chat_member and message.left_chat_member.id == client.me.id:
-        if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: 
+        if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
             group_tracking_collection.delete_one({"_id": message.chat.id})
             messages_collection.delete_many({"chat_id": message.chat.id})
             earning_tracking_collection.update_many(
-                {"_id": {"$in": [user["_id"] for user in earning_tracking_collection.find({})]}}, 
-                {"$pull": {"groups": message.chat.id}} 
+                {"_id": {"$in": [user["_id"] for user in earning_tracking_collection.find({})]}},
+                {"$pull": {"groups": message.chat.id}}
             )
 
             logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared. (Code by @asbhaibsr)")
@@ -1275,7 +1284,7 @@ async def left_member_handler(client: Client, message: Message):
                 logger.info(f"Owner notified about bot leaving group: {group_title}. (Notification by @asbhaibsr)")
             except Exception as e:
                 logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}. (Notification error by @asbhaibsr)")
-            return 
+            return
 
     await store_message(message)
     if message.from_user:
@@ -1290,9 +1299,9 @@ async def handle_message_and_reply(client: Client, message: Message):
 
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         group_status = group_tracking_collection.find_one({"_id": message.chat.id})
-        if group_status and not group_status.get("bot_enabled", True): 
+        if group_status and not group_status.get("bot_enabled", True):
             logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling. (Code by @asbhaibsr)")
-            return 
+            return
 
     if message.from_user and is_on_cooldown(message.from_user.id):
         logger.debug(f"User {message.from_user.id} is on cooldown. Skipping message. (Cooldown by @asbhaibsr)")
@@ -1302,65 +1311,97 @@ async def handle_message_and_reply(client: Client, message: Message):
 
     logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}). (Handle message by @asbhaibsr)")
 
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]: 
-        logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.") 
-        await update_group_info(message.chat.id, message.chat.title, message.chat.username) 
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.")
+        await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
     # --- NEW: Check for /linkdel, /biolinkdel, /usernamedel conditions ---
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
-        
+
         # Link Deletion Check
         if current_group_settings and current_group_settings.get("linkdel_enabled", False) and message.text:
             if contains_link(message.text):
-                try:
-                    await message.delete()
-                    await message.reply_text("ओहो, ये क्या भेज दिया? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया! 💨 अब से ध्यान रखना, हाँ?", quote=True)
-                    logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return 
-                except Exception as e:
-                    logger.error(f"Error deleting link message {message.id}: {e}")
-        
-        # Biolink Deletion Check
+                # Check if the user is an admin or owner, if so, don't delete their links.
+                if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
+                    try:
+                        await message.delete()
+                        await message.reply_text("ओहो, ये क्या भेज दिया? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया! 💨 अब से ध्यान रखना, हाँ?", quote=True)
+                        logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
+                        return
+                    except Exception as e:
+                        logger.error(f"Error deleting link message {message.id}: {e}")
+                else:
+                    logger.info(f"Admin's link message {message.id} was not deleted in chat {message.chat.id}.")
+
+
+        # Biolink Deletion Check (Updated Logic)
         if current_group_settings and current_group_settings.get("biolinkdel_enabled", False) and message.from_user:
             user_id = message.from_user.id
             is_biolink_exception = biolink_exceptions_collection.find_one({"_id": user_id})
 
-            if not is_biolink_exception: 
-                user_has_bio_link = await has_bio_link(client, user_id)
-                if user_has_bio_link:
-                    try:
-                        await message.delete()
-                        await message.reply_text(
-                            "अरे बाबा रे! 😲 आपकी बायो में तो लिंक है! इसीलिए आपका मैसेज गायब हो गया! 👻\n"
-                            "अगर आपको बायो में लिंक रखते हुए भी मैसेज भेजना है, तो कृपया एडमिन से संपर्क करें और उन्हें `/biolink आपका_यूजरआईडी` कमांड देने को कहें। ठीक है?", 
-                            quote=True
-                        )
-                        logger.info(f"Deleted biolink message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                        return 
-                    except Exception as e:
-                        logger.error(f"Error deleting biolink message {message.id}: {e}")
+            if not is_biolink_exception: # If user is not in exception list
+                # Check for t.me links or mentions if message is text and potentially forwarded
+                if message.text and (contains_link(message.text) or contains_mention(message.text)):
+                    # Check if the message is forwarded from a channel, or contains a t.me link/mention directly
+                    # This is a heuristic, as we cannot read user bios directly.
+                    # This targets common self-promotion methods.
+                    if message.forward_from_chat and message.forward_from_chat.type == ChatType.CHANNEL:
+                         # If forwarded from channel and contains link/mention, consider it for deletion
+                        if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
+                            try:
+                                await message.delete()
+                                await message.reply_text(
+                                    "अरे बाबा रे! 😲 चैनल से फॉरवर्ड किया गया लिंक/यूजरनेम मैसेज! इसीलिए आपका मैसेज गायब हो गया! 👻\n"
+                                    "अगर आपको यह अनुमति चाहिए, तो कृपया एडमिन से संपर्क करें और उन्हें `/biolink आपका_यूजरआईडी` कमांड देने को कहें।",
+                                    quote=True
+                                )
+                                logger.info(f"Deleted forwarded channel message with link/mention {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
+                                return
+                            except Exception as e:
+                                logger.error(f"Error deleting forwarded channel link/mention message {message.id}: {e}")
+                        else:
+                            logger.info(f"Admin's forwarded channel message {message.id} was not deleted in chat {message.chat.id}.")
+
+                    elif contains_link(message.text) and "t.me" in message.text: # Direct t.me links are often self-promotion
+                        if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
+                            try:
+                                await message.delete()
+                                await message.reply_text(
+                                    "अरे बाबा रे! 😲 आपकी बायो में लिंक हो सकता है या आपने `t.me` लिंक भेजा! इसीलिए आपका मैसेज गायब हो गया! 👻\n"
+                                    "अगर आपको यह अनुमति चाहिए, तो कृपया एडमिन से संपर्क करें और उन्हें `/biolink आपका_यूजरआईडी` कमांड देने को कहें।",
+                                    quote=True
+                                )
+                                logger.info(f"Deleted direct t.me link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
+                                return
+                            except Exception as e:
+                                logger.error(f"Error deleting direct t.me link message {message.id}: {e}")
+                        else:
+                            logger.info(f"Admin's direct t.me link message {message.id} was not deleted in chat {message.chat.id}.")
 
         # Username Deletion Check
         if current_group_settings and current_group_settings.get("usernamedel_enabled", False) and message.text:
             if contains_mention(message.text):
-                try:
-                    await message.delete()
-                    await message.reply_text("टच-टच! 😬 आपने `@` का इस्तेमाल किया! सॉरी, वो मैसेज तो चला गया आसमान में! 🚀 अगली बार से ध्यान रखना, हाँ? 😉", quote=True)
-                    logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return 
-                except Exception as e:
-                    logger.error(f"Error deleting username message {message.id}: {e}")
+                if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
+                    try:
+                        await message.delete()
+                        await message.reply_text("टच-टच! 😬 आपने `@` का इस्तेमाल किया! सॉरी, वो मैसेज तो चला गया आसमान में! 🚀 अगली बार से ध्यान रखना, हाँ? 😉", quote=True)
+                        logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
+                        return
+                    except Exception as e:
+                        logger.error(f"Error deleting username message {message.id}: {e}")
+                else:
+                    logger.info(f"Admin's username mention message {message.id} was not deleted in chat {message.chat.id}.")
     # --- END NEW CHECKS ---
 
-    await store_message(message) 
+    await store_message(message)
 
     if not message.text or not message.text.startswith('/'):
         logger.info(f"Attempting to generate reply for chat {message.chat.id}. (Logic by @asbhaibsr)")
         reply_doc = await generate_reply(message)
-        
+
         if reply_doc:
             try:
                 if reply_doc.get("type") == "text":
@@ -1384,7 +1425,7 @@ if __name__ == "__main__":
     flask_thread.start()
 
     logger.info("Starting Pyrogram bot... (Code by @asbhaibsr)")
-    
+
     app.run()
-    
+
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
