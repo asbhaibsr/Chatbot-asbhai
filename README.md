@@ -1,154 +1,107 @@
-# Smart AI Chatbot: Aapka Intelligent Telegram Saathi ✨ (Your Intelligent Telegram Companion)
-
----
-
-[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?name=chatbot-asbhai&repository=asbhaibsr%2FChatbot-asbhai&branch=main&run_command=python3+main.py&instance_type=free&regions=was&instances_min=0&autoscaling_sleep_idle_delay=300&env%5BAPI_HASH%5D=918e2aa94075a7d04717b371a21fb689&env%5BAPI_ID%5D=28762030&env%5BBOT_TOKEN%5D=8098449556%3AAAED8oT7U3lsPFwJxdxS-k0m27H3v9XC7EY&env%5BMONGO_URI_BUTTONS%5D=mongodb%2Bsrv%3A%2F%2Fed69yyr92n%3AkaY09k4z8zCjDSR3%40cluster0.6uhfmud.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BMONGO_URI_MESSAGES%5D=mongodb%2Bsrv%3A%2F%2Fjeriwo3420%3AsDz0ZevArtOnjpR0%40cluster0.yrfv26n.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BMONGO_URI_TRACKING%5D=mongodb%2Bsrv%3A%2F%2Fmockingbird07317%3ArTgIMbRuwlW7qMLq%40cluster0.4vlhect.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BOWNER_ID%5D=8019381468&ports=8080%3Bhttp%3B%2F&hc_protocol%5B8080%5D=tcp&hc_grace_period%5B8080%5D=5&hc_interval%5B8080%5D=30&hc_restart_limit%5B8080%5D=3&hc_timeout%5B8080%5D=5&hc_path%5B8080%5D=%2F&hc_method%5B8080%5D=get)
-
-<div align="center">
-  <p>💡 Live Demo Video: Bot Ko Kaam Karte Dekhiye! 💡</p>
-  <a href="https://t.me/asbhai_bsr/26" target="_blank">
-    <img src="https://i.imgur.com/uGzJ0uV.gif" alt="Live Animation Video Demo" width="600"/>
-  </a>
-  <br>
-  <em>(GIF par click karein aur Telegram par poora **live animation video** dekhein / Click on the GIF to watch the full **live animation video** on Telegram)</em>
-</div>
-
----
-
-## 🌟 Overview (Sankshipt Vivaran)
-The **Smart AI Chatbot** ek dynamic aur **self-learning Telegram bot** hai, jise group conversations ko aur bhi mazedaar aur interactive banane ke liye design kiya gaya hai. **Pyrogram** aur **MongoDB** ki power se bana, yeh bot chal rahi baaton se seekhta hai, context yaad rakhta hai, aur smart, **contextual replies** deta hai. Ismein ek zabardast **earning system** bhi hai jo groups mein active users ko reward karta hai!
-
----
-
-## ✨ Key Features (Mukhy Visheshataen)
-
-Yeh bot users ke experience ko behtar banane aur powerful administration tools provide karne ke liye kai features se bhara hai:
-
-* **🧠 Self-Learning AI (Khud Seekhne Wala AI)**: Bot har message aur reply se seekhta hai, apni **contextual aur relevant responses** dene ki ability ko lagatar behtar karta hai. Jitna zyaada interact karega, utna hi smart banega!
-* **💸 Earning System (Points)**: Users group chats mein actively participate karke **points** kama sakte hain. Ek **leaderboard** top active users ko dikhata hai, jismein sabse zyaada engaged contributors ke liye **monthly rewards** ka bhi chance hai.
-* **💾 Robust Data Storage (Majboot Data Bhandaran)**: Sabhi conversations ko **MongoDB database** mein surakshit roop se store kiya jaata hai taaki bot behtar seekh sake aur context yaad rakh sake, privacy ka poora dhyaan rakhte hue.
-* **💬 Interactive Group Chat (Interative Samooh Vaartalaap)**: Groups mein add hone ke liye design kiya gaya, bot discussions mein participate kar sakta hai, messages ka reply de sakta hai, aur chat interactions ko efficiently manage kar sakta hai.
-* **🚀 Efficient Cooldown Mechanism (Prabhavi Cooldown Tantra)**: Spamming ko rokta hai aur commands ke liye cooldown period implement karke fair usage yakeeni banata hai.
-* **🛠️ Admin & Owner Commands (Prashasak aur Maalik Ke Aadesh)**: Bot owner ke liye exclusive powerful commands, jismein shaamil hain:
-    * **Global Broadcasting**: Bot jin sabhi groups mein hai, un sabhi mein messages bhejein.
-    * **Database Management**: Purane messages ko clean karein, specific entries delete karein, aur earning data reset karein.
-    * **Group & User Tracking**: Bot activity, active users, aur group participation ko monitor karein.
-    * **Bot Control**: Bot ko remotely restart karein.
-* **🔄 Chat Toggle**: Group administrators apni groups mein bot ki chat functionality ko simple commands ka use karke kisi bhi samay **enable ya disable** kar sakte hain.
-* **🔔 Real-time Notifications**: Bot owner ko notify karta hai jab use naye groups mein add kiya jaata hai ya jab naye users private mein uske saath engage hote hain, jisse har waqt oversight bani rehti hai.
-
----
-
-## 🚀 Deployment (Deploy Kaise Karein)
-
-Aap is Smart AI Chatbot ki apni khud ki instance Koyeb par bas ek click se deploy kar sakte hain:
-
----
-
-[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?name=chatbot-asbhai&repository=asbhaibsr%2FChatbot-asbhai&branch=main&run_command=python3+main.py&instance_type=free&regions=was&instances_min=0&autoscaling_sleep_idle_delay=300&env%5BAPI_HASH%5D=918e2aa94075a7d04717b371a21fb689&env%5BAPI_ID%5D=28762030&env%5BBOT_TOKEN%5D=8098449556%3AAAED8oT7U3lsPFwJxdxS-k0m27H3v9XC7EY&env%5BMONGO_URI_BUTTONS%5D=mongodb%2Bsrv%3A%2F%2Fed69yyr92n%3AkaY09k4z8zCjDSR3%40cluster0.6uhfmud.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BMONGO_URI_MESSAGES%5D=mongodb%2Bsrv%3A%2F%2Fjeriwo3420%3AsDz0ZevArtOnjpR0%40cluster0.yrfv26n.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BMONGO_URI_TRACKING%5D=mongodb%2Bsrv%3A%2F%2Fmockingbird07317%3ArTgIMbRuwlW7qMLq%40cluster0.4vlhect.mongodb.net%2F%3FretryWrites%3Dtrue%26w%3Dmajority%26appName%3DCluster0&env%5BOWNER_ID%5D=8019381468&ports=8080%3Bhttp%3B%2F&hc_protocol%5B8080%5D=tcp&hc_grace_period%5B8080%5D=5&hc_interval%5B8080%5D=30&hc_restart_limit%5B8080%5D=3&hc_timeout%5B8080%5D=5&hc_path%5B8080%5D=%2F&hc_method%5B8080%5D=get)
-
-### Required Environment Variables (Zaroori Environment Variables):
-
-Deploy karne se pehle, yeh environment variables configure karna na bhulein:
-
-* `BOT_TOKEN`: Aapka Telegram Bot API Token (BotFather se milega).
-* `API_ID`: Aapka Telegram API ID (my.telegram.org se milega).
-* `API_HASH`: Aapka Telegram API Hash (my.telegram.org se milega).
-* `OWNER_ID`: Aapki Telegram User ID (numeric, string format mein) admin access ke liye.
-* `MONGO_URI_MESSAGES`: Messages database ke liye MongoDB connection URI.
-* `MONGO_URI_BUTTONS`: Button interactions database ke liye MongoDB connection URI.
-* `MONGO_URI_TRACKING`: User/group tracking aur earning data ke liye MongoDB connection URI.
-* `MONGO_URI_WITHDRAWALS`: Withdrawal requests ke liye MongoDB connection URI (Naya!).
-
----
-
-## ⚙️ Commands (Aadesh)
-
-Yahan woh commands hain jo aap Smart AI Chatbot ke saath use kar sakte hain. Inhe **ek click mein copy** karne ke liye code blocks par click karein!
-
----
-
-### Public Commands (Sabhi Users Ke Liye)
-
-* **`/start`**
-    ```
-    /start
-    ```
-    Bot ko initiate karta hai aur features ka overview deta hai. (Starts the bot and provides a welcome message with an overview of features.)
-* **`/topusers`**
-    ```
-    /topusers
-    ```
-    **Earning Leaderboard** dikhata hai, jismein top active users aur unki potential earnings show hoti hain. (Displays the **Earning Leaderboard**, showing top active users and their potential earnings.)
-
-### Admin/Owner Commands (Owner ID Zaroori)
-
-* **`/broadcast <message>`**
-    ```
-    /broadcast Aapka message yahan
-    ```
-    Ek `<message>` ko un sabhi groups mein bhejta hai jinka bot hissa hai. (Sends a `<message>` to all groups the bot is part of.)
-* **`/stats check`**
-    ```
-    /stats check
-    ```
-    Overall bot statistics dikhata hai, jismein total groups, active users, aur stored messages shaamil hain. (Shows overall bot statistics, including total groups, active users, and stored messages.)
-* **`/groups`**
-    ```
-    /groups
-    ```
-    Un sabhi groups ki list dikhata hai jismein bot currently hai (sirf owner ke liye). (Lists all groups the bot is currently in (owner only).)
-* **`/leavegroup <group_id>`**
-    ```
-    /leavegroup -1001234567890
-    ```
-    Bot ko ek specified group se leave karwata hai aur usse related data database se clear karta hai. (Makes the bot leave a specified group and clears its related data from the database.)
-* **`/cleardata <percentage>%`**
-    ```
-    /cleardata 50%
-    ```
-    Database se sabse **purane messages** ka ek specified percentage delete karta hai (jaise, `/cleardata 10%`, `/cleardata 100%`). (Deletes a specified percentage of the **oldest messages** from the database (e.g., `/cleardata 10%`, `/cleardata 100%`).)
-* **`/deletemessage <message_content>`**
-    ```
-    /deletemessage hello
-    ```
-    Database se uske content ke aadhar par ek specific message delete karta hai (sateek rahein!). (Deletes a specific message from the database based on its content (be precise!).)
-* **`/clearearning`**
-    ```
-    /clearearning
-    ```
-    **Sabhi monthly earning message counts ko zero par reset karta hai** aur sabhi pending withdrawal requests ko clear karta hai. (This is typically used at the end of an earning period.)
-* **`/restart`**
-    ```
-    /restart
-    ```
-    Bot application ko restart karta hai. (Restarts the bot application.)
-
-### Group Admin Commands (Group Administrators Ke Liye)
-
-* **`/chat on`**
-    ```
-    /chat on
-    ```
-    Current group mein bot ki chatting functionality enable karta hai. (Enables the bot's chatting functionality in the current group.)
-* **`/chat off`**
-    ```
-    /chat off
-    ```
-    Current group mein bot ki chatting functionality disable karta hai. (Disables the bot's chatting functionality in the current group.)
-
----
-
-## 🤝 Support & Updates (Samarthan aur Updates)
-
-* **Owner Telegram ID:** **@asbhaibsr**
-* **Updates Channel:** **@asbhai_bsr** (Latest features aur news ke saath updated rahein!)
-* **Support Group:** **@aschat_group** (Community support aur discussions ke liye join karein.)
-
----
-
-## ©️ Credits (Shrey)
-
-Yeh Smart AI Chatbot **@asbhaibsr** dwara passion ke saath design aur develop kiya gaya hai.
-Sabhi adhikaar surakshit hain. Is code ka **unauthorized FORKING, REBRANDING, ya RESELLING sakhti se mana hai (STRICTLY PROHIBITED).**
-Kisi bhi official inquiry ya custom bot development ke liye, kripya **@asbhaibsr** se sampark karein.
+नमस्ते! मैं हूँ ASKIANGELBOT, आपकी अपनी पर्सनल AI लर्निंग और मॉडरेटर बॉट! मैं ग्रुप और प्राइवेट चैट्स में आपसे और दूसरों से सीखती हूँ, और समय के साथ और भी स्मार्ट होती जाती हूँ। मेरा मकसद आपकी बातचीत को मजेदार और ग्रुप को व्यवस्थित रखना है।
+मैं Telegram पर Python के Pyrogram फ्रेमवर्क और MongoDB डेटाबेस का उपयोग करके बनी हूँ।
+✨ मुख्य विशेषताएँ (Features)
+ * 🧠 सेल्फ-लर्निंग AI: मैं आपकी बातचीत से नए जवाब सीखती हूँ और समय के साथ बेहतर होती जाती हूँ।
+ * 💨 स्मार्ट कूलडाउन: अनचाहे स्पैम और मैसेज से बचाता हूँ, ताकि बातचीत स्मूथ रहे।
+ * 🔗 लिंक और मेंशन मॉडरेटर: ग्रुप एडमिन के लिए लिंक (नॉर्मल, बायो), और @ मेंशन डिलीट करने की सुविधा।
+ * 🏆 एक्टिव यूजर लीडरबोर्ड: सबसे सक्रिय सदस्यों को पहचानता हूँ और पुरस्कार देता हूँ।
+ * 📊 विस्तृत स्टैटिस्टिक्स: बॉट के प्रदर्शन और डेटा के बारे में जानकारी देता हूँ।
+ * 🗑️ डेटा मैनेजमेंट: मैसेजेस, बटन्स और ट्रैकिंग डेटा को मैनेज और क्लियर करने के कमांड्स।
+ * 🔄 आसान रीस्टार्ट और ब्रॉडकास्ट: ओनर के लिए बॉट को रीस्टार्ट करने और सभी चैट्स पर मैसेज भेजने की सुविधा।
+ * 🛡️ ग्रुप कंट्रोल: ग्रुप में मेरी सक्रियता को ऑन/ऑफ करने का विकल्प।
+ * 🔔 नई यूजर सूचनाएं: जब कोई नया यूजर मुझे प्राइवेट में स्टार्ट करता है, तो ओनर को सूचित करता हूँ।
+🛠️ डिप्लॉय करें अपना ASKIANGELBOT (Deploy Your Own ASKIANGELBOT)
+अपना खुद का ASKIANGELBOT डिप्लॉय करना बहुत आसान है! बस नीचे दिए गए Koyeb बटन पर क्लिक करें और अपनी डिटेल्स भरें।
+⚙️ आवश्यक पर्यावरण चर (Environment Variables)
+यह बॉट ठीक से काम करने के लिए कुछ पर्यावरण चर (Environment Variables) पर निर्भर करता है। डिप्लॉय करते समय आपको इन्हें सेट करना होगा:
+ * BOT_TOKEN: आपके बॉटफादर से प्राप्त बॉट टोकन।
+ * API_ID: आपके My Telegram API से प्राप्त API ID।
+ * API_HASH: आपके My Telegram API से प्राप्त API Hash।
+ * OWNER_ID: आपका Telegram यूजर ID (न्यूमेरिक)। यह सुनिश्चित करेगा कि केवल आप ही संवेदनशील कमांड्स का उपयोग कर सकें।
+ * MONGO_URI_MESSAGES: MongoDB Atlas कनेक्शन स्ट्रिंग आपके मैसेजेस डेटाबेस के लिए।
+ * MONGO_URI_BUTTONS: MongoDB Atlas कनेक्शन स्ट्रिंग आपके बटन्स डेटाबेस के लिए।
+ * MONGO_URI_TRACKING: MongoDB Atlas कनेक्शन स्ट्रिंग आपके ट्रैकिंग और यूजर डेटाबेस के लिए।
+MongoDB डेटाबेस कैसे प्राप्त करें:
+आप MongoDB Atlas पर मुफ्त टियर अकाउंट बनाकर अपने तीनों MongoDB URI प्राप्त कर सकते हैं। तीन अलग-अलग क्लस्टर या कम से कम तीन अलग-अलग डेटाबेस बनाना सबसे अच्छा अभ्यास है।
+🔑 कमांड्स (Commands)
+यहाँ मेरे सभी कमांड्स की लिस्ट है:
+🌟 सभी उपयोगकर्ताओं के लिए (For All Users)
+ * /start - बॉट से बातचीत शुरू करें।
+   <button onclick="navigator.clipboard.writeText('/start')">Copy</button>
+ * /help - यह हेल्प मेनू देखें।
+   <button onclick="navigator.clipboard.writeText('/help')">Copy</button>
+ * /topusers - सबसे सक्रिय उपयोगकर्ताओं का लीडरबोर्ड देखें और जानें कौन जीत रहा है! 💰
+   <button onclick="navigator.clipboard.writeText('/topusers')">Copy</button>
+ * /clearmydata - आपकी सभी संग्रहित बातचीत (जो मैंने याद रखी हैं) और अर्निंग डेटा हटा दें।
+   <button onclick="navigator.clipboard.writeText('/clearmydata')">Copy</button>
+👑 ग्रुप एडमिन्स और ओनर के लिए (For Group Admins & Owner)
+ये कमांड्स ग्रुप चैट के लिए हैं और केवल ग्रुप एडमिनिस्ट्रेटर या ओनर द्वारा उपयोग की जा सकती हैं।
+ * /chat on/off ⚡️ (ON/OFF)
+   ग्रुप में बॉट की प्रतिक्रियाओं को चालू या बंद करें।
+   * /chat on
+     <button onclick="navigator.clipboard.writeText('/chat on')">Copy</button>
+   * /chat off
+     <button onclick="navigator.clipboard.writeText('/chat off')">Copy</button>
+ * /linkdel on/off 🔗 (ON/OFF)
+   ग्रुप में सभी प्रकार के लिंक्स (जैसे http://, https://, www., t.me/) को डिलीट या अनुमति दें।
+   * /linkdel on
+     <button onclick="navigator.clipboard.writeText('/linkdel on')">Copy</button>
+   * /linkdel off
+     <button onclick="navigator.clipboard.writeText('/linkdel off')">Copy</button>
+ * /biolinkdel on/off 👤🔗 (ON/OFF)
+   उन उपयोगकर्ताओं के मैसेजेस को डिलीट या अनुमति दें जिनकी Telegram बायो में t.me या http/https लिंक्स हैं।
+   * /biolinkdel on
+     <button onclick="navigator.clipboard.writeText('/biolinkdel on')">Copy</button>
+   * /biolinkdel off
+     <button onclick="navigator.clipboard.writeText('/biolinkdel off')">Copy</button>
+ * /biolink <userid> ➕
+   एक विशिष्ट यूजर को बायो में लिंक्स रखने की छूट दें, भले ही biolinkdel ऑन हो। इसे हटाने के लिए /biolink remove <userid> का उपयोग करें।
+   * /biolink 123456789
+     <button onclick="navigator.clipboard.writeText('/biolink 123456789')">Copy</button>
+   * /biolink remove 123456789
+     <button onclick="navigator.clipboard.writeText('/biolink remove 123456789')">Copy</button>
+ * /usernamedel on/off @ (ON/OFF)
+   ग्रुप में @ मेंशन वाले मैसेजेस को डिलीट या अनुमति दें।
+   * /usernamedel on
+     <button onclick="navigator.clipboard.writeText('/usernamedel on')">Copy</button>
+   * /usernamedel off
+     <button onclick="navigator.clipboard.writeText('/usernamedel off')">Copy</button>
+🎩 केवल बॉट ओनर के लिए (Owner Only Commands)
+ये कमांड्स केवल बॉट के OWNER_ID द्वारा ही उपयोग की जा सकती हैं और आमतौर पर प्राइवेट चैट में उपयोग की जाती हैं।
+ * /groups - उन सभी ग्रुप्स की सूची देखें जिनमें बॉट शामिल है।
+   <button onclick="navigator.clipboard.writeText('/groups')">Copy</button>
+ * /stats check - बॉट के कुल संदेशों, उपयोगकर्ताओं और ग्रुप्स के आंकड़े देखें।
+   <button onclick="navigator.clipboard.writeText('/stats check')">Copy</button>
+ * /cleardata <percentage> - डेटाबेस से निश्चित प्रतिशत में पुराने मैसेजेस डिलीट करें।
+   * उदाहरण: /cleardata 30%
+     <button onclick="navigator.clipboard.writeText('/cleardata 30%')">Copy</button>
+ * /deletemessage <content/sticker_id> - विशिष्ट टेक्स्ट या स्टिकर ID के सभी मैसेजेस को डेटाबेस से डिलीट करें।
+   * उदाहरण: /deletemessage हेलो
+     <button onclick="navigator.clipboard.writeText('/deletemessage हेलो')">Copy</button>
+   * उदाहरण: /deletemessage BQADAgAD0QAD0QJ9GgACyJt4b2l_ (स्टिकर ID)
+     <button onclick="navigator.clipboard.writeText('/deletemessage BQADAgAD0QAD0QJ9GgACyJt4b2l_')">Copy</button>
+ * /clearearning - सभी उपयोगकर्ताओं के अर्निंग डेटा (संदेश गणना) को रीसेट करें।
+   <button onclick="navigator.clipboard.writeText('/clearearning')">Copy</button>
+ * /clearall ⚠️ - अत्यधिक महत्वपूर्ण! सभी तीन डेटाबेस (messages, buttons, tracking) से सारा डेटा स्थायी रूप से डिलीट करें। उपयोग करने से पहले पुष्टि करनी होगी।
+   <button onclick="navigator.clipboard.writeText('/clearall')">Copy</button>
+ * /leavegroup <group_id> - बॉट को एक विशिष्ट ग्रुप से बाहर निकालें और उस ग्रुप से संबंधित डेटा हटा दें।
+   * उदाहरण: /leavegroup -1001234567890
+     <button onclick="navigator.clipboard.writeText('/leavegroup -1001234567890')">Copy</button>
+ * /broadcast <message> - सभी ग्रुप्स और प्राइवेट चैट्स पर एक संदेश भेजें।
+   * उदाहरण: /broadcast यह एक घोषणा है!
+     <button onclick="navigator.clipboard.writeText('/broadcast यह एक घोषणा है!')">Copy</button>
+ * /restart - बॉट को रीस्टार्ट करें।
+   <button onclick="navigator.clipboard.writeText('/restart')">Copy</button>
+🤝 योगदान (Contributions)
+यह प्रोजेक्ट ओपन-सोर्स है और आपके योगदान का हमेशा स्वागत है! अगर आप इस बॉट को और बेहतर बनाने के लिए कोई विचार या सुधार चाहते हैं, तो बेझिझक फ़ोर्क करें, कोड में बदलाव करें और एक पुल रिक्वेस्ट (Pull Request) सबमिट करें।
+ * GitHub Repository
+❤️ क्रेडिट्स और संपर्क (Credits & Contact)
+यह अद्भुत बॉट @asbhaibsr द्वारा बनाया और डिज़ाइन किया गया है।
+ * 👨‍💻 बॉट डेवलपर: @asbhaibsr
+ * 📣 अपडेट चैनल: @asbhai_bsr
+ * ❓ सपोर्ट ग्रुप: @aschat_group
+अगर आपको कोई सहायता चाहिए, कोई बग मिला है, या बस हाय कहना चाहते हैं, तो ऊपर दिए गए लिंक्स के माध्यम से संपर्क करें।
+यह बॉट @asbhaibsr की संपत्ति है। अनधिकृत फ़ोर्किंग, रीब्रांडिंग, या रीसेलिंग सख्ती से प्रतिबंधित है।
+एक ज़रूरी नोट: GitHub README फ़ाइलें सीधे HTML <button> टैग को सपोर्ट नहीं करती हैं। ऊपर दिए गए Copy बटन आपके ब्राउज़र में काम करेंगे जब आप इस टेक्स्ट को देखेंगे, लेकिन GitHub पर README में ये बटन दिखाई नहीं देंगे और काम नहीं करेंगे।
+GitHub पर कोड को कॉपी करने के लिए, उपयोगकर्ता को मैनुअली कोड ब्लॉक के पास माउस ले जाकर GitHub द्वारा प्रदान किए गए कॉपी आइकन पर क्लिक करना होगा।
+हालांकि, मैंने आपके अनुरोध के अनुसार आउटपुट प्रदान कर दिया है, ताकि आपको यह पता चल सके कि HTML में बटन कैसे दिखेंगे। यदि आप इसे एक वेब पेज पर होस्ट कर रहे हैं, तो ये बटन काम करेंगे।
