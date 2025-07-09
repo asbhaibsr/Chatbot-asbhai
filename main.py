@@ -49,8 +49,9 @@ API_HASH = os.getenv("API_HASH")
 MAX_MESSAGES_THRESHOLD = 100000
 PRUNE_PERCENTAGE = 0.30
 UPDATE_CHANNEL_USERNAME = "asbhai_bsr"
-ASBHAI_USERNAME = "asbhaibsr"
-BOT_PHOTO_URL = "https://envs.sh/FU3.jpg"
+ASBHAI_USERNAME = "asbhaibsr" # Owner's username for contact
+ASFILTER_BOT_USERNAME = "asfilter_bot" # The bot for premium rewards
+BOT_PHOTO_URL = "https://envs.sh/FU3.jpg" # Consider updating this URL if it's generic
 REPO_LINK = "https://github.com/asbhaibsr/Chatbot-asbhai.git"
 
 # Regex for common URL patterns including t.me and typical link formats
@@ -75,7 +76,7 @@ try:
     user_tracking_collection = db_tracking.users_data
     earning_tracking_collection = db_tracking.monthly_earnings_data
     reset_status_collection = db_tracking.reset_status
-    biolink_exceptions_collection = db_tracking.biolink_exceptions
+    biolink_exceptions_collection = db_tracking.biolink_exceptions # For biolink deletion exceptions
     logger.info("MongoDB (Tracking, Earning & Biolink Exceptions) connection successful. Credit: @asbhaibsr")
 
     # Create indexes for efficient querying if they don't exist
@@ -142,19 +143,20 @@ def update_command_cooldown(user_id):
     user_cooldowns[user_id] = time.time()
 
 # --- Message Reply Cooldown (for general messages) ---
-# Stores the timestamp when a user's *last* general message was processed/replied to.
-# Bot will wait 5 seconds after this timestamp before processing another general message from the same user.
-user_message_cooldowns = {}
+# Stores the timestamp when a chat's *last* general message was processed/replied to.
+# Bot will wait 5 seconds after this timestamp before processing another general message in that chat.
+# This ensures that if multiple messages arrive simultaneously after cooldown, only the first is processed.
+chat_message_cooldowns = {} # Changed from user_message_cooldowns to chat_message_cooldowns
 MESSAGE_REPLY_COOLDOWN_TIME = 5 # seconds
 
-async def can_reply_to_user(user_id):
-    last_reply_time = user_message_cooldowns.get(user_id)
+async def can_reply_to_chat(chat_id): # Function updated to check chat_id
+    last_reply_time = chat_message_cooldowns.get(chat_id)
     if last_reply_time is None:
         return True
     return (time.time() - last_reply_time) >= MESSAGE_REPLY_COOLDOWN_TIME
 
-def update_message_reply_cooldown(user_id):
-    user_message_cooldowns[user_id] = time.time()
+def update_message_reply_cooldown(chat_id): # Function updated to use chat_id
+    chat_message_cooldowns[chat_id] = time.time()
 
 
 # --- Utility Functions ---
@@ -339,10 +341,12 @@ async def generate_reply(message: Message):
 
     potential_replies = []
 
+    # Prioritize replies where bot observed a pair (user replied to bot's specific content)
+    # Changed to find exact match for replied_to_content
     observed_replies_cursor = messages_collection.find({
         "is_bot_observed_pair": True,
         "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"},
-        "user_id": app.me.id
+        "user_id": {"$ne": app.me.id} # Ensure the reply is not from the bot itself
     })
     for doc in observed_replies_cursor:
         potential_replies.append(doc)
@@ -354,12 +358,21 @@ async def generate_reply(message: Message):
 
     logger.info(f"No direct observed reply for: '{query_content}'. Falling back to keyword search. (Logic by @asbhaibsr)")
 
-    keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
-
-    general_replies_cursor = messages_collection.find({
-        "type": {"$in": ["text", "sticker"]},
-        "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"} if keyword_regex else {"$exists": True}
-    })
+    # Fallback to general keyword search
+    # Ensure keywords are not empty before creating regex
+    if query_keywords:
+        keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
+        general_replies_cursor = messages_collection.find({
+            "type": {"$in": ["text", "sticker"]},
+            "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"},
+            "user_id": {"$ne": app.me.id} # Exclude bot's own messages from general replies
+        })
+    else:
+        # If no keywords, fall back to any random message (less ideal but prevents crash)
+        general_replies_cursor = messages_collection.find({
+            "type": {"$in": ["text", "sticker"]},
+            "user_id": {"$ne": app.me.id}
+        })
 
     potential_replies = []
     for doc in general_replies_cursor:
@@ -461,9 +474,18 @@ async def send_and_auto_delete_reply(message: Message, text: str = None, photo: 
 
     # Add user info to the reply text for command replies
     text_to_send = text
-    if text and message.command:
+    # Only add command info if it's actually a command message
+    if message.command and text:
         command_name = message.command[0]
         text_to_send = f"**कमांड:** `{command_name}`{user_info_str}\n\n{text}"
+    elif text and message.chat.type == ChatType.PRIVATE and message.from_user.id == OWNER_ID:
+        # For owner's private messages that aren't commands, just send the text as is.
+        # This prevents "कमांड: None" when owner replies in private to bot.
+        pass
+    elif text and message.from_user:
+        # For non-command messages from users, don't add "कमांड:" prefix
+        pass
+
 
     if photo:
         sent_message = await message.reply_photo(
@@ -634,7 +656,7 @@ async def callback_handler(client, callback_query):
             "• `/groups`: (Sirf Owner ke liye) Jin groups mein main hoon, unki list dekhne ke liye.\n"
             "• `/stats check`: Bot ke statistics dekhne ke liye.\n"
             "• `/cleardata <percentage>`: (Sirf Owner ke liye) Database se data delete karne ke liye.\n"
-            "• `/deletemessage <content>`: (Sirf Owner ke liye) Specific message delete karne ke liye.\n"
+            "• `/deletemessage <content/sticker_id>`: (Sirf Owner ke liye) Specific message ya sticker delete karne ke liye.\n" # Updated help text
             "• `/clearearning`: (Sirf Owner ke liye) Earning data reset karne ke liye.\n"
             "• `/clearall`: (Sirf Owner ke liye) Saara database (3 DBs) clear karne ke liye. **(Dhyan se!)**\n"
             "• `/leavegroup <group_id>`: (Sirf Owner ke liye) Kisi group ko chhodne ke liye.\n"
@@ -712,7 +734,8 @@ async def top_users_command(client: Client, message: Message):
         1: "💰 ₹50",
         2: "💸 ₹30",
         3: "🎁 ₹20",
-        4: "🎬 @asfilter_bot का 1 हफ़्ते का प्रीमियम प्लान"
+        4: f"🎬 @{ASFILTER_BOT_USERNAME} का 1 हफ़्ते का प्रीमियम प्लान", # Updated prize for 4th rank
+        5: f"🎬 @{ASFILTER_BOT_USERNAME} का 3 दिन का प्रीमियम प्लान"  # New prize for 5th rank
     }
 
     for i, user in enumerate(top_users[:5]): # Display top 5 users
@@ -722,7 +745,7 @@ async def top_users_command(client: Client, message: Message):
         message_count = user.get('message_count', 0)
         
         # Determine prize string
-        prize_str = prizes.get(rank, "🏅 कोई पुरस्कार नहीं") # Default for ranks > 4
+        prize_str = prizes.get(rank, "🏅 कोई पुरस्कार नहीं") # Default for ranks > 5
 
         group_info = ""
         last_group_id = user.get('last_active_group_id')
@@ -954,6 +977,8 @@ async def leave_group_command(client: Client, message: Message):
 
         group_tracking_collection.delete_one({"_id": group_id})
         messages_collection.delete_many({"chat_id": group_id})
+        # Note: Earning data associated with users in this group is not directly tied to group_id in a way that needs pruning here.
+        # It's user-centric. If a user's count reduces, it's handled implicitly by them not messaging anymore.
         logger.info(f"Considered cleaning earning data for users from left group {group_id}. (Code by @asbhaibsr)")
 
         await send_and_auto_delete_reply(message, text=f"Safaltapoorvak group `{group_id}` se bahar aa gayi, aur uska sara data bhi clean kar diya! Bye-bye! 👋 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -1035,25 +1060,30 @@ async def delete_specific_message_command(client: Client, message: Message):
         return
 
     if len(message.command) < 2:
-        await send_and_auto_delete_reply(message, text="Kaun sa message delete karna hai, batao toh sahi! Jaise: `/deletemessage hello` ya `/deletemessage 'kya haal hai'` 👻 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="Kaun sa message delete karna hai, batao toh sahi! Jaise: `/deletemessage hello` ya `/deletemessage 'kya haal hai'` ya `deletemessage <sticker_file_id>` 👻 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
 
     search_query = " ".join(message.command[1:])
+    deleted_count = 0
 
-    message_to_delete = messages_collection.find_one({"chat_id": message.chat.id, "content": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
-
-    if not message_to_delete:
-        message_to_delete = messages_collection.find_one({"content": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
-
-    if message_to_delete:
-        delete_result = messages_collection.delete_one({"_id": message_to_delete["_id"]})
-        if delete_result.deleted_count > 0:
-            await send_and_auto_delete_reply(message, text=f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' wale message ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
-            logger.info(f"Deleted message with content: '{search_query}'. (Code by @asbhaibsr)")
+    # Try to delete by exact content or partial content
+    # First, try to match content (text or emoji for sticker)
+    if search_query:
+        # Check for sticker ID first (starts with BQAD, CAAD, etc.)
+        if re.match(r'^(BQAD|CAAD|AgAD|CgAD)', search_query):
+            delete_result = messages_collection.delete_many({"sticker_id": search_query})
+            deleted_count += delete_result.deleted_count
         else:
-            await send_and_auto_delete_reply(message, text="Aww, yeh message to mujhe mila ही nahi. Shayad usne apni location badal di hai! 🕵️‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+            # If not a sticker ID, treat as text content
+            # Using $regex with .* to allow partial matches as requested
+            delete_result = messages_collection.delete_many({"content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}})
+            deleted_count += delete_result.deleted_count
+
+    if deleted_count > 0:
+        await send_and_auto_delete_reply(message, text=f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' se milte-julte **{deleted_count}** messages/stickers ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        logger.info(f"Deleted {deleted_count} messages/stickers with query: '{search_query}'. (Code by @asbhaibsr)")
     else:
-        await send_and_auto_delete_reply(message, text="Umm, mujhe tumhara yeh message to mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is query se koi message ya sticker mila hi nahi apne database mein. Spelling/ID check kar lo? 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
 
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -1345,21 +1375,22 @@ async def handle_clearall_dbs_callback(client: Client, callback_query):
         try:
             # Drop all databases for client_messages
             for db_name in client_messages.list_database_names():
-                if db_name not in ["admin", "local", "config"]:
+                if db_name not in ["admin", "local", "config"]: # Avoid dropping system databases
                     client_messages.drop_database(db_name)
-            logger.info("Messages DBs dropped.")
-
+                    logger.info(f"Dropped messages database: {db_name}.")
+            
             # Drop all databases for client_buttons
             for db_name in client_buttons.list_database_names():
                 if db_name not in ["admin", "local", "config"]:
                     client_buttons.drop_database(db_name)
-            logger.info("Buttons DBs dropped.")
+                    logger.info(f"Dropped buttons database: {db_name}.")
 
             # Drop all databases for client_tracking
             for db_name in client_tracking.list_database_names():
                 if db_name not in ["admin", "local", "config"]:
                     client_tracking.drop_database(db_name)
-            logger.info("Tracking DBs dropped.")
+                    logger.info(f"Dropped tracking database: {db_name}.")
+
 
             await query.edit_message_text("✅ **सफलतापूर्वक:** आपकी सभी MongoDB डेटाबेस का सारा डेटा डिलीट कर दिया गया है। बॉट अब बिल्कुल नया हो गया है! ✨", parse_mode=ParseMode.MARKDOWN)
             logger.info(f"Owner {query.from_user.id} confirmed and successfully cleared all MongoDB databases.")
@@ -1399,15 +1430,15 @@ async def clear_my_data_command(client: Client, message: Message):
         return
 
     try:
-        deleted_count = messages_collection.delete_many({"user_id": target_user_id}).deleted_count
-        earning_tracking_collection.delete_one({"_id": target_user_id}) # Also clear earning data for that user
+        deleted_messages_count = messages_collection.delete_many({"user_id": target_user_id}).deleted_count
+        deleted_earning_data = earning_tracking_collection.delete_one({"_id": target_user_id}).deleted_count # Also clear earning data for that user
 
-        if deleted_count > 0:
+        if deleted_messages_count > 0 or deleted_earning_data > 0:
             if target_user_id == message.from_user.id:
-                await send_and_auto_delete_reply(message, text=f"वाह! ✨ मैंने आपकी `{deleted_count}` बातचीत के मैसेज और अर्निंग डेटा डिलीट कर दिए हैं। अब आप बिल्कुल फ्रेश हो! 😊", parse_mode=ParseMode.MARKDOWN)
+                await send_and_auto_delete_reply(message, text=f"वाह! ✨ मैंने आपकी `{deleted_messages_count}` बातचीत के मैसेज और अर्निंग डेटा डिलीट कर दिए हैं। अब आप बिल्कुल फ्रेश हो! 😊", parse_mode=ParseMode.MARKDOWN)
                 logger.info(f"User {target_user_id} successfully cleared their data.")
             else: # Owner deleting another user's data
-                await send_and_auto_delete_reply(message, text=f"बॉस का ऑर्डर! 👑 मैंने यूजर `{target_user_id}` के `{deleted_count}` बातचीत के मैसेज और अर्निंग डेटा डिलीट कर दिए हैं। 😉", parse_mode=ParseMode.MARKDOWN)
+                await send_and_auto_delete_reply(message, text=f"बॉस का ऑर्डर! 👑 मैंने यूजर `{target_user_id}` के `{deleted_messages_count}` बातचीत के मैसेज और अर्निंग डेटा डिलीट कर दिए हैं। 😉", parse_mode=ParseMode.MARKDOWN)
                 logger.info(f"Owner {message.from_user.id} cleared data for user {target_user_id}.")
         else:
             if target_user_id == message.from_user.id:
@@ -1429,6 +1460,8 @@ async def new_member_handler(client: Client, message: Message):
 
     for member in message.new_chat_members:
         logger.info(f"Processing new member: {member.id} ({member.first_name}) in chat {message.chat.id}. Is bot: {member.is_bot}. (Event handled by @asbhaibsr)")
+        
+        # Scenario 1: The bot itself joins a new group
         if member.id == client.me.id:
             if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
                 logger.info(f"DEBUG: Bot {client.me.id} detected as new member in group {message.chat.id}. Calling update_group_info.")
@@ -1451,16 +1484,18 @@ async def new_member_handler(client: Client, message: Message):
                     logger.info(f"Owner notified about new group: {group_title}. (Notification by @asbhaibsr)")
                 except Exception as e:
                     logger.error(f"Could not notify owner about new group {group_title}: {e}. (Notification error by @asbhaibsr)")
-            return
+            return # Exit function if the member is the bot itself
 
-        if not member.is_bot:
+        # Scenario 2: A new (non-bot) user starts the bot in private
+        # Per user's clarification: ONLY notify owner if a NEW user starts the bot in private,
+        # NOT when a new user joins a group where the bot is present.
+        if not member.is_bot and message.chat.type == ChatType.PRIVATE and member.id == message.from_user.id:
             user_exists = user_tracking_collection.find_one({"_id": member.id})
-
-            if message.chat.type == ChatType.PRIVATE and member.id == message.from_user.id and not user_exists:
+            if not user_exists: # Only send notification if it's genuinely a new user to the bot's private chat
                 user_name = member.first_name if member.first_name else "Naya User"
                 user_username = f"@{member.username}" if member.username else "N/A"
                 notification_message = (
-                    f"✨ **New User Alert!**\n"
+                    f"✨ **New User Alert! (Private Chat)**\n"
                     f"Ek naye user ne bot ko private mein start kiya hai.\n\n"
                     f"**User Name:** {user_name}\n"
                     f"**User ID:** `{member.id}`\n"
@@ -1473,27 +1508,6 @@ async def new_member_handler(client: Client, message: Message):
                     logger.info(f"Owner notified about new private user: {user_name}. (Notification by @asbhaibsr)")
                 except Exception as e:
                     logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
-
-            elif message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and not user_exists:
-                user_name = member.first_name if member.first_name else "Naya User"
-                user_username = f"@{member.username}" if member.username else "N/A"
-                group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
-                notification_message = (
-                    f"👥 **New Group Member Alert!**\n"
-                    f"Ek naya user group mein add hua hai jahan bot bhi hai.\n\n"
-                    f"**User Name:** {user_name}\n"
-                    f"**User ID:** `{member.id}`\n"
-                    f"**Username:** {user_username}\n"
-                    f"**Group Name:** {group_title}\n"
-                    f"**Group ID:** `{message.chat.id}`\n"
-                    f"**Joined On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
-                )
-                try:
-                    await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
-                    logger.info(f"Owner notified about new group member: {user_name} in {group_title}. (Notification by @asbhaibsr)")
-                except Exception as e:
-                    logger.error(f"Could not notify owner about new group member {user_name} in {group_title}: {e}. (Notification error by @asbhaibsr)")
 
     await store_message(message)
     if message.from_user:
@@ -1508,10 +1522,14 @@ async def left_member_handler(client: Client, message: Message):
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
             group_tracking_collection.delete_one({"_id": message.chat.id})
             messages_collection.delete_many({"chat_id": message.chat.id})
+            # This part below to update user's group list is not strictly necessary for earning,
+            # as earning is based on message count not group membership, but keeping for completeness
+            # if `groups` array was used in user_tracking_collection
             earning_tracking_collection.update_many(
-                {"_id": {"$in": [user["_id"] for user in earning_tracking_collection.find({})]}},
-                {"$pull": {"groups": message.chat.id}}
+                {}, # All users
+                {"$pull": {"last_active_group_id": message.chat.id}} # If it was tracking last group specifically
             )
+
 
             logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared. (Code by @asbhaibsr)")
             group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
@@ -1539,12 +1557,14 @@ async def left_member_handler(client: Client, message: Message):
 
 @app.on_message(filters.text | filters.sticker | filters.photo | filters.video | filters.document) # Added more filters for comprehensive handling
 async def handle_message_and_reply(client: Client, message: Message):
+    # Ignore messages from bots
     if message.from_user and message.from_user.is_bot:
         logger.debug(f"Skipping message from bot user: {message.from_user.id}. (Handle message by @asbhaibsr)")
         return
 
     is_group_chat = message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]
 
+    # Check if bot is enabled in group chats
     if is_group_chat:
         group_status = group_tracking_collection.find_one({"_id": message.chat.id})
         if group_status and not group_status.get("bot_enabled", True):
@@ -1552,12 +1572,14 @@ async def handle_message_and_reply(client: Client, message: Message):
             return
 
     # Apply 5-second cooldown for general messages (not commands)
-    if message.from_user and not message.text.startswith('/'): # Only apply to non-command messages
-        user_id = message.from_user.id
-        if not await can_reply_to_user(user_id):
-            logger.info(f"User {user_id} is on message reply cooldown. Skipping message {message.id}.")
+    # This logic ensures that only one message is processed per cooldown period per chat.
+    # If multiple messages arrive simultaneously after cooldown, the first one picked up by the event loop will proceed,
+    # and then the cooldown will be set, effectively ignoring others during that new cooldown.
+    if message.from_user and not (message.text and message.text.startswith('/')): # Only apply to non-command messages
+        chat_id_for_cooldown = message.chat.id
+        if not await can_reply_to_chat(chat_id_for_cooldown): # Check cooldown for the specific chat
+            logger.info(f"Chat {chat_id_for_cooldown} is on message reply cooldown. Skipping message {message.id}.")
             return # Skip processing and replying to this message
-        update_message_reply_cooldown(user_id) # Update cooldown after processing this message
 
     logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}). (Handle message by @asbhaibsr)")
 
@@ -1585,13 +1607,14 @@ async def handle_message_and_reply(client: Client, message: Message):
                     # Schedule deletion of the bot's alert message
                     asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                     logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return
+                    return # Stop processing this message further
                 except Exception as e:
                     logger.error(f"Error deleting link message {message.id}: {e}")
             elif contains_link(message.text) and is_sender_admin:
                 logger.info(f"Admin's link message {message.id} was not deleted in chat {message.chat.id}.")
 
         # 2. Biolink Deletion Check (links in user's BIO)
+        # This check is only performed if the message has not already been deleted by the linkdel rule
         if current_group_settings and current_group_settings.get("biolinkdel_enabled", False) and user_id:
             try:
                 user_chat_obj = await client.get_chat(user_id)
@@ -1611,7 +1634,7 @@ async def handle_message_and_reply(client: Client, message: Message):
                             # Schedule deletion of the bot's alert message
                             asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                             logger.info(f"Deleted message {message.id} from user {user_id} due to link in bio in chat {message.chat.id}.")
-                            return
+                            return # Stop processing this message further
                         except Exception as e:
                             logger.error(f"Error deleting message {message.id} due to bio link: {e}")
                 elif (is_sender_admin or is_biolink_exception) and URL_PATTERN.search(user_bio):
@@ -1621,6 +1644,7 @@ async def handle_message_and_reply(client: Client, message: Message):
                 logger.error(f"Error checking user bio for user {user_id} in chat {message.chat.id}: {e}")
 
         # 3. Username Deletion Check (@mentions in message content)
+        # This check is only performed if the message has not already been deleted by the above rules
         if current_group_settings and current_group_settings.get("usernamedel_enabled", False) and message.text:
             if contains_mention(message.text) and not is_sender_admin:
                 try:
@@ -1629,17 +1653,17 @@ async def handle_message_and_reply(client: Client, message: Message):
                     # Schedule deletion of the bot's alert message
                     asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                     logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return
+                    return # Stop processing this message further
                 except Exception as e:
                     logger.error(f"Error deleting username message {message.id}: {e}")
             elif contains_mention(message.text) and is_sender_admin:
                 logger.info(f"Admin's username mention message {message.id} was not deleted in chat {message.chat.id}.")
     # --- END NEW CHECKS ---
 
-    # Only store message and generate reply if it wasn't deleted by any of the above checks
-    await store_message(message)
+    # Only store message and generate reply if it wasn't deleted by any of the above checks AND it's not a command
+    if not (message.text and message.text.startswith('/')):
+        await store_message(message)
 
-    if not message.text or not message.text.startswith('/'):
         logger.info(f"Attempting to generate reply for chat {message.chat.id}. (Logic by @asbhaibsr)")
         reply_doc = await generate_reply(message)
 
@@ -1655,6 +1679,9 @@ async def handle_message_and_reply(client: Client, message: Message):
                     logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}. (System by @asbhaibsr)")
             except Exception as e:
                 logger.error(f"Error sending reply for message {message.id}: {e}. (System by @asbhaibsr)")
+            finally:
+                # Set cooldown AFTER a reply is sent
+                update_message_reply_cooldown(message.chat.id)
         else:
             logger.info("No suitable reply found. (System by @asbhaibsr)")
 
@@ -1678,4 +1705,3 @@ if __name__ == "__main__":
     app.run()
 
     # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
-
