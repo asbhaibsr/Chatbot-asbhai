@@ -146,16 +146,16 @@ def update_command_cooldown(user_id):
 # Stores the timestamp when a chat's *last* general message was processed/replied to.
 # Bot will wait 5 seconds after this timestamp before processing another general message in that chat.
 # This ensures that if multiple messages arrive simultaneously after cooldown, only the first is processed.
-chat_message_cooldowns = {} # Changed from user_message_cooldowns to chat_message_cooldowns
+chat_message_cooldowns = {}
 MESSAGE_REPLY_COOLDOWN_TIME = 5 # seconds
 
-async def can_reply_to_chat(chat_id): # Function updated to check chat_id
+async def can_reply_to_chat(chat_id):
     last_reply_time = chat_message_cooldowns.get(chat_id)
     if last_reply_time is None:
         return True
     return (time.time() - last_reply_time) >= MESSAGE_REPLY_COOLDOWN_TIME
 
-def update_message_reply_cooldown(chat_id): # Function updated to use chat_id
+def update_message_reply_cooldown(chat_id):
     chat_message_cooldowns[chat_id] = time.time()
 
 
@@ -711,6 +711,17 @@ async def callback_handler(client, callback_query):
             "timestamp": datetime.now(),
             "credit": "by @asbhaibsr"
         })
+    elif callback_query.data == "show_my_stats": # NEW CALLBACK DATA FOR MY STATS
+        await my_stats_command(client, callback_query.message)
+        buttons_collection.insert_one({
+            "user_id": callback_query.from_user.id,
+            "username": callback_query.from_user.username,
+            "first_name": callback_query.from_user.first_name,
+            "button_data": callback_query.data,
+            "timestamp": datetime.now(),
+            "credit": "by @asbhaibsr"
+        })
+
 
     logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}. (Code by @asbhaibsr)")
 
@@ -791,6 +802,9 @@ async def top_users_command(client: Client, message: Message):
             [
                 InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", url=f"https://t.me/{ASBHAI_USERNAME}"),
                 InlineKeyboardButton("💰 Earning Rules", callback_data="show_earning_rules")
+            ],
+            [
+                InlineKeyboardButton("📊 My Stats", callback_data="show_my_stats") # NEW BUTTON
             ]
         ]
     )
@@ -1281,7 +1295,7 @@ async def allow_biolink_user_command(client: Client, message: Message):
                 {"$set": {"allowed_by_admin": True, "added_on": datetime.now(), "credit": "by @asbhaibsr"}},
                 upsert=True
             )
-            await send_and_auto_delete_reply(message, text=f"याय! 🎉 मैंने यूज़र `{target_user_id}` को स्पेशल परमिशन दे दी है! अब ये **अपनी बायो में `t.me` या `http/https` लिंक्स** रख पाएंगे और उनके मैसेज डिलीट नहीं होंगे! क्यूंकि एडमिन ने बोला, तो बोला! 👑", parse_mode=ParseMode.MARKDOWN)
+            await send_and_auto_delete_reply(message, text=f"याय! 🎉 मैंने यूज़र `{target_user_id}` को स्पेशल परमिशन दे दी है! अब ये **अपनी बायो में `t.me` या `http/https` लिंक्स** रख पाएंगे और उनके मैसेज डिलीट नहीं होंगे! क्यूंकि एडमिन ने बोला, तो बोला!👑", parse_mode=ParseMode.MARKDOWN)
             logger.info(f"Added user {target_user_id} to biolink exceptions in group {message.chat.id}.")
         except ValueError:
             await send_and_auto_delete_reply(message, text="उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", parse_mode=ParseMode.MARKDOWN)
@@ -1453,6 +1467,114 @@ async def clear_my_data_command(client: Client, message: Message):
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
+# --- NEW: My Stats Command ---
+@app.on_message(filters.command("mystats") & (filters.private | filters.group))
+async def my_stats_command(client: Client, message: Message):
+    if is_on_command_cooldown(message.from_user.id):
+        return
+    update_command_cooldown(message.from_user.id)
+
+    user_id = message.from_user.id
+    user_data = earning_tracking_collection.find_one({"_id": user_id})
+
+    if not user_data:
+        await send_and_auto_delete_reply(message, text="📊 आपकी कोई स्टैटिस्टिक्स नहीं मिली! शायद आपने अभी तक कोई मैसेज नहीं भेजा या डेटा रीसेट हो गया है। सक्रिय हो जाओ, और मैं आपकी स्टैट्स को ट्रैक करना शुरू कर दूंगी! 😉", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    # Overall Stats
+    overall_messages_sent = user_data.get("group_message_count", 0)
+    
+    # Calculate global ranking (approximated for large datasets without full sort)
+    # This is a complex query to get exact global ranking efficiently in MongoDB without a full scan.
+    # For simplicity, we'll give an approximation or count users above them.
+    # Exact global ranking might be too slow for very large collections.
+    
+    # Let's count users who have more messages than the current user
+    users_with_more_messages = earning_tracking_collection.count_documents(
+        {"group_message_count": {"$gt": overall_messages_sent}}
+    )
+    global_ranking_position = users_with_more_messages + 1
+
+    # Active groups detection (approximate for simplicity using unique chat_ids from messages_collection)
+    # This is a rough estimation of active groups based on where the user has sent messages.
+    # For a more accurate count, you'd need a more robust group tracking per user.
+    active_groups_overall = messages_collection.distinct("chat_id", {"user_id": user_id, "chat_type": {"$in": ["group", "supergroup"]}})
+    num_overall_active_groups = len(active_groups_overall)
+
+
+    # Today's Stats
+    today = datetime.now(pytz.timezone('Asia/Kolkata')).date()
+    start_of_today = datetime.combine(today, datetime.min.time(), tzinfo=pytz.timezone('Asia/Kolkata'))
+    end_of_today = datetime.combine(today, datetime.max.time(), tzinfo=pytz.timezone('Asia/Kolkata'))
+
+    messages_today = messages_collection.count_documents({
+        "user_id": user_id,
+        "timestamp": {"$gte": start_of_today, "$lte": end_of_today},
+        "chat_type": {"$in": ["group", "supergroup"]}
+    })
+    
+    # Global ranking for today (this would be very complex and slow without specific daily aggregates)
+    # For now, we'll use a placeholder or simply say it's not tracked daily at a global level.
+    # For a real system, you'd need a daily message count aggregation for all users.
+    global_ranking_today = "N/A (daily global rank not tracked)"
+    
+    active_groups_today = messages_collection.distinct("chat_id", {
+        "user_id": user_id,
+        "timestamp": {"$gte": start_of_today, "$lte": end_of_today},
+        "chat_type": {"$in": ["group", "supergroup"]}
+    })
+    num_today_active_groups = len(active_groups_today)
+
+
+    # This Week's Stats
+    start_of_week = datetime.now(pytz.timezone('Asia/Kolkata')).date() - timedelta(days=datetime.now(pytz.timezone('Asia/Kolkata')).weekday()) # Monday
+    start_of_week = datetime.combine(start_of_week, datetime.min.time(), tzinfo=pytz.timezone('Asia/Kolkata'))
+    end_of_week = start_of_week + timedelta(days=6, hours=23, minutes=59, seconds=59)
+
+    messages_this_week = messages_collection.count_documents({
+        "user_id": user_id,
+        "timestamp": {"$gte": start_of_week, "$lte": end_of_week},
+        "chat_type": {"$in": ["group", "supergroup"]}
+    })
+    
+    # Global ranking for this week (similar to daily, very complex without specific weekly aggregates)
+    global_ranking_this_week = "N/A (weekly global rank not tracked)"
+
+    active_groups_this_week = messages_collection.distinct("chat_id", {
+        "user_id": user_id,
+        "timestamp": {"$gte": start_of_week, "$lte": end_of_week},
+        "chat_type": {"$in": ["group", "supergroup"]}
+    })
+    num_this_week_active_groups = len(active_groups_this_week)
+
+
+    stats_text = (
+        f"📊 **{message.from_user.first_name}'s Stats**\n"
+        f"👥 ChatFight detects you in **{num_overall_active_groups}** groups (overall).\n\n" # Updated for clarity
+
+        f"➖ **Overall Stats**\n"
+        f"🏆 Global ranking position: **{global_ranking_position}°** of ~{earning_tracking_collection.count_documents({})}\n"
+        f"📤 Messages sent: **{overall_messages_sent}**\n"
+        f"👥 Active groups: **{num_overall_active_groups}**\n\n"
+
+        f"➖ **Today's Stats**\n"
+        f"🏆 Global ranking position: **{global_ranking_today}**\n"
+        f"📤 Messages sent: **{messages_today}**\n"
+        f"👥 Active groups: **{num_today_active_groups}**\n\n"
+
+        f"➖ **This Week's Stats**\n"
+        f"🏆 Global ranking position: **{global_ranking_this_week}**\n"
+        f"📤 Messages sent: **{messages_this_week}**\n"
+        f"👥 Active groups: **{num_this_week_active_groups}**\n\n"
+        f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+    )
+
+    await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
+    await store_message(message)
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    logger.info(f"My Stats command processed for user {message.from_user.id} in chat {message.chat.id}.")
+
 # --- New chat members and left chat members ---
 @app.on_message(filters.new_chat_members)
 async def new_member_handler(client: Client, message: Message):
@@ -1603,7 +1725,7 @@ async def handle_message_and_reply(client: Client, message: Message):
             if contains_link(message.text) and not is_sender_admin:
                 try:
                     await message.delete()
-                    sent_delete_alert = await message.reply_text("ओहो, ये क्या भेज दिया? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया! 💨 अब से ध्यान रखना, हाँ?", quote=True, parse_mode=ParseMode.MARKDOWN)
+                    sent_delete_alert = await message.reply_text(f"ओहो, ये क्या भेज दिया {message.from_user.mention}? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया! 💨 अब से ध्यान रखना, हाँ?", quote=True, parse_mode=ParseMode.MARKDOWN)
                     # Schedule deletion of the bot's alert message
                     asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                     logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
@@ -1627,7 +1749,7 @@ async def handle_message_and_reply(client: Client, message: Message):
                         try:
                             await message.delete()
                             sent_delete_alert = await message.reply_text(
-                                "अरे बाबा रे! 😲 आपकी **बायो में लिंक है!** इसीलिए आपका मैसेज गायब हो गया!👻\n"
+                                f"अरे बाबा रे {message.from_user.mention}! 😲 आपकी **बायो में लिंक है!** इसीलिए आपका मैसेज गायब हो गया!👻\n"
                                 "कृपया अपनी बायो से लिंक हटाएँ। यदि आपको यह अनुमति चाहिए, तो कृपया एडमिन से संपर्क करें और उन्हें `/biolink आपका_यूजरआईडी` कमांड देने को कहें।",
                                 quote=True, parse_mode=ParseMode.MARKDOWN
                             )
@@ -1649,7 +1771,7 @@ async def handle_message_and_reply(client: Client, message: Message):
             if contains_mention(message.text) and not is_sender_admin:
                 try:
                     await message.delete()
-                    sent_delete_alert = await message.reply_text("टच-टच! 😬 आपने `@` का इस्तेमाल किया! सॉरी, वो मैसेज तो चला गया आसमान में! 🚀 अगली बार से ध्यान रखना, हाँ? 😉", quote=True, parse_mode=ParseMode.MARKDOWN)
+                    sent_delete_alert = await message.reply_text(f"टच-टच {message.from_user.mention}! 😬 आपने `@` का इस्तेमाल किया! सॉरी, वो मैसेज तो चला गया आसमान में! 🚀 अगली बार से ध्यान रखना, हाँ? 😉", quote=True, parse_mode=ParseMode.MARKDOWN)
                     # Schedule deletion of the bot's alert message
                     asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                     logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
