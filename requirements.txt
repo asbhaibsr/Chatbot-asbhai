@@ -6,3 +6,5 @@ dnspython
 tgcrypto==1.2.2
 Flask
 pytz
+yt-dlp
+ffmpeg
