@@ -10,8 +10,6 @@ import os
 import asyncio
 import threading
 import time
-import music_bot_module
-
 
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
