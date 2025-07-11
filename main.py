@@ -65,7 +65,7 @@ try:
     messages_collection = db_messages.messages
     logger.info("MongoDB (Messages) connection successful. Credit: @asbhaibsr")
 
-    client_buttons = MongoClient(MONGO_URI_BUTTONS)
+    client_buttons = MongoClient(MONGO_URI_BUTTONs)
     db_buttons = client_buttons.bot_button_data
     buttons_collection = db_buttons.button_interactions
     logger.info("MongoDB (Buttons) connection successful. Credit: @asbhaibsr")
@@ -144,10 +144,9 @@ def update_command_cooldown(user_id):
 
 # --- Message Reply Cooldown (for general messages) ---
 # Stores the timestamp when a chat's *last* general message was processed/replied to.
-# Bot will wait 5 seconds after this timestamp before processing another general message in that chat.
-# This ensures that if multiple messages arrive simultaneously after cooldown, only the first is processed.
+# Bot will wait 8 minutes after this timestamp before processing another general message in that chat.
 chat_message_cooldowns = {}
-MESSAGE_REPLY_COOLDOWN_TIME = 5 # seconds
+MESSAGE_REPLY_COOLDOWN_TIME = 8 # seconds (8 seconds)
 
 async def can_reply_to_chat(chat_id):
     last_reply_time = chat_message_cooldowns.get(chat_id)
@@ -711,17 +710,6 @@ async def callback_handler(client, callback_query):
             "timestamp": datetime.now(),
             "credit": "by @asbhaibsr"
         })
-    elif callback_query.data == "show_my_stats": # NEW CALLBACK DATA FOR MY STATS
-        await my_stats_command(client, callback_query.message)
-        buttons_collection.insert_one({
-            "user_id": callback_query.from_user.id,
-            "username": callback_query.from_user.username,
-            "first_name": callback_query.from_user.first_name,
-            "button_data": callback_query.data,
-            "timestamp": datetime.now(),
-            "credit": "by @asbhaibsr"
-        })
-
 
     logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}. (Code by @asbhaibsr)")
 
@@ -802,9 +790,6 @@ async def top_users_command(client: Client, message: Message):
             [
                 InlineKeyboardButton("💰 पैसे निकलवाएँ (Withdraw)", url=f"https://t.me/{ASBHAI_USERNAME}"),
                 InlineKeyboardButton("💰 Earning Rules", callback_data="show_earning_rules")
-            ],
-            [
-                InlineKeyboardButton("📊 My Stats", callback_data="show_my_stats") # NEW BUTTON
             ]
         ]
     )
@@ -1327,7 +1312,7 @@ async def toggle_usernamedel_command(client: Client, message: Message):
             {"$set": {"usernamedel_enabled": True}},
             upsert=True
         )
-        await send_and_auto_delete_reply(message, text="चीं-चीं! 🐦 अब से कोई भी `@` करके किसी को भी परेशान नहीं कर पाएगा! जो करेगा, उसका मैसेज मैं फट से उड़ा दूंगी! 💨 मुझे डिस्टर्बेंस पसंद नहीं! 😠", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="चीं-चीं! 🐦 अब से कोई भी `@` करके किसी को भी परेशान नहीं कर पाएगा! जो करेगा, उसका मैसेज मैं फट से उड़ा दूंगी!💨 मुझे डिस्टर्बेंस पसंद नहीं! 😠", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Username deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
     elif action == "off":
         group_tracking_collection.update_one(
@@ -1385,7 +1370,7 @@ async def handle_clearall_dbs_callback(client: Client, callback_query):
         return
 
     if query.data == 'confirm_clearall_dbs':
-        await query.edit_message_text("डेटा डिलीट किया जा रहा है... कृपया प्रतीक्षा करें। ⏳")
+        await query.edit_message_text("डेटा डिलीट किया जा रहा है... कृपया प्रतीक्षा करें।⏳")
         try:
             # Drop all databases for client_messages
             for db_name in client_messages.list_database_names():
@@ -1466,114 +1451,6 @@ async def clear_my_data_command(client: Client, message: Message):
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
-
-# --- NEW: My Stats Command ---
-@app.on_message(filters.command("mystats") & (filters.private | filters.group))
-async def my_stats_command(client: Client, message: Message):
-    if is_on_command_cooldown(message.from_user.id):
-        return
-    update_command_cooldown(message.from_user.id)
-
-    user_id = message.from_user.id
-    user_data = earning_tracking_collection.find_one({"_id": user_id})
-
-    if not user_data:
-        await send_and_auto_delete_reply(message, text="📊 आपकी कोई स्टैटिस्टिक्स नहीं मिली! शायद आपने अभी तक कोई मैसेज नहीं भेजा या डेटा रीसेट हो गया है। सक्रिय हो जाओ, और मैं आपकी स्टैट्स को ट्रैक करना शुरू कर दूंगी! 😉", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    # Overall Stats
-    overall_messages_sent = user_data.get("group_message_count", 0)
-    
-    # Calculate global ranking (approximated for large datasets without full sort)
-    # This is a complex query to get exact global ranking efficiently in MongoDB without a full scan.
-    # For simplicity, we'll give an approximation or count users above them.
-    # Exact global ranking might be too slow for very large collections.
-    
-    # Let's count users who have more messages than the current user
-    users_with_more_messages = earning_tracking_collection.count_documents(
-        {"group_message_count": {"$gt": overall_messages_sent}}
-    )
-    global_ranking_position = users_with_more_messages + 1
-
-    # Active groups detection (approximate for simplicity using unique chat_ids from messages_collection)
-    # This is a rough estimation of active groups based on where the user has sent messages.
-    # For a more accurate count, you'd need a more robust group tracking per user.
-    active_groups_overall = messages_collection.distinct("chat_id", {"user_id": user_id, "chat_type": {"$in": ["group", "supergroup"]}})
-    num_overall_active_groups = len(active_groups_overall)
-
-
-    # Today's Stats
-    today = datetime.now(pytz.timezone('Asia/Kolkata')).date()
-    start_of_today = datetime.combine(today, datetime.min.time(), tzinfo=pytz.timezone('Asia/Kolkata'))
-    end_of_today = datetime.combine(today, datetime.max.time(), tzinfo=pytz.timezone('Asia/Kolkata'))
-
-    messages_today = messages_collection.count_documents({
-        "user_id": user_id,
-        "timestamp": {"$gte": start_of_today, "$lte": end_of_today},
-        "chat_type": {"$in": ["group", "supergroup"]}
-    })
-    
-    # Global ranking for today (this would be very complex and slow without specific daily aggregates)
-    # For now, we'll use a placeholder or simply say it's not tracked daily at a global level.
-    # For a real system, you'd need a daily message count aggregation for all users.
-    global_ranking_today = "N/A (daily global rank not tracked)"
-    
-    active_groups_today = messages_collection.distinct("chat_id", {
-        "user_id": user_id,
-        "timestamp": {"$gte": start_of_today, "$lte": end_of_today},
-        "chat_type": {"$in": ["group", "supergroup"]}
-    })
-    num_today_active_groups = len(active_groups_today)
-
-
-    # This Week's Stats
-    start_of_week = datetime.now(pytz.timezone('Asia/Kolkata')).date() - timedelta(days=datetime.now(pytz.timezone('Asia/Kolkata')).weekday()) # Monday
-    start_of_week = datetime.combine(start_of_week, datetime.min.time(), tzinfo=pytz.timezone('Asia/Kolkata'))
-    end_of_week = start_of_week + timedelta(days=6, hours=23, minutes=59, seconds=59)
-
-    messages_this_week = messages_collection.count_documents({
-        "user_id": user_id,
-        "timestamp": {"$gte": start_of_week, "$lte": end_of_week},
-        "chat_type": {"$in": ["group", "supergroup"]}
-    })
-    
-    # Global ranking for this week (similar to daily, very complex without specific weekly aggregates)
-    global_ranking_this_week = "N/A (weekly global rank not tracked)"
-
-    active_groups_this_week = messages_collection.distinct("chat_id", {
-        "user_id": user_id,
-        "timestamp": {"$gte": start_of_week, "$lte": end_of_week},
-        "chat_type": {"$in": ["group", "supergroup"]}
-    })
-    num_this_week_active_groups = len(active_groups_this_week)
-
-
-    stats_text = (
-        f"📊 **{message.from_user.first_name}'s Stats**\n"
-        f"👥 ChatFight detects you in **{num_overall_active_groups}** groups (overall).\n\n" # Updated for clarity
-
-        f"➖ **Overall Stats**\n"
-        f"🏆 Global ranking position: **{global_ranking_position}°** of ~{earning_tracking_collection.count_documents({})}\n"
-        f"📤 Messages sent: **{overall_messages_sent}**\n"
-        f"👥 Active groups: **{num_overall_active_groups}**\n\n"
-
-        f"➖ **Today's Stats**\n"
-        f"🏆 Global ranking position: **{global_ranking_today}**\n"
-        f"📤 Messages sent: **{messages_today}**\n"
-        f"👥 Active groups: **{num_today_active_groups}**\n\n"
-
-        f"➖ **This Week's Stats**\n"
-        f"🏆 Global ranking position: **{global_ranking_this_week}**\n"
-        f"📤 Messages sent: **{messages_this_week}**\n"
-        f"👥 Active groups: **{num_this_week_active_groups}**\n\n"
-        f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
-    )
-
-    await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
-    if message.from_user:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"My Stats command processed for user {message.from_user.id} in chat {message.chat.id}.")
 
 # --- New chat members and left chat members ---
 @app.on_message(filters.new_chat_members)
@@ -1693,10 +1570,7 @@ async def handle_message_and_reply(client: Client, message: Message):
             logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling. (Code by @asbhaibsr)")
             return
 
-    # Apply 5-second cooldown for general messages (not commands)
-    # This logic ensures that only one message is processed per cooldown period per chat.
-    # If multiple messages arrive simultaneously after cooldown, the first one picked up by the event loop will proceed,
-    # and then the cooldown will be set, effectively ignoring others during that new cooldown.
+    # Apply cooldown for general messages (not commands)
     if message.from_user and not (message.text and message.text.startswith('/')): # Only apply to non-command messages
         chat_id_for_cooldown = message.chat.id
         if not await can_reply_to_chat(chat_id_for_cooldown): # Check cooldown for the specific chat
