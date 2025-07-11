@@ -65,7 +65,7 @@ try:
     messages_collection = db_messages.messages
     logger.info("MongoDB (Messages) connection successful. Credit: @asbhaibsr")
 
-    client_buttons = MongoClient(MONGO_URI_BUTTONs)
+    client_buttons = MongoClient(MONGO_URI_BUTTONS)
     db_buttons = client_buttons.bot_button_data
     buttons_collection = db_buttons.button_interactions
     logger.info("MongoDB (Buttons) connection successful. Credit: @asbhaibsr")
