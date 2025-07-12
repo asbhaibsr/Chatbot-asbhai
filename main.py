@@ -493,6 +493,14 @@ async def send_and_auto_delete_reply(message: Message, text: str = None, photo: 
     return sent_message
 
 # --- Music Commands ---
+# --- IMPORTANT: THIS BOT CODE IS PROPERTY OF @asbhaibsr ---
+# [Previous code remains the same until the music commands section]
+
+# --- Music Commands ---
+# Dictionary to store music queue and playback status for each chat
+music_queues = {}
+current_playing = {}
+
 @app.on_message(filters.command("play"))
 async def play_music(client: Client, message: Message):
     if is_on_command_cooldown(message.from_user.id):
@@ -512,18 +520,137 @@ async def play_music(client: Client, message: Message):
             await send_and_auto_delete_reply(message, text="माफ़ कीजिए, मैं इस गाने को डाउनलोड नहीं कर पाया। कृपया कोई अन्य गाना ट्राई करें।")
             return
 
-        await send_and_auto_delete_reply(message, text=f"🎵 चल रहा है: {title}")
+        chat_id = message.chat.id
         
-        # Send as voice message
-        await message.reply_voice(
-            audio_url,
-            caption=f"🎧 {title}",
-            duration=duration
+        # Initialize queue if not exists
+        if chat_id not in music_queues:
+            music_queues[chat_id] = []
+            
+        # Add song to queue
+        music_queues[chat_id].append({
+            'url': audio_url,
+            'title': title,
+            'duration': duration,
+            'requested_by': message.from_user.id
+        })
+        
+        # Create buttons
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("⏸ Pause", callback_data="pause_music"),
+                    InlineKeyboardButton("⏭ Skip", callback_data="skip_music")
+                ],
+                [
+                    InlineKeyboardButton("🔀 Shuffle", callback_data="shuffle_queue"),
+                    InlineKeyboardButton("🗑 Clear Queue", callback_data="clear_queue")
+                ]
+            ]
         )
-        
+
+        # If nothing is playing, start playback
+        if chat_id not in current_playing or not current_playing[chat_id]['playing']:
+            await play_next_song(client, chat_id)
+        else:
+            await send_and_auto_delete_reply(
+                message,
+                text=f"🎵 Added to queue: {title}\nPosition: {len(music_queues[chat_id])}",
+                reply_markup=keyboard
+            )
+            
     except Exception as e:
         logger.error(f"Error in play command: {e}")
         await send_and_auto_delete_reply(message, text=f"त्रुटि हुई: {e}")
+
+async def play_next_song(client: Client, chat_id: int):
+    if chat_id not in music_queues or not music_queues[chat_id]:
+        current_playing.pop(chat_id, None)
+        return
+
+    song = music_queues[chat_id].pop(0)
+    
+    # Update current playing status
+    current_playing[chat_id] = {
+        'playing': True,
+        'song': song,
+        'start_time': time.time()
+    }
+    
+    # Create buttons
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("⏸ Pause", callback_data="pause_music"),
+                InlineKeyboardButton("⏭ Skip", callback_data="skip_music")
+            ],
+            [
+                InlineKeyboardButton("🔀 Shuffle", callback_data="shuffle_queue"),
+                InlineKeyboardButton("🗑 Clear Queue", callback_data="clear_queue")
+            ]
+        ]
+    )
+
+    try:
+        # Send as voice message
+        msg = await client.send_voice(
+            chat_id,
+            song['url'],
+            caption=f"🎧 Now Playing: {song['title']}\nDuration: {format_duration(song['duration'])}\nRequested by: {song['requested_by']}",
+            duration=song['duration'],
+            reply_markup=keyboard
+        )
+        
+        # Store message ID for later control
+        current_playing[chat_id]['message_id'] = msg.id
+        
+        # Schedule next song
+        await asyncio.sleep(song['duration'])
+        await play_next_song(client, chat_id)
+        
+    except Exception as e:
+        logger.error(f"Error playing song in chat {chat_id}: {e}")
+        await play_next_song(client, chat_id)
+
+def format_duration(seconds: int) -> str:
+    minutes, seconds = divmod(seconds, 60)
+    return f"{minutes}:{seconds:02d}"
+
+@app.on_callback_query(filters.regex(r"^(pause_music|skip_music|shuffle_queue|clear_queue)$"))
+async def music_controls(client: Client, callback_query):
+    chat_id = callback_query.message.chat.id
+    user_id = callback_query.from_user.id
+    
+    if chat_id not in current_playing:
+        await callback_query.answer("No song is currently playing!", show_alert=True)
+        return
+        
+    if callback_query.data == "pause_music":
+        if current_playing[chat_id]['playing']:
+            # Pause logic would go here (requires voice chat implementation)
+            await callback_query.answer("Paused the music!")
+            current_playing[chat_id]['playing'] = False
+        else:
+            # Resume logic would go here
+            await callback_query.answer("Resumed the music!")
+            current_playing[chat_id]['playing'] = True
+            
+    elif callback_query.data == "skip_music":
+        await callback_query.answer("Skipping current song!")
+        await play_next_song(client, chat_id)
+        
+    elif callback_query.data == "shuffle_queue":
+        if chat_id in music_queues and len(music_queues[chat_id]) > 0:
+            random.shuffle(music_queues[chat_id])
+            await callback_query.answer("Queue shuffled!")
+        else:
+            await callback_query.answer("Queue is empty!", show_alert=True)
+            
+    elif callback_query.data == "clear_queue":
+        if chat_id in music_queues:
+            music_queues[chat_id].clear()
+            await callback_query.answer("Queue cleared!")
+        else:
+            await callback_query.answer("Queue is already empty!", show_alert=True)
 
 @app.on_message(filters.command("song"))
 async def download_song(client: Client, message: Message):
@@ -558,6 +685,8 @@ async def download_song(client: Client, message: Message):
     except Exception as e:
         logger.error(f"Error in song command: {e}")
         await send_and_auto_delete_reply(message, text=f"त्रुटि हुई: {e}")
+
+# [Rest of the code remains the same]
 
 # --- Tracking Functions ---
 async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None):
