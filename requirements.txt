@@ -6,3 +6,6 @@ dnspython
 tgcrypto==1.2.2
 Flask
 pytz
+ffmpeg-python==0.2.0
+youtube-search==2.1.2
+yt-dlp==2023.11.16
