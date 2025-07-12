@@ -30,6 +30,26 @@ import pytz
 # Flask imports
 from flask import Flask, request, jsonify
 
+# FFmpeg डाउनलोड और सेटअप (बिना root permission के)
+if not os.path.exists("ffmpeg"):
+    print("Downloading FFmpeg...")
+    try:
+        subprocess.run([
+            "wget", 
+            "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+        ], check=True)
+        subprocess.run([
+            "tar", "-xf", "ffmpeg-release-amd64-static.tar.xz"
+        ], check=True)
+        # FFmpeg बाइनरी को एक्सेसिबल बनाएं
+        os.rename("ffmpeg-*/ffmpeg", "ffmpeg")
+        os.chmod("ffmpeg", 0o755)  # Execute permission
+    except Exception as e:
+        print(f"FFmpeg डाउनलोड में समस्या: {e}")
+
+# FFmpeg पाथ सेट करें
+os.environ["PATH"] += os.pathsep + os.getcwd()
+
 # --- Logger Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
