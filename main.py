@@ -71,7 +71,12 @@ YTDL_OPTIONS = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
-    'extract_flat': 'in_playlist'
+    'extract_flat': 'in_playlist',
+    'postprocessors': [{  # यह नया ऐड करें
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'mp3',
+        'preferredquality': '192',
+    }],
 }
 
 FFMPEG_OPTIONS = {
