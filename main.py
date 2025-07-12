@@ -30,10 +30,14 @@ import pytz
 # Flask imports
 from flask import Flask, request, jsonify
 
-# FFmpeg डाउनलोड और सेटअप (बिना root permission के)
+# FFmpeg डाउनलोड और सेटअप (संशोधित संस्करण)
 if not os.path.exists("ffmpeg"):
     print("Downloading FFmpeg...")
     try:
+        # पुरानी फाइल्स डिलीट करें (अगर exist करती हैं)
+        if os.path.exists("ffmpeg-release-amd64-static.tar.xz"):
+            os.remove("ffmpeg-release-amd64-static.tar.xz")
+        
         # FFmpeg डाउनलोड करें
         subprocess.run([
             "wget", 
@@ -42,38 +46,25 @@ if not os.path.exists("ffmpeg"):
         
         # टार फाइल एक्सट्रैक्ट करें
         subprocess.run([
-            "tar", "-xf", "ffmpeg-release-amd64-static.tar.xz"
+            "tar", "-xf", "ffmpeg-release-amd64-static.tar.xz", "--wildcards", "*ffmpeg"
         ], check=True)
         
-        # एक्सट्रैक्ट किए गए फोल्डर का नाम पता करें
-        extracted_dir = None
-        for dir_name in os.listdir('.'):
-            if dir_name.startswith('ffmpeg-') and os.path.isdir(dir_name):
-                extracted_dir = dir_name
+        # FFmpeg बाइनरी ढूंढें और मूव करें
+        for root, dirs, files in os.walk('.'):
+            if 'ffmpeg' in files:
+                ffmpeg_path = os.path.join(root, 'ffmpeg')
+                os.rename(ffmpeg_path, "ffmpeg")
+                os.chmod("ffmpeg", 0o755)
                 break
-                
-        if not extracted_dir:
-            raise Exception("FFmpeg extracted directory not found")
-            
-        # FFmpeg बाइनरी को एक्सेसिबल बनाएं
-        ffmpeg_path = os.path.join(extracted_dir, "ffmpeg")
-        if not os.path.exists(ffmpeg_path):
-            raise Exception(f"FFmpeg binary not found at {ffmpeg_path}")
-            
-        os.rename(ffmpeg_path, "ffmpeg")
-        os.chmod("ffmpeg", 0o755)  # Execute permission
         
-        # सफाई: टार फाइल और एक्सट्रैक्टेड फोल्डर डिलीट करें
+        # सफाई
+        subprocess.run(["rm", "-rf", "ffmpeg-*"], check=True)
         os.remove("ffmpeg-release-amd64-static.tar.xz")
-        subprocess.run(["rm", "-rf", extracted_dir], check=True)
         
     except Exception as e:
-        print(f"FFmpeg डाउनलोड या इंस्टॉलेशन में समस्या: {e}")
-        # क्लीनअप का प्रयास करें
-        if os.path.exists("ffmpeg-release-amd64-static.tar.xz"):
-            os.remove("ffmpeg-release-amd64-static.tar.xz")
+        print(f"FFmpeg इंस्टॉलेशन में त्रुटि: {str(e)}")
 
-# FFmpeg पाथ सेट करें
+# PATH में जोड़ें
 os.environ["PATH"] += os.pathsep + os.getcwd()
 
 # --- Logger Setup ---
@@ -110,7 +101,7 @@ YTDL_OPTIONS = {
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
     'restrictfilenames': True,
     'noplaylist': True,
-    'nocheckcertificate': True,
+    'nocheckcertificate': True,  # SSL सर्टिफिकेट चेक को डिसेबल करें
     'ignoreerrors': False,
     'logtostderr': False,
     'quiet': True,
@@ -118,7 +109,7 @@ YTDL_OPTIONS = {
     'default_search': 'auto',
     'source_address': '0.0.0.0',
     'extract_flat': 'in_playlist',
-    'postprocessors': [{  # यह नया ऐड करें
+    'postprocessors': [{  # MP3 में कन्वर्ट करने के लिए
         'key': 'FFmpegExtractAudio',
         'preferredcodec': 'mp3',
         'preferredquality': '192',
