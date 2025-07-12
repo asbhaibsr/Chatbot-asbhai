@@ -6,7 +6,7 @@ dnspython>=2.3.0
 tgcrypto==1.2.2
 Flask>=2.2.3
 pytz>=2023.3
-ffmpeg-python==0.2.0
 youtube-search==2.1.2
-yt-dlp==2023.11.16
+yt-dlp==2023.7.6
+ffmpeg-python==0.2.0
 python-dotenv>=0.21.1
