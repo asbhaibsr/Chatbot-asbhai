@@ -10,7 +10,8 @@ import os
 import asyncio
 import threading
 import time
-
+import yt_dlp
+import subprocess
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.raw.functions.messages import SetTyping
@@ -57,6 +58,26 @@ REPO_LINK = "https://github.com/asbhaibsr/Chatbot-asbhai.git"
 # Regex for common URL patterns including t.me and typical link formats
 URL_PATTERN = re.compile(r"(?:https?://|www\.|t\.me/)[^\s/$.?#].[^\s]*", re.IGNORECASE)
 
+# YT-DLP options
+YTDL_OPTIONS = {
+    'format': 'bestaudio/best',
+    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+    'restrictfilenames': True,
+    'noplaylist': True,
+    'nocheckcertificate': True,
+    'ignoreerrors': False,
+    'logtostderr': False,
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'auto',
+    'source_address': '0.0.0.0',
+    'extract_flat': 'in_playlist'
+}
+
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn'
+}
 
 # --- MongoDB Setup ---
 try:
@@ -101,7 +122,6 @@ try:
         {"usernamedel_enabled": {"$exists": False}},
         {"$set": {"usernamedel_enabled": False}}
     )
-
 
 except Exception as e:
     logger.error(f"Failed to connect to one or more MongoDB instances: {e}. Designed by @asbhaibsr")
@@ -156,7 +176,6 @@ async def can_reply_to_chat(chat_id):
 
 def update_message_reply_cooldown(chat_id):
     chat_message_cooldowns[chat_id] = time.time()
-
 
 # --- Utility Functions ---
 def extract_keywords(text):
@@ -247,6 +266,10 @@ async def store_message(message: Message):
             message_data["content"] = message.sticker.emoji if message.sticker.emoji else ""
             message_data["sticker_id"] = message.sticker.file_id
             message_data["keywords"] = extract_keywords(message.sticker.emoji)
+        elif message.voice:
+            message_data["type"] = "voice"
+            message_data["voice_file_id"] = message.voice.file_id
+            message_data["keywords"] = []
         else:
             logger.debug(f"Unsupported message type for storage: {message.id}. (Code by @asbhaibsr)")
             return
@@ -263,6 +286,8 @@ async def store_message(message: Message):
                 replied_content = message.reply_to_message.text
             elif message.reply_to_message.sticker:
                 replied_content = message.reply_to_message.sticker.emoji if message.reply_to_message.emoji else ""
+            elif message.reply_to_message.voice:
+                replied_content = message.reply_to_message.voice.file_id
 
             message_data["replied_to_content"] = replied_content
 
@@ -385,6 +410,155 @@ async def generate_reply(message: Message):
     logger.info(f"No suitable reply found for: '{query_content}'. (Logic by @asbhaibsr)")
     return None
 
+# --- Music Bot Functions ---
+async def download_audio(url: str):
+    try:
+        with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if 'entries' in info:
+                # Take first item from a playlist
+                info = info['entries'][0]
+            audio_url = info['url']
+            title = info.get('title', 'Unknown Title')
+            duration = info.get('duration', 0)
+            return audio_url, title, duration
+    except Exception as e:
+        logger.error(f"Error downloading audio: {e}")
+        return None, None, None
+
+async def send_and_auto_delete_reply(message: Message, text: str = None, photo: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
+    """Sends a reply and schedules it for deletion after 3 minutes, unless it's a /start command."""
+    # This function is now more robust for handling photo vs text, and deleting after delay.
+    # The `disable_web_page_preview` is only passed to `reply_text`.
+
+    sent_message = None
+
+    user_info_str = ""
+    if message.from_user:
+        if message.from_user.username:
+            user_info_str = f" (द्वारा: @{message.from_user.username})"
+        else:
+            user_info_str = f" (द्वारा: {message.from_user.first_name})"
+
+    # Add user info to the reply text for command replies
+    text_to_send = text
+    # Only add command info if it's actually a command message
+    if message.command and text:
+        command_name = message.command[0]
+        text_to_send = f"**कमांड:** `{command_name}`{user_info_str}\n\n{text}"
+    elif text and message.chat.type == ChatType.PRIVATE and message.from_user.id == OWNER_ID:
+        # For owner's private messages that aren't commands, just send the text as is.
+        # This prevents "कमांड: None" when owner replies in private to bot.
+        pass
+    elif text and message.from_user:
+        # For non-command messages from users, don't add "कमांड:" prefix
+        pass
+
+
+    if photo:
+        sent_message = await message.reply_photo(
+            photo=photo,
+            caption=text_to_send, # Caption is for photo, use text_to_send here
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            # disable_web_page_preview is NOT a valid argument for reply_photo
+        )
+    elif text:
+        sent_message = await message.reply_text(
+            text_to_send,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            disable_web_page_preview=disable_web_page_preview
+        )
+    else:
+        logger.warning(f"send_and_auto_delete_reply called with no text or photo for message {message.id}.")
+        return None
+
+    # Do not delete /start messages
+    if message.command and message.command[0] == "start":
+        return sent_message
+
+    # Schedule deletion after 3 minutes (180 seconds)
+    async def delete_after_delay_task():
+        await asyncio.sleep(180)
+        try:
+            if sent_message:
+                await sent_message.delete()
+            # Optionally, delete the user's original command message too
+            # await message.delete()
+        except Exception as e:
+            logger.warning(f"Failed to delete message {sent_message.id if sent_message else 'N/A'} in chat {message.chat.id}: {e}")
+
+    asyncio.create_task(delete_after_delay_task())
+    return sent_message
+
+# --- Music Commands ---
+@app.on_message(filters.command("play"))
+async def play_music(client: Client, message: Message):
+    if is_on_command_cooldown(message.from_user.id):
+        return
+    update_command_cooldown(message.from_user.id)
+
+    if len(message.command) < 2:
+        await send_and_auto_delete_reply(message, text="कृपया गाने का नाम या YouTube URL दें। उदाहरण: `/play गाना नाम` या `/play https://youtube.com/...`")
+        return
+
+    query = " ".join(message.command[1:])
+    await send_and_auto_delete_reply(message, text=f"🔍 खोज रहा हूँ: {query}...")
+
+    try:
+        audio_url, title, duration = await download_audio(query)
+        if not audio_url:
+            await send_and_auto_delete_reply(message, text="माफ़ कीजिए, मैं इस गाने को डाउनलोड नहीं कर पाया। कृपया कोई अन्य गाना ट्राई करें।")
+            return
+
+        await send_and_auto_delete_reply(message, text=f"🎵 चल रहा है: {title}")
+        
+        # Send as voice message
+        await message.reply_voice(
+            audio_url,
+            caption=f"🎧 {title}",
+            duration=duration
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in play command: {e}")
+        await send_and_auto_delete_reply(message, text=f"त्रुटि हुई: {e}")
+
+@app.on_message(filters.command("song"))
+async def download_song(client: Client, message: Message):
+    if is_on_command_cooldown(message.from_user.id):
+        return
+    update_command_cooldown(message.from_user.id)
+
+    if len(message.command) < 2:
+        await send_and_auto_delete_reply(message, text="कृपया गाने का नाम या YouTube URL दें। उदाहरण: `/song गाना नाम` या `/song https://youtube.com/...`")
+        return
+
+    query = " ".join(message.command[1:])
+    await send_and_auto_delete_reply(message, text=f"🔍 खोज रहा हूँ: {query}...")
+
+    try:
+        audio_url, title, duration = await download_audio(query)
+        if not audio_url:
+            await send_and_auto_delete_reply(message, text="माफ़ कीजिए, मैं इस गाने को डाउनलोड नहीं कर पाया। कृपया कोई अन्य गाना ट्राई करें।")
+            return
+
+        await send_and_auto_delete_reply(message, text=f"⬇️ डाउनलोड हो रहा है: {title}")
+        
+        # Send as audio file
+        await message.reply_audio(
+            audio_url,
+            caption=f"🎵 {title}",
+            duration=duration,
+            performer="YouTube",
+            title=title
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in song command: {e}")
+        await send_and_auto_delete_reply(message, text=f"त्रुटि हुई: {e}")
+
 # --- Tracking Functions ---
 async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None):
     try:
@@ -456,73 +630,6 @@ async def reset_monthly_earnings_manual():
         logger.error(f"Error resetting monthly earnings manually: {e}. (Earning system by @asbhaibsr)")
 
 # --- Pyrogram Event Handlers ---
-
-async def send_and_auto_delete_reply(message: Message, text: str = None, photo: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
-    """Sends a reply and schedules it for deletion after 3 minutes, unless it's a /start command."""
-    # This function is now more robust for handling photo vs text, and deleting after delay.
-    # The `disable_web_page_preview` is only passed to `reply_text`.
-
-    sent_message = None
-
-    user_info_str = ""
-    if message.from_user:
-        if message.from_user.username:
-            user_info_str = f" (द्वारा: @{message.from_user.username})"
-        else:
-            user_info_str = f" (द्वारा: {message.from_user.first_name})"
-
-    # Add user info to the reply text for command replies
-    text_to_send = text
-    # Only add command info if it's actually a command message
-    if message.command and text:
-        command_name = message.command[0]
-        text_to_send = f"**कमांड:** `{command_name}`{user_info_str}\n\n{text}"
-    elif text and message.chat.type == ChatType.PRIVATE and message.from_user.id == OWNER_ID:
-        # For owner's private messages that aren't commands, just send the text as is.
-        # This prevents "कमांड: None" when owner replies in private to bot.
-        pass
-    elif text and message.from_user:
-        # For non-command messages from users, don't add "कमांड:" prefix
-        pass
-
-
-    if photo:
-        sent_message = await message.reply_photo(
-            photo=photo,
-            caption=text_to_send, # Caption is for photo, use text_to_send here
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
-            # disable_web_page_preview is NOT a valid argument for reply_photo
-        )
-    elif text:
-        sent_message = await message.reply_text(
-            text_to_send,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
-            disable_web_page_preview=disable_web_page_preview
-        )
-    else:
-        logger.warning(f"send_and_auto_delete_reply called with no text or photo for message {message.id}.")
-        return None
-
-    # Do not delete /start messages
-    if message.command and message.command[0] == "start":
-        return sent_message
-
-    # Schedule deletion after 3 minutes (180 seconds)
-    async def delete_after_delay_task():
-        await asyncio.sleep(180)
-        try:
-            if sent_message:
-                await sent_message.delete()
-            # Optionally, delete the user's original command message too
-            # await message.delete()
-        except Exception as e:
-            logger.warning(f"Failed to delete message {sent_message.id if sent_message else 'N/A'} in chat {message.chat.id}: {e}")
-
-    asyncio.create_task(delete_after_delay_task())
-    return sent_message
-
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_private_command(client: Client, message: Message):
@@ -664,7 +771,9 @@ async def callback_handler(client, callback_query):
             "• `/linkdel on/off`: (Sirf Group Admins ke liye) Group mein **sabhi prakar ke links** delete/allow karne ke liye.\n"
             "• `/biolinkdel on/off`: (Sirf Group Admins ke liye) Group mein **users ke bio mein `t.me` aur `http/https` links** wale messages ko delete/allow karne ke liye.\n"
             "• `/biolink <userid>`: (Sirf Group Admins ke liye) `biolinkdel` on hone par bhi kisi user ko **bio mein `t.me` aur `http/https` links** रखने की permission dene ke liye.\n"
-            "• `/usernamedel on/off`: (Sirf Group Admins ke liye) Group mein **'@' mentions** allow ya delete karne ke liye.\n\n"
+            "• `/usernamedel on/off`: (Sirf Group Admins ke liye) Group mein **'@' mentions** allow ya delete karne ke liye.\n"
+            "• `/play <song>`: YouTube से गाना बजाने के लिए\n"
+            "• `/song <song>`: YouTube से गाना डाउनलोड करने के लिए\n\n"
             "**🔗 Mera Code (GitHub Repository):**\n"
             f"[**{REPO_LINK}**]({REPO_LINK})\n\n"
             "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
@@ -1231,7 +1340,7 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
             {"$set": {"biolinkdel_enabled": True}},
             upsert=True
         )
-        await send_and_auto_delete_reply(message, text="हम्म... 😼 अब से जो भी **यूज़र अपनी बायो में `t.me` या `http/https` लिंक रखेगा**, मैं उसके **मैसेज को चुपचाप हटा दूंगी!** (अगर उसे `/biolink` से छूट नहीं मिली है). ग्रुप में कोई मस्ती नहीं!🤫", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="हम्म... 😼 अब से जो भी **यूज़र अपनी बायो में `t.me` या `http/https` लिंक रखेगा**, मैं उसके **मैसेज को चुपचाप हटा दूंगी!** (अगर उसे `/biolink` से छूट नहीं मिली है). ग्रुप में कोई मस्ती नहीं! 🤫", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Biolink deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
     elif action == "off":
         group_tracking_collection.update_one(
