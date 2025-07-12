@@ -224,6 +224,12 @@ async def store_message(message: Message):
             logger.debug(f"Skipping storage for message from bot: {message.from_user.id}. (Code by @asbhaibsr)")
             return
 
+        # --- NEW: Only store messages that are replies ---
+        if not message.reply_to_message:
+            logger.debug(f"Skipping storage for non-reply message: {message.id}. (Code by @asbhaibsr)")
+            return
+        # --- END NEW ---
+
         message_data = {
             "message_id": message.id,
             "user_id": message.from_user.id if message.from_user else None,
@@ -237,21 +243,31 @@ async def store_message(message: Message):
             "credits": "Code by @asbhaibsr, Support: @aschat_group"
         }
 
+        # --- NEW: Handle different message types including voice ---
         if message.text:
             message_data["type"] = "text"
             message_data["content"] = message.text
             message_data["keywords"] = extract_keywords(message.text)
             message_data["sticker_id"] = None
+            message_data["voice_file_id"] = None
         elif message.sticker:
             message_data["type"] = "sticker"
             message_data["content"] = message.sticker.emoji if message.sticker.emoji else ""
             message_data["sticker_id"] = message.sticker.file_id
             message_data["keywords"] = extract_keywords(message.sticker.emoji)
+            message_data["voice_file_id"] = None
+        elif message.voice: # Handle voice messages
+            message_data["type"] = "voice"
+            message_data["content"] = None # No text content for voice
+            message_data["sticker_id"] = None
+            message_data["voice_file_id"] = message.voice.file_id
+            message_data["keywords"] = [] # No keywords for voice unless transcribed
         else:
             logger.debug(f"Unsupported message type for storage: {message.id}. (Code by @asbhaibsr)")
             return
+        # --- END NEW ---
 
-        # Check if this message is a reply to a bot's message
+        # Check if this message is a reply to ANY message (not just bot's)
         if message.reply_to_message:
             message_data["is_reply"] = True
             message_data["replied_to_message_id"] = message.reply_to_message.id
@@ -259,26 +275,32 @@ async def store_message(message: Message):
 
             # Extract content of the message being replied to
             replied_content = None
+            replied_sticker_id = None
+            replied_voice_file_id = None
+
             if message.reply_to_message.text:
                 replied_content = message.reply_to_message.text
             elif message.reply_to_message.sticker:
-                replied_content = message.reply_to_message.sticker.emoji if message.reply_to_message.emoji else ""
+                replied_content = message.reply_to_message.sticker.emoji # Use emoji as content for sticker
+                replied_sticker_id = message.reply_to_message.sticker.file_id
+            elif message.reply_to_message.voice: # Get file_id for replied voice
+                replied_voice_file_id = message.reply_to_message.voice.file_id
 
-            message_data["replied_to_content"] = replied_content
+            message_data["replied_to_content"] = replied_content # Original text/emoji
+            message_data["replied_to_sticker_id"] = replied_sticker_id
+            message_data["replied_to_voice_file_id"] = replied_voice_file_id
 
-            # Check if the reply was to the bot itself
+            # Check if the reply was to the bot itself (for learning specific pairs)
             if message.reply_to_message.from_user and message.reply_to_message.from_user.id == app.me.id:
                 message_data["is_bot_observed_pair"] = True
-                original_bot_message_in_db = messages_collection.find_one({"chat_id": message.chat.id, "message_id": message.reply_to_message.id})
-                if original_bot_message_in_db:
-                    messages_collection.update_one(
-                        {"_id": original_bot_message_in_db["_id"]},
-                        {"$set": {"is_bot_observed_pair": True}}
-                    )
-                    logger.debug(f"Marked bot's original message {message.reply_to_message.id} as observed pair. (System by @asbhaibsr)")
+                # No need to update original_bot_message_in_db here as we're marking the *reply* to it.
+                # The original bot message's 'is_bot_observed_pair' flag is about whether *it* was replied to.
+                # If we want to mark the bot's sent message as "observed" (meaning, it received a reply),
+                # we'd do that when a reply comes in.
+                # For now, this is simpler: the *reply* itself is marked.
 
         messages_collection.insert_one(message_data)
-        logger.info(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
+        logger.info(f"Message stored: {message.id} (type: {message_data['type']}) from {message.from_user.id if message.from_user else 'None'}. Is reply: {message_data.get('is_reply', False)}. Observed pair: {message_data.get('is_bot_observed_pair', False)}. (Storage by @asbhaibsr)")
 
         logger.debug(f"DEBUG: Checking earning condition in store_message: chat_type={message.chat.type.name}, is_from_user={bool(message.from_user)}, is_not_bot={not message.from_user.is_bot if message.from_user else 'N/A'}")
 
@@ -328,48 +350,79 @@ async def generate_reply(message: Message):
     )
     await asyncio.sleep(0.5)
 
-    if not message.text and not message.sticker:
+    if not message.text and not message.sticker and not message.voice:
         return
 
-    query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
-    query_keywords = extract_keywords(query_content)
+    # Extract query based on message type
+    query_content = None
+    query_sticker_id = None
+    query_voice_file_id = None
+    query_keywords = []
+    query_type = None
 
-    if not query_keywords and not query_content:
-        logger.debug("No content or keywords extracted for reply generation. (Code by @asbhaibsr)")
+    if message.text:
+        query_type = "text"
+        query_content = message.text
+        query_keywords = extract_keywords(message.text)
+    elif message.sticker:
+        query_type = "sticker"
+        query_content = message.sticker.emoji if message.sticker.emoji else ""
+        query_sticker_id = message.sticker.file_id
+        query_keywords = extract_keywords(query_content)
+    elif message.voice:
+        query_type = "voice"
+        query_voice_file_id = message.voice.file_id
+        query_keywords = [] # No keywords for voice unless transcribed
+
+
+    if not query_content and not query_sticker_id and not query_voice_file_id:
+        logger.debug("No content, sticker ID, or voice file ID extracted for reply generation. (Code by @asbhaibsr)")
         return
 
-    potential_replies = []
+    # --- NEW LOGIC: Prioritize replies that match the *replied_to_content* of a stored message ---
+    # Goal: If user says "hello" and you replied "hi", next time user says "hello", bot should reply "hi".
+    # So, we are looking for stored messages where "replied_to_content" matches the current message's content.
 
-    # Prioritize replies where bot observed a pair (user replied to bot's specific content)
-    # Changed to find exact match for replied_to_content
-    observed_replies_cursor = messages_collection.find({
-        "is_bot_observed_pair": True,
-        "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"},
+    # 1. Search for replies based on exact content/sticker_id/voice_file_id matching
+    #    the current message's content (i.e., user says X, what did someone reply to X before?)
+    query_for_replies = {
+        "is_reply": True, # Ensure it was a reply
         "user_id": {"$ne": app.me.id} # Ensure the reply is not from the bot itself
-    })
-    for doc in observed_replies_cursor:
-        potential_replies.append(doc)
+    }
 
-    if potential_replies:
-        chosen_reply = random.choice(potential_replies)
-        logger.info(f"Contextual reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}. (Logic by @asbhaibsr)")
+    if query_type == "text":
+        query_for_replies["replied_to_content"] = {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}
+    elif query_type == "sticker":
+        query_for_replies["replied_to_sticker_id"] = query_sticker_id
+    elif query_type == "voice":
+        query_for_replies["replied_to_voice_file_id"] = query_voice_file_id
+    else:
+        logger.debug(f"Unsupported query type for reply generation: {query_type}. (Code by @asbhaibsr)")
+        return
+
+    potential_replies_based_on_current_message = list(messages_collection.find(query_for_replies))
+
+    if potential_replies_based_on_current_message:
+        chosen_reply = random.choice(potential_replies_based_on_current_message)
+        logger.info(f"Direct/Contextual reply found for '{query_content or query_sticker_id or query_voice_file_id}': {chosen_reply.get('content') or chosen_reply.get('sticker_id') or chosen_reply.get('voice_file_id')}. (Logic by @asbhaibsr)")
         return chosen_reply
 
-    logger.info(f"No direct observed reply for: '{query_content}'. Falling back to keyword search. (Logic by @asbhaibsr)")
+    logger.info(f"No direct contextual reply for: '{query_content or query_sticker_id or query_voice_file_id}'. Falling back to keyword/random search. (Logic by @asbhaibsr)")
 
-    # Fallback to general keyword search
-    # Ensure keywords are not empty before creating regex
-    if query_keywords:
+    # 2. Fallback to general keyword search (for text/sticker only, not ideal for voice)
+    if query_keywords and query_type in ["text", "sticker"]:
         keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
         general_replies_cursor = messages_collection.find({
-            "type": {"$in": ["text", "sticker"]},
+            "type": {"$in": ["text", "sticker"]}, # Only search text/sticker for keywords
             "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"},
-            "user_id": {"$ne": app.me.id} # Exclude bot's own messages from general replies
+            "user_id": {"$ne": app.me.id}, # Exclude bot's own messages
+            "is_reply": True # Ensure general replies are also from replies
         })
     else:
-        # If no keywords, fall back to any random message (less ideal but prevents crash)
+        # If no keywords (e.g., voice message without transcription) or no text/sticker,
+        # fall back to any random *reply* message
         general_replies_cursor = messages_collection.find({
-            "type": {"$in": ["text", "sticker"]},
+            "is_reply": True, # Only consider replies
             "user_id": {"$ne": app.me.id}
         })
 
@@ -379,10 +432,10 @@ async def generate_reply(message: Message):
 
     if potential_replies:
         chosen_reply = random.choice(potential_replies)
-        logger.info(f"Keyword-based reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}. (Logic by @asbhaibsr)")
+        logger.info(f"Keyword-based/Random reply found for '{query_content or query_sticker_id or query_voice_file_id}': {chosen_reply.get('content') or chosen_reply.get('sticker_id') or chosen_reply.get('voice_file_id')}. (Logic by @asbhaibsr)")
         return chosen_reply
 
-    logger.info(f"No suitable reply found for: '{query_content}'. (Logic by @asbhaibsr)")
+    logger.info(f"No suitable reply found for: '{query_content or query_sticker_id or query_voice_file_id}'. (Logic by @asbhaibsr)")
     return None
 
 # --- Tracking Functions ---
@@ -655,7 +708,7 @@ async def callback_handler(client, callback_query):
             "• `/groups`: (Sirf Owner ke liye) Jin groups mein main hoon, unki list dekhne ke liye.\n"
             "• `/stats check`: Bot ke statistics dekhne ke liye.\n"
             "• `/cleardata <percentage>`: (Sirf Owner ke liye) Database se data delete karne ke liye.\n"
-            "• `/deletemessage <content/sticker_id>`: (Sirf Owner ke liye) Specific message ya sticker delete karne ke liye.\n" # Updated help text
+            "• `/delsticker <sticker_file_id>`: (Sirf Owner ke liye) Specific sticker delete karne ke liye.\n" # Updated help text
             "• `/clearearning`: (Sirf Owner ke liye) Earning data reset karne ke liye.\n"
             "• `/clearall`: (Sirf Owner ke liye) Saara database (3 DBs) clear karne ke liye. **(Dhyan se!)**\n"
             "• `/leavegroup <group_id>`: (Sirf Owner ke liye) Kisi group ko chhodne ke liye.\n"
@@ -1048,43 +1101,38 @@ async def clear_data_command(client: Client, message: Message):
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
-@app.on_message(filters.command("deletemessage") & filters.private)
-async def delete_specific_message_command(client: Client, message: Message):
+@app.on_message(filters.command("delsticker") & filters.private)
+async def delete_sticker_command(client: Client, message: Message):
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
-        await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="Sorry, darling! Yeh command sirf mere boss ke liye hai. 🚫 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
 
     if len(message.command) < 2:
-        await send_and_auto_delete_reply(message, text="Kaun sa message delete karna hai, batao toh sahi! Jaise: `/deletemessage hello` ya `/deletemessage 'kya haal hai'` ya `deletemessage <sticker_file_id>` 👻 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="Kis sticker ko delete karna hai, uski `file_id` batao na! Jaise: `/delsticker <sticker_file_id>` 👻 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
 
-    search_query = " ".join(message.command[1:])
+    sticker_file_id = message.command[1]
     deleted_count = 0
 
-    # Try to delete by exact content or partial content
-    # First, try to match content (text or emoji for sticker)
-    if search_query:
-        # Check for sticker ID first (starts with BQAD, CAAD, etc.)
-        if re.match(r'^(BQAD|CAAD|AgAD|CgAD)', search_query):
-            delete_result = messages_collection.delete_many({"sticker_id": search_query})
-            deleted_count += delete_result.deleted_count
+    try:
+        delete_result = messages_collection.delete_many({"sticker_id": sticker_file_id, "type": "sticker"})
+        deleted_count = delete_result.deleted_count
+
+        if deleted_count > 0:
+            await send_and_auto_delete_reply(message, text=f"Jaisa hukum mere aaka! 🧞‍♀️ Maine `{sticker_file_id}` वाले **{deleted_count}** stickers ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+            logger.info(f"Deleted {deleted_count} stickers with file_id: '{sticker_file_id}'. (Code by @asbhaibsr)")
         else:
-            # If not a sticker ID, treat as text content
-            # Using $regex with .* to allow partial matches as requested
-            delete_result = messages_collection.delete_many({"content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}})
-            deleted_count += delete_result.deleted_count
+            await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is `file_id` se koi sticker mila hi nahi apne database mein. ID check kar lo? 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
 
-    if deleted_count > 0:
-        await send_and_auto_delete_reply(message, text=f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' se milte-julte **{deleted_count}** messages/stickers ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Deleted {deleted_count} messages/stickers with query: '{search_query}'. (Code by @asbhaibsr)")
-    else:
-        await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is query se koi message ya sticker mila hi nahi apne database mein. Spelling/ID check kar lo? 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await send_and_auto_delete_reply(message, text=f"Sticker delete karte samay galti ho gayi: {e}. Oh no! 😢 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        logger.error(f"Error deleting sticker with file_id {sticker_file_id}: {e}. (Code by @asbhaibsr)")
 
-    await store_message(message)
+    await store_message(message) # Store the command itself
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("clearearning") & filters.private)
@@ -1554,7 +1602,7 @@ async def left_member_handler(client: Client, message: Message):
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
-@app.on_message(filters.text | filters.sticker | filters.photo | filters.video | filters.document) # Added more filters for comprehensive handling
+@app.on_message(filters.text | filters.sticker | filters.photo | filters.video | filters.document | filters.voice) # Added filters.voice
 async def handle_message_and_reply(client: Client, message: Message):
     # Ignore messages from bots
     if message.from_user and message.from_user.is_bot:
@@ -1570,8 +1618,8 @@ async def handle_message_and_reply(client: Client, message: Message):
             logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling. (Code by @asbhaibsr)")
             return
 
-    # Apply cooldown for general messages (not commands)
-    if message.from_user and not (message.text and message.text.startswith('/')): # Only apply to non-command messages
+    # Apply cooldown for general messages (not commands from owner)
+    if message.from_user and not (message.text and message.text.startswith('/') and message.from_user.id == OWNER_ID): # Only apply to non-command messages or commands from non-owner
         chat_id_for_cooldown = message.chat.id
         if not await can_reply_to_chat(chat_id_for_cooldown): # Check cooldown for the specific chat
             logger.info(f"Chat {chat_id_for_cooldown} is on message reply cooldown. Skipping message {message.id}.")
@@ -1657,29 +1705,37 @@ async def handle_message_and_reply(client: Client, message: Message):
     # --- END NEW CHECKS ---
 
     # Only store message and generate reply if it wasn't deleted by any of the above checks AND it's not a command
+    # NOTE: The store_message function itself now checks if it's a reply and returns if not.
     if not (message.text and message.text.startswith('/')):
         await store_message(message)
 
-        logger.info(f"Attempting to generate reply for chat {message.chat.id}. (Logic by @asbhaibsr)")
-        reply_doc = await generate_reply(message)
+        # Only attempt to generate reply if it's actually a reply and thus was stored successfully
+        if message.reply_to_message:
+            logger.info(f"Attempting to generate reply for chat {message.chat.id}. (Logic by @asbhaibsr)")
+            reply_doc = await generate_reply(message)
 
-        if reply_doc:
-            try:
-                if reply_doc.get("type") == "text":
-                    await message.reply_text(reply_doc["content"], parse_mode=ParseMode.MARKDOWN)
-                    logger.info(f"Replied with text: {reply_doc['content']}. (System by @asbhaibsr)")
-                elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
-                    await message.reply_sticker(reply_doc["sticker_id"])
-                    logger.info(f"Replied with sticker: {reply_doc['sticker_id']}. (System by @asbhaibsr)")
-                else:
-                    logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}. (System by @asbhaibsr)")
-            except Exception as e:
-                logger.error(f"Error sending reply for message {message.id}: {e}. (System by @asbhaibsr)")
-            finally:
-                # Set cooldown AFTER a reply is sent
-                update_message_reply_cooldown(message.chat.id)
+            if reply_doc:
+                try:
+                    if reply_doc.get("type") == "text":
+                        await message.reply_text(reply_doc["content"], parse_mode=ParseMode.MARKDOWN)
+                        logger.info(f"Replied with text: {reply_doc['content']}. (System by @asbhaibsr)")
+                    elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
+                        await message.reply_sticker(reply_doc["sticker_id"])
+                        logger.info(f"Replied with sticker: {reply_doc['sticker_id']}. (System by @asbhaibsr)")
+                    elif reply_doc.get("type") == "voice" and reply_doc.get("voice_file_id"):
+                        await message.reply_voice(reply_doc["voice_file_id"])
+                        logger.info(f"Replied with voice: {reply_doc['voice_file_id']}. (System by @asbhaibsr)")
+                    else:
+                        logger.warning(f"Reply document found but no content/sticker_id/voice_file_id: {reply_doc}. (System by @asbhaibsr)")
+                except Exception as e:
+                    logger.error(f"Error sending reply for message {message.id}: {e}. (System by @asbhaibsr)")
+                finally:
+                    # Set cooldown AFTER a reply is sent
+                    update_message_reply_cooldown(message.chat.id)
+            else:
+                logger.info("No suitable reply found. (System by @asbhaibsr)")
         else:
-            logger.info("No suitable reply found. (System by @asbhaibsr)")
+            logger.info("Message was not a reply, so no reply generation attempted. (System by @asbhaibsr)")
 
 async def delete_after_delay_for_message(message_obj: Message, delay: int):
     """Utility to delete a specific message after a delay."""
