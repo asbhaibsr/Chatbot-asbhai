@@ -77,7 +77,12 @@ try:
     earning_tracking_collection = db_tracking.monthly_earnings_data
     reset_status_collection = db_tracking.reset_status
     biolink_exceptions_collection = db_tracking.biolink_exceptions # For biolink deletion exceptions
-    logger.info("MongoDB (Tracking, Earning & Biolink Exceptions) connection successful. Credit: @asbhaibsr")
+    # NEW: Collection for owner-taught responses
+    owner_taught_responses_collection = db_tracking.owner_taught_responses 
+    # NEW: Collection for conversational learning (user A -> user B)
+    conversational_learning_collection = db_tracking.conversational_learning 
+    
+    logger.info("MongoDB (Tracking, Earning, Biolink Exceptions, Learning Data) connection successful. Credit: @asbhaibsr")
 
     # Create indexes for efficient querying if they don't exist
     messages_collection.create_index([("timestamp", 1)])
@@ -101,6 +106,10 @@ try:
         {"usernamedel_enabled": {"$exists": False}},
         {"$set": {"usernamedel_enabled": False}}
     )
+
+    # NEW: Create indexes for learning collections
+    owner_taught_responses_collection.create_index([("trigger", 1)])
+    conversational_learning_collection.create_index([("trigger", 1)])
 
 
 except Exception as e:
@@ -217,11 +226,21 @@ def contains_mention(text: str):
     return bool(re.search(mention_pattern, text))
 
 # --- Message Storage Logic ---
-async def store_message(message: Message):
+async def store_message(message: Message, is_owner_taught_pair=False, is_conversational_pair=False, trigger_content=None):
+    # Refactored to only store relevant messages for learning or specific tracking
     try:
         # Avoid storing messages from bots
         if message.from_user and message.from_user.is_bot:
             logger.debug(f"Skipping storage for message from bot: {message.from_user.id}. (Code by @asbhaibsr)")
+            return
+
+        # NEW: Only store message data if it's part of a specific learning type
+        # Or if it's a command being used (for command cooldowns and owner commands)
+        # General messages will NOT be stored unless they are part of a learning pair
+        is_command = message.text and message.text.startswith('/')
+
+        if not is_owner_taught_pair and not is_conversational_pair and not is_command:
+            logger.debug(f"Skipping general message storage for {message.id} as it's not a learning pair or command.")
             return
 
         message_data = {
@@ -233,7 +252,6 @@ async def store_message(message: Message):
             "chat_type": message.chat.type.name,
             "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
             "timestamp": datetime.now(),
-            "is_bot_observed_pair": False,
             "credits": "Code by @asbhaibsr, Support: @aschat_group"
         }
 
@@ -250,38 +268,29 @@ async def store_message(message: Message):
         else:
             logger.debug(f"Unsupported message type for storage: {message.id}. (Code by @asbhaibsr)")
             return
+        
+        # Store for the new learning systems
+        if is_owner_taught_pair and trigger_content:
+            owner_taught_responses_collection.update_one(
+                {"trigger": trigger_content},
+                {"$addToSet": {"responses": message_data}}, # Use $addToSet to avoid duplicate responses
+                upsert=True
+            )
+            logger.info(f"Owner-taught pair stored: Trigger '{trigger_content}', Response '{message_data.get('content') or message_data.get('sticker_id')}'")
+        elif is_conversational_pair and trigger_content:
+            conversational_learning_collection.update_one(
+                {"trigger": trigger_content},
+                {"$addToSet": {"responses": message_data}}, # Use $addToSet
+                upsert=True
+            )
+            logger.info(f"Conversational pair stored: Trigger '{trigger_content}', Response '{message_data.get('content') or message_data.get('sticker_id')}'")
+        else:
+            # Only store messages_collection if it's a command or for other general tracking purposes
+            # (though message_collection is mainly used for old-style learning and pruning, so we might re-evaluate its purpose)
+            messages_collection.insert_one(message_data)
+            logger.info(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
 
-        # Check if this message is a reply to a bot's message
-        if message.reply_to_message:
-            message_data["is_reply"] = True
-            message_data["replied_to_message_id"] = message.reply_to_message.id
-            message_data["replied_to_user_id"] = message.reply_to_message.from_user.id if message.reply_to_message.from_user else None
-
-            # Extract content of the message being replied to
-            replied_content = None
-            if message.reply_to_message.text:
-                replied_content = message.reply_to_message.text
-            elif message.reply_to_message.sticker:
-                replied_content = message.reply_to_message.sticker.emoji if message.reply_to_message.emoji else ""
-
-            message_data["replied_to_content"] = replied_content
-
-            # Check if the reply was to the bot itself
-            if message.reply_to_message.from_user and message.reply_to_message.from_user.id == app.me.id:
-                message_data["is_bot_observed_pair"] = True
-                original_bot_message_in_db = messages_collection.find_one({"chat_id": message.chat.id, "message_id": message.reply_to_message.id})
-                if original_bot_message_in_db:
-                    messages_collection.update_one(
-                        {"_id": original_bot_message_in_db["_id"]},
-                        {"$set": {"is_bot_observed_pair": True}}
-                    )
-                    logger.debug(f"Marked bot's original message {message.reply_to_message.id} as observed pair. (System by @asbhaibsr)")
-
-        messages_collection.insert_one(message_data)
-        logger.info(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
-
-        logger.debug(f"DEBUG: Checking earning condition in store_message: chat_type={message.chat.type.name}, is_from_user={bool(message.from_user)}, is_not_bot={not message.from_user.is_bot if message.from_user else 'N/A'}")
-
+        # Earning tracking still happens for all eligible user messages in groups, regardless of learning storage
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and message.from_user and not message.from_user.is_bot:
             user_id_to_track = message.from_user.id
             username_to_track = message.from_user.username
@@ -290,27 +299,20 @@ async def store_message(message: Message):
             current_group_title = message.chat.title
             current_group_username = message.chat.username
 
-            logger.info(f"DEBUG: Attempting to update earning count for user {user_id_to_track} ({first_name_to_track}) in chat {message.chat.id}.")
-
-            try:
-                earning_tracking_collection.update_one(
-                    {"_id": user_id_to_track},
-                    {"$inc": {"group_message_count": 1},
-                     "$set": {"username": username_to_track,
-                              "first_name": first_name_to_track,
-                              "last_active_group_message": datetime.now(),
-                              "last_active_group_id": current_group_id,
-                              "last_active_group_title": current_group_title,
-                              "last_active_group_username": current_group_username
-                              },
-                     "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
-                    upsert=True
-                )
-                updated_user_data = earning_tracking_collection.find_one({'_id': user_id_to_track})
-                current_count = updated_user_data.get('group_message_count', 0) if updated_user_data else 0
-                logger.info(f"Group message count updated for user {user_id_to_track} ({first_name_to_track}). Current count: {current_count}. (Earning tracking by @asbhaibsr)")
-            except Exception as e:
-                logger.error(f"ERROR: Failed to update earning count for user {user_id_to_track}: {e}. (Earning tracking error by @asbhaibsr)")
+            earning_tracking_collection.update_one(
+                {"_id": user_id_to_track},
+                {"$inc": {"group_message_count": 1},
+                 "$set": {"username": username_to_track,
+                          "first_name": first_name_to_track,
+                          "last_active_group_message": datetime.now(),
+                          "last_active_group_id": current_group_id,
+                          "last_active_group_title": current_group_title,
+                          "last_active_group_username": current_group_username
+                          },
+                 "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
+                upsert=True
+            )
+            logger.info(f"Group message count updated for user {user_id_to_track}. (Earning tracking by @asbhaibsr)")
 
 
         await prune_old_messages()
@@ -332,42 +334,41 @@ async def generate_reply(message: Message):
         return
 
     query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
+    
+    # NEW: Prioritize owner-taught responses
+    if message.from_user.id == OWNER_ID:
+        # If owner is the one sending the message, check if they are "training"
+        # This will be handled by the self_reply_learning filter, not here.
+        pass
+
+    # First, check for owner-taught patterns (these are for general use after being taught by owner)
+    owner_taught_doc = owner_taught_responses_collection.find_one({"trigger": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
+    if owner_taught_doc and owner_taught_doc.get('responses'):
+        chosen_response_data = random.choice(owner_taught_doc['responses'])
+        logger.info(f"Owner-taught reply found for '{query_content}'.")
+        return chosen_response_data
+    
+    # Second, check for conversational learning patterns (A says X -> B says Y)
+    conversational_doc = conversational_learning_collection.find_one({"trigger": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
+    if conversational_doc and conversational_doc.get('responses'):
+        chosen_response_data = random.choice(conversational_doc['responses'])
+        logger.info(f"Conversational reply found for '{query_content}'.")
+        return chosen_response_data
+
+    logger.info(f"No specific learning pattern found for '{query_content}'. Falling back to old keyword search if necessary. (Logic by @asbhaibsr)")
+
+    # Original keyword search fallback (less prioritized now)
     query_keywords = extract_keywords(query_content)
-
-    if not query_keywords and not query_content:
-        logger.debug("No content or keywords extracted for reply generation. (Code by @asbhaibsr)")
-        return
-
-    potential_replies = []
-
-    # Prioritize replies where bot observed a pair (user replied to bot's specific content)
-    # Changed to find exact match for replied_to_content
-    observed_replies_cursor = messages_collection.find({
-        "is_bot_observed_pair": True,
-        "replied_to_content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"},
-        "user_id": {"$ne": app.me.id} # Ensure the reply is not from the bot itself
-    })
-    for doc in observed_replies_cursor:
-        potential_replies.append(doc)
-
-    if potential_replies:
-        chosen_reply = random.choice(potential_replies)
-        logger.info(f"Contextual reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}. (Logic by @asbhaibsr)")
-        return chosen_reply
-
-    logger.info(f"No direct observed reply for: '{query_content}'. Falling back to keyword search. (Logic by @asbhaibsr)")
-
-    # Fallback to general keyword search
-    # Ensure keywords are not empty before creating regex
     if query_keywords:
         keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
+        # Find messages that contain any of the keywords and are not from the bot itself
         general_replies_cursor = messages_collection.find({
             "type": {"$in": ["text", "sticker"]},
             "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"},
-            "user_id": {"$ne": app.me.id} # Exclude bot's own messages from general replies
+            "user_id": {"$ne": app.me.id}
         })
     else:
-        # If no keywords, fall back to any random message (less ideal but prevents crash)
+        # If no keywords, fall back to any random message (very general)
         general_replies_cursor = messages_collection.find({
             "type": {"$in": ["text", "sticker"]},
             "user_id": {"$ne": app.me.id}
@@ -379,10 +380,10 @@ async def generate_reply(message: Message):
 
     if potential_replies:
         chosen_reply = random.choice(potential_replies)
-        logger.info(f"Keyword-based reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}. (Logic by @asbhaibsr)")
+        logger.info(f"Keyword-based fallback reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}.")
         return chosen_reply
 
-    logger.info(f"No suitable reply found for: '{query_content}'. (Logic by @asbhaibsr)")
+    logger.info(f"No suitable reply found for: '{query_content}'.")
     return None
 
 # --- Tracking Functions ---
@@ -561,7 +562,8 @@ async def start_private_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True) 
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private start command processed for user {message.from_user.id}. (Code by @asbhaibsr)")
@@ -604,7 +606,8 @@ async def start_group_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.")
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
@@ -655,7 +658,8 @@ async def callback_handler(client, callback_query):
             "• `/groups`: (Sirf Owner ke liye) Jin groups mein main hoon, unki list dekhne ke liye.\n"
             "• `/stats check`: Bot ke statistics dekhne ke liye.\n"
             "• `/cleardata <percentage>`: (Sirf Owner ke liye) Database se data delete karne ke liye.\n"
-            "• `/deletemessage <content/sticker_id>`: (Sirf Owner ke liye) Specific message ya sticker delete karne ke liye.\n" # Updated help text
+            "• `/deletemessage <content>`: (Sirf Owner ke liye) Specific **text message** delete karne ke liye.\n" # UPDATED HELP TEXT
+            "• `/delsticker <percentage>`: (Sirf Owner ke liye) Database se **stickers** delete karne ke liye (e.g., `10%`, `20%`, `40%`).\n" # NEW HELP TEXT
             "• `/clearearning`: (Sirf Owner ke liye) Earning data reset karne ke liye.\n"
             "• `/clearall`: (Sirf Owner ke liye) Saara database (3 DBs) clear karne ke liye. **(Dhyan se!)**\n"
             "• `/leavegroup <group_id>`: (Sirf Owner ke liye) Kisi group ko chhodne ke liye.\n"
@@ -795,7 +799,8 @@ async def top_users_command(client: Client, message: Message):
     )
 
     await send_and_auto_delete_reply(message, text="\n".join(earning_messages), reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Top users command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
@@ -838,7 +843,8 @@ async def broadcast_command(client: Client, message: Message):
             failed_count += 1
 
     await send_and_auto_delete_reply(message, text=f"Broadcast ho gaya, darling! ✨ **{sent_count}** chats tak pahunchi, aur **{failed_count}** tak nahi. Koi nahi, next time! 😉 (System by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     logger.info(f"Broadcast command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("stats") & filters.private)
@@ -854,16 +860,22 @@ async def stats_private_command(client: Client, message: Message):
     total_messages = messages_collection.count_documents({})
     unique_group_ids = group_tracking_collection.count_documents({})
     num_users = user_tracking_collection.count_documents({})
+    total_owner_taught = owner_taught_responses_collection.count_documents({})
+    total_conversational_learned = conversational_learning_collection.count_documents({})
+
 
     stats_text = (
         "📊 **Bot Statistics** 📊\n"
         f"• Jitne groups mein main hoon: **{unique_group_ids}** lovely groups!\n"
         f"• Total users jo maine observe kiye: **{num_users}** pyaare users!\n"
-        f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩\n\n"
+        f"• Total messages jo maine store kiye (Old Learning): **{total_messages}** baaton ka khazana! 🤩\n"
+        f"• Owner-taught patterns: **{total_owner_taught}** unique patterns!\n" # NEW STAT
+        f"• Conversational patterns learned: **{total_conversational_learned}** unique patterns!\n\n" # NEW STAT
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private stats command processed for user {message.from_user.id}. (Code by @asbhaibsr)")
@@ -881,16 +893,21 @@ async def stats_group_command(client: Client, message: Message):
     total_messages = messages_collection.count_documents({})
     unique_group_ids = group_tracking_collection.count_documents({})
     num_users = user_tracking_collection.count_documents({})
+    total_owner_taught = owner_taught_responses_collection.count_documents({})
+    total_conversational_learned = conversational_learning_collection.count_documents({})
 
     stats_text = (
         "📊 **Bot Statistics** 📊\n"
         f"• Jitne groups mein main hoon: **{unique_group_ids}** lovely groups!\n"
         f"• Total users jo maine observe kiye: **{num_users}** pyaare users!\n"
-        f"• Total messages jo maine store kiye: **{total_messages}** baaton ka khazana! 🤩\n\n"
+        f"• Total messages jo maine store kiye (Old Learning): **{total_messages}** baaton ka khazana! 🤩\n"
+        f"• Owner-taught patterns: **{total_owner_taught}** unique patterns!\n" # NEW STAT
+        f"• Conversational patterns learned: **{total_conversational_learned}** unique patterns!\n\n" # NEW STAT
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
@@ -946,7 +963,8 @@ async def list_groups_command(client: Client, message: Message):
 
     group_list_text += "\n_Yeh data tracking database se hai, bilkul secret!_ 🤫\n**Code & System By:** @asbhaibsr"
     await send_and_auto_delete_reply(message, text=group_list_text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Groups list command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
 
@@ -975,9 +993,11 @@ async def leave_group_command(client: Client, message: Message):
         await client.leave_chat(group_id)
 
         group_tracking_collection.delete_one({"_id": group_id})
-        messages_collection.delete_many({"chat_id": group_id})
-        # Note: Earning data associated with users in this group is not directly tied to group_id in a way that needs pruning here.
-        # It's user-centric. If a user's count reduces, it's handled implicitly by them not messaging anymore.
+        messages_collection.delete_many({"chat_id": group_id}) # Clear old general messages
+        # NEW: Clear learning data associated with this group
+        owner_taught_responses_collection.delete_many({"responses.chat_id": group_id})
+        conversational_learning_collection.delete_many({"responses.chat_id": group_id})
+        
         logger.info(f"Considered cleaning earning data for users from left group {group_id}. (Code by @asbhaibsr)")
 
         await send_and_auto_delete_reply(message, text=f"Safaltapoorvak group `{group_id}` se bahar aa gayi, aur uska sara data bhi clean kar diya! Bye-bye! 👋 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -989,7 +1009,8 @@ async def leave_group_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text=f"Group se bahar nikalte samay galti ho gayi: {e}. Oh no! 😢 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Error leaving group {group_id_str}: {e}. (Code by @asbhaibsr)")
 
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 # --- New Commands ---
@@ -1018,34 +1039,49 @@ async def clear_data_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Invalid percentage format. Percentage number mein hona chahiye, jaise `10` ya `50`. Fir se try karo!💖 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
 
-    total_messages = messages_collection.count_documents({})
-    if total_messages == 0:
-        await send_and_auto_delete_reply(message, text="Mere paas abhi koi data nahi hai delete karne ke liye. Sab clean-clean hai! ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
-        return
+    # NEW: Prune ALL learning collections by percentage
+    total_messages_old = messages_collection.count_documents({})
+    total_owner_taught = owner_taught_responses_collection.count_documents({})
+    total_conversational = conversational_learning_collection.count_documents({})
 
-    messages_to_delete_count = int(total_messages * (percentage / 100))
-    if messages_to_delete_count == 0 and percentage > 0:
-        await send_and_auto_delete_reply(message, text=f"Itna kam data hai ki {percentage}% delete karne se kuch fark nahi padega! 😂 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
-        return
-    elif messages_to_delete_count == 0 and percentage == 0:
-        await send_and_auto_delete_reply(message, text="Zero percent? That means no deletion! 😉 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
-        return
+    deleted_count_old = 0
+    deleted_count_owner_taught = 0
+    deleted_count_conversational = 0
 
+    if total_messages_old > 0:
+        messages_to_delete_old = int(total_messages_old * (percentage / 100))
+        oldest_message_ids = []
+        for msg in messages_collection.find({}).sort("timestamp", 1).limit(messages_to_delete_old):
+            oldest_message_ids.append(msg['_id'])
+        if oldest_message_ids:
+            deleted_count_old = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}}).deleted_count
 
-    oldest_message_ids = []
-    for msg in messages_collection.find({}) \
-                                        .sort("timestamp", 1) \
-                                        .limit(messages_to_delete_count):
-        oldest_message_ids.append(msg['_id'])
+    if total_owner_taught > 0:
+        docs_to_delete_owner = int(total_owner_taught * (percentage / 100))
+        oldest_owner_taught_ids = []
+        for doc in owner_taught_responses_collection.find({}).sort("timestamp", 1).limit(docs_to_delete_owner): # Assuming 'timestamp' exists or add one
+            oldest_owner_taught_ids.append(doc['_id'])
+        if oldest_owner_taught_ids:
+            deleted_count_owner_taught = owner_taught_responses_collection.delete_many({"_id": {"$in": oldest_owner_taught_ids}}).deleted_count
 
-    if oldest_message_ids:
-        delete_result = messages_collection.delete_many({"_id": {"$in": oldest_message_ids}})
-        await send_and_auto_delete_reply(message, text=f"Wow! 🤩 Maine aapka **{percentage}%** data, yaani **{delete_result.deleted_count}** messages, successfully delete kar diye! Ab main thodi light feel kar rahi hoon. ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Cleared {delete_result.deleted_count} messages based on {percentage}% request. (Code by @asbhaibsr)")
+    if total_conversational > 0:
+        docs_to_delete_conv = int(total_conversational * (percentage / 100))
+        oldest_conv_ids = []
+        for doc in conversational_learning_collection.find({}).sort("timestamp", 1).limit(docs_to_delete_conv): # Assuming 'timestamp' exists or add one
+            oldest_conv_ids.append(doc['_id'])
+        if oldest_conv_ids:
+            deleted_count_conversational = conversational_learning_collection.delete_many({"_id": {"$in": oldest_conv_ids}}).deleted_count
+            
+    total_deleted = deleted_count_old + deleted_count_owner_taught + deleted_count_conversational
+
+    if total_deleted > 0:
+        await send_and_auto_delete_reply(message, text=f"Wow! 🤩 Maine aapka **{percentage}%** data successfully delete kar diya! Total **{total_deleted}** entries (Old: {deleted_count_old}, Owner-Taught: {deleted_count_owner_taught}, Conversational: {deleted_count_conversational}) clean ho gayi. Ab main thodi light feel kar rahi hoon. ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        logger.info(f"Cleared {total_deleted} messages across collections based on {percentage}% request. (Code by @asbhaibsr)")
     else:
         await send_and_auto_delete_reply(message, text="Umm, kuch delete karne ke liye mila hi nahi. Lagta hai tumne pehle hi sab clean kar diya hai! 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("deletemessage") & filters.private)
@@ -1059,33 +1095,112 @@ async def delete_specific_message_command(client: Client, message: Message):
         return
 
     if len(message.command) < 2:
-        await send_and_auto_delete_reply(message, text="Kaun sa message delete karna hai, batao toh sahi! Jaise: `/deletemessage hello` ya `/deletemessage 'kya haal hai'` ya `deletemessage <sticker_file_id>` 👻 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="Kaun sa **text message** delete karna hai, batao toh sahi! Jaise: `/deletemessage hello` ya `/deletemessage 'kya haal hai'` 👻 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
 
     search_query = " ".join(message.command[1:])
     deleted_count = 0
 
-    # Try to delete by exact content or partial content
-    # First, try to match content (text or emoji for sticker)
+    # NEW: Only delete TEXT messages based on content from all learning collections
     if search_query:
-        # Check for sticker ID first (starts with BQAD, CAAD, etc.)
-        if re.match(r'^(BQAD|CAAD|AgAD|CgAD)', search_query):
-            delete_result = messages_collection.delete_many({"sticker_id": search_query})
-            deleted_count += delete_result.deleted_count
-        else:
-            # If not a sticker ID, treat as text content
-            # Using $regex with .* to allow partial matches as requested
-            delete_result = messages_collection.delete_many({"content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}})
-            deleted_count += delete_result.deleted_count
+        # Delete from old messages collection
+        delete_result_old = messages_collection.delete_many({"type": "text", "content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}})
+        deleted_count += delete_result_old.deleted_count
+        
+        # Delete from owner_taught_responses collection
+        # This will remove the entire pattern if the trigger or any response matches
+        delete_result_owner_taught_trigger = owner_taught_responses_collection.delete_many({"trigger": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
+        deleted_count += delete_result_owner_taught_trigger.deleted_count
+        
+        delete_result_owner_taught_response = owner_taught_responses_collection.update_many(
+            {"responses.content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}},
+            {"$pull": {"responses": {"content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}}}}
+        )
+        deleted_count += delete_result_owner_taught_response.modified_count # Count modified documents
+
+        # Delete from conversational_learning collection
+        delete_result_conv_trigger = conversational_learning_collection.delete_many({"trigger": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
+        deleted_count += delete_result_conv_trigger.deleted_count
+
+        delete_result_conv_response = conversational_learning_collection.update_many(
+            {"responses.content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}},
+            {"$pull": {"responses": {"content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}}}}
+        )
+        deleted_count += delete_result_conv_response.modified_count
 
     if deleted_count > 0:
-        await send_and_auto_delete_reply(message, text=f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' se milte-julte **{deleted_count}** messages/stickers ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Deleted {deleted_count} messages/stickers with query: '{search_query}'. (Code by @asbhaibsr)")
+        await send_and_auto_delete_reply(message, text=f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' se milte-julte **{deleted_count}** **text messages** ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        logger.info(f"Deleted {deleted_count} text messages with query: '{search_query}'. (Code by @asbhaibsr)")
     else:
-        await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is query se koi message ya sticker mila hi nahi apne database mein. Spelling/ID check kar lo? 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is query se koi **text message** mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
+
+@app.on_message(filters.command("delsticker") & filters.private) # NEW COMMAND
+async def delete_specific_sticker_command(client: Client, message: Message):
+    if is_on_command_cooldown(message.from_user.id):
+        return
+    update_command_cooldown(message.from_user.id)
+
+    if message.from_user.id != OWNER_ID:
+        await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    if len(message.command) < 2:
+        await send_and_auto_delete_reply(message, text="Kitne **stickers** delete karne hai? Percentage batao na, jaise: `/delsticker 10%` ya `delsticker 20%` ya `delsticker 40%`! 🧹 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    percentage_str = message.command[1].strip('%')
+    try:
+        percentage = int(percentage_str)
+        if not (1 <= percentage <= 100):
+            await send_and_auto_delete_reply(message, text="Percentage 1 se 100 ke beech mein hona chahiye. Thoda dhyan se! 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+            return
+    except ValueError:
+        await send_and_auto_delete_reply(message, text="Invalid percentage format. Percentage number mein hona chahiye, jaise `10` ya `50`. Fir se try karo!💖 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    deleted_count = 0
+    
+    # Delete from old messages collection
+    total_stickers_old = messages_collection.count_documents({"type": "sticker"})
+    if total_stickers_old > 0:
+        stickers_to_delete_old = int(total_stickers_old * (percentage / 100))
+        sticker_ids_to_delete = []
+        for s in messages_collection.find({"type": "sticker"}).sort("timestamp", 1).limit(stickers_to_delete_old):
+            sticker_ids_to_delete.append(s['_id'])
+        if sticker_ids_to_delete:
+            deleted_count += messages_collection.delete_many({"_id": {"$in": sticker_ids_to_delete}}).deleted_count
+
+    # Delete from owner_taught_responses (if any response is a sticker)
+    # Pull only the sticker responses, don't delete the whole pattern if other responses exist
+    owner_taught_pull_result = owner_taught_responses_collection.update_many(
+        {"responses.type": "sticker"},
+        {"$pull": {"responses": {"type": "sticker"}}}
+    )
+    deleted_count += owner_taught_pull_result.modified_count # Count documents where stickers were pulled
+
+    # Delete from conversational_learning (if any response is a sticker)
+    conversational_pull_result = conversational_learning_collection.update_many(
+        {"responses.type": "sticker"},
+        {"$pull": {"responses": {"type": "sticker"}}}
+    )
+    deleted_count += conversational_pull_result.modified_count
+
+
+    if deleted_count > 0:
+        await send_and_auto_delete_reply(message, text=f"Jaisa hukum mere aaka! 🧞‍♀️ Maine **{percentage}%** stickers ko dhoondh ke delete kar diya. Total **{deleted_count}** stickers removed. Ab woh history ka हिस्सा नहीं रहा! ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        logger.info(f"Deleted {deleted_count} stickers based on {percentage}% request. (Code by @asbhaibsr)")
+    else:
+        await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is query se koi **sticker** mila hi nahi apne database mein. Ya toh sticker hi nahi hai, ya percentage bahot kam hai! 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
+    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
 
 @app.on_message(filters.command("clearearning") & filters.private)
 async def clear_earning_command(client: Client, message: Message):
@@ -1101,7 +1216,8 @@ async def clear_earning_command(client: Client, message: Message):
     await send_and_auto_delete_reply(message, text="💰 **Earning data successfully cleared!** Ab sab phir se zero se shuru karenge! 😉 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
     logger.info(f"Owner {message.from_user.id} manually triggered earning data reset. (Code by @asbhaibsr)")
 
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("restart") & filters.private)
@@ -1161,7 +1277,8 @@ async def toggle_chat_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="Galat command, darling! `/chat on` ya `/chat off` use karo. 😉", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -1204,7 +1321,8 @@ async def toggle_linkdel_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/linkdel on` या `/linkdel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
 
 
 @app.on_message(filters.command("biolinkdel") & filters.group)
@@ -1244,7 +1362,8 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/biolinkdel on` या `/biolinkdel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
 
 
 @app.on_message(filters.command("biolink") & filters.group)
@@ -1285,7 +1404,8 @@ async def allow_biolink_user_command(client: Client, message: Message):
         except ValueError:
             await send_and_auto_delete_reply(message, text="उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
 
 
 @app.on_message(filters.command("usernamedel") & filters.group)
@@ -1325,7 +1445,8 @@ async def toggle_usernamedel_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/usernamedel on` या `/usernamedel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
 
 # --- NEW: /clearall command (Owner-Only, with confirmation) ---
 @app.on_message(filters.command("clearall") & filters.private)
@@ -1356,7 +1477,8 @@ async def clear_all_dbs_command(client: Client, message: Message):
         parse_mode=ParseMode.MARKDOWN
     )
     logger.info(f"Owner {message.from_user.id} initiated /clearall command. Waiting for confirmation.")
-    await store_message(message) # Store the command itself
+    # Store command usage, not for learning
+    await store_message(message, is_command=True) 
 
 @app.on_callback_query(filters.regex("^(confirm_clearall_dbs|cancel_clearall_dbs)$"))
 async def handle_clearall_dbs_callback(client: Client, callback_query):
@@ -1372,27 +1494,35 @@ async def handle_clearall_dbs_callback(client: Client, callback_query):
     if query.data == 'confirm_clearall_dbs':
         await query.edit_message_text("डेटा डिलीट किया जा रहा है... कृपया प्रतीक्षा करें।⏳")
         try:
-            # Drop all databases for client_messages
-            for db_name in client_messages.list_database_names():
-                if db_name not in ["admin", "local", "config"]: # Avoid dropping system databases
-                    client_messages.drop_database(db_name)
-                    logger.info(f"Dropped messages database: {db_name}.")
+            # Drop all collections within their respective databases.
+            # This is safer than dropping the entire database which might delete other dbs if the URI is for a cluster.
+            # Drop messages_collection
+            messages_collection.drop()
+            logger.info("messages_collection dropped.")
             
-            # Drop all databases for client_buttons
-            for db_name in client_buttons.list_database_names():
-                if db_name not in ["admin", "local", "config"]:
-                    client_buttons.drop_database(db_name)
-                    logger.info(f"Dropped buttons database: {db_name}.")
+            # Drop buttons_collection
+            buttons_collection.drop()
+            logger.info("buttons_collection dropped.")
 
-            # Drop all databases for client_tracking
-            for db_name in client_tracking.list_database_names():
-                if db_name not in ["admin", "local", "config"]:
-                    client_tracking.drop_database(db_name)
-                    logger.info(f"Dropped tracking database: {db_name}.")
+            # Drop all collections in the tracking database
+            group_tracking_collection.drop()
+            logger.info("group_tracking_collection dropped.")
+            user_tracking_collection.drop()
+            logger.info("user_tracking_collection dropped.")
+            earning_tracking_collection.drop()
+            logger.info("earning_tracking_collection dropped.")
+            reset_status_collection.drop()
+            logger.info("reset_status_collection dropped.")
+            biolink_exceptions_collection.drop()
+            logger.info("biolink_exceptions_collection dropped.")
+            owner_taught_responses_collection.drop() # NEW: Drop owner-taught collection
+            logger.info("owner_taught_responses_collection dropped.")
+            conversational_learning_collection.drop() # NEW: Drop conversational learning collection
+            logger.info("conversational_learning_collection dropped.")
 
 
             await query.edit_message_text("✅ **सफलतापूर्वक:** आपकी सभी MongoDB डेटाबेस का सारा डेटा डिलीट कर दिया गया है। बॉट अब बिल्कुल नया हो गया है! ✨", parse_mode=ParseMode.MARKDOWN)
-            logger.info(f"Owner {query.from_user.id} confirmed and successfully cleared all MongoDB databases.")
+            logger.info(f"Owner {query.from_user.id} confirmed and successfully cleared all MongoDB data.")
         except Exception as e:
             await query.edit_message_text(f"❌ **त्रुटि:** डेटा डिलीट करने में समस्या आई: {e}\n\nकृपया लॉग्स चेक करें।", parse_mode=ParseMode.MARKDOWN)
             logger.error(f"Error during /clearall confirmation and deletion: {e}")
@@ -1425,12 +1555,28 @@ async def clear_my_data_command(client: Client, message: Message):
         target_user_id = message.from_user.id
 
     if not target_user_id:
-        await send_and_auto_delete_reply(message, text="मुझे पता नहीं चल रहा कि किसका डेटा डिलीट करना है। 😕", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="मुझे पता नहीं चल रहा कि किसका डेटा डिलीet करना है। 😕", parse_mode=ParseMode.MARKDOWN)
         return
 
     try:
         deleted_messages_count = messages_collection.delete_many({"user_id": target_user_id}).deleted_count
         deleted_earning_data = earning_tracking_collection.delete_one({"_id": target_user_id}).deleted_count # Also clear earning data for that user
+        
+        # NEW: Also clear user's entries from learning collections if they contributed
+        owner_taught_responses_collection.update_many(
+            {"responses.user_id": target_user_id},
+            {"$pull": {"responses": {"user_id": target_user_id}}}
+        )
+        # If a trigger was taught by this user and has no other responses left, delete the trigger
+        owner_taught_responses_collection.delete_many({"responses": []})
+
+        conversational_learning_collection.update_many(
+            {"responses.user_id": target_user_id},
+            {"$pull": {"responses": {"user_id": target_user_id}}}
+        )
+        # If a trigger was taught by this user and has no other responses left, delete the trigger
+        conversational_learning_collection.delete_many({"responses": []})
+
 
         if deleted_messages_count > 0 or deleted_earning_data > 0:
             if target_user_id == message.from_user.id:
@@ -1447,7 +1593,8 @@ async def clear_my_data_command(client: Client, message: Message):
     except Exception as e:
         await send_and_auto_delete_reply(message, text=f"डेटा डिलीट करने में कुछ गड़बड़ हो गई: {e}. ओह नो! 😱", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Error clearing data for user {target_user_id}: {e}")
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -1508,7 +1655,8 @@ async def new_member_handler(client: Client, message: Message):
                 except Exception as e:
                     logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
 
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -1521,14 +1669,14 @@ async def left_member_handler(client: Client, message: Message):
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
             group_tracking_collection.delete_one({"_id": message.chat.id})
             messages_collection.delete_many({"chat_id": message.chat.id})
-            # This part below to update user's group list is not strictly necessary for earning,
-            # as earning is based on message count not group membership, but keeping for completeness
-            # if `groups` array was used in user_tracking_collection
+            # NEW: Clear learning data associated with this group
+            owner_taught_responses_collection.delete_many({"responses.chat_id": message.chat.id})
+            conversational_learning_collection.delete_many({"responses.chat_id": message.chat.id})
+
             earning_tracking_collection.update_many(
                 {}, # All users
                 {"$pull": {"last_active_group_id": message.chat.id}} # If it was tracking last group specifically
             )
-
 
             logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared. (Code by @asbhaibsr)")
             group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
@@ -1549,7 +1697,8 @@ async def left_member_handler(client: Client, message: Message):
                 logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}. (Notification error by @asbhaibsr)")
             return
 
-    await store_message(message)
+    # Store command usage, not for learning
+    await store_message(message, is_command=True)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -1558,7 +1707,7 @@ async def left_member_handler(client: Client, message: Message):
 async def handle_message_and_reply(client: Client, message: Message):
     # Ignore messages from bots
     if message.from_user and message.from_user.is_bot:
-        logger.debug(f"Skipping message from bot user: {message.from_user.id}. (Handle message by @asbhaibsr)")
+        logger.debug(f"Skipping message from bot user: {message.from_user.id}.")
         return
 
     is_group_chat = message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]
@@ -1567,7 +1716,7 @@ async def handle_message_and_reply(client: Client, message: Message):
     if is_group_chat:
         group_status = group_tracking_collection.find_one({"_id": message.chat.id})
         if group_status and not group_status.get("bot_enabled", True):
-            logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling. (Code by @asbhaibsr)")
+            logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling.")
             return
 
     # Apply cooldown for general messages (not commands)
@@ -1577,7 +1726,7 @@ async def handle_message_and_reply(client: Client, message: Message):
             logger.info(f"Chat {chat_id_for_cooldown} is on message reply cooldown. Skipping message {message.id}.")
             return # Skip processing and replying to this message
 
-    logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}). (Handle message by @asbhaibsr)")
+    logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}).")
 
     if is_group_chat:
         logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.")
@@ -1585,7 +1734,86 @@ async def handle_message_and_reply(client: Client, message: Message):
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
-    # --- NEW: Check for /linkdel, /biolinkdel, /usernamedel conditions ---
+    # --- NEW: Learning Logic (Owner-Taught & Conversational) ---
+
+    # 1. Owner-Taught Learning (Owner replies to OWN message)
+    if message.from_user and message.from_user.id == OWNER_ID and message.reply_to_message:
+        replied_to_msg = message.reply_to_message
+        if replied_to_msg.from_user and replied_to_msg.from_user.id == OWNER_ID:
+            trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
+            
+            if trigger_content:
+                # Prepare response data (similar structure to message_data in store_message)
+                response_data = {
+                    "message_id": message.id,
+                    "user_id": message.from_user.id,
+                    "username": message.from_user.username,
+                    "first_name": message.from_user.first_name,
+                    "chat_id": message.chat.id,
+                    "chat_type": message.chat.type.name,
+                    "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
+                    "timestamp": datetime.now(),
+                    "credits": "Code by @asbhaibsr"
+                }
+                if message.text:
+                    response_data["type"] = "text"
+                    response_data["content"] = message.text
+                elif message.sticker:
+                    response_data["type"] = "sticker"
+                    response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""
+                    response_data["sticker_id"] = message.sticker.file_id
+                
+                owner_taught_responses_collection.update_one(
+                    {"trigger": trigger_content},
+                    {"$addToSet": {"responses": response_data}}, # Use $addToSet to add unique responses
+                    upsert=True
+                )
+                await message.reply_text("मालिक! 👑 मैंने यह बातचीत सीख ली है और अब इसे याद रखूंगी! 😉", parse_mode=ParseMode.MARKDOWN)
+                logger.info(f"Owner {OWNER_ID} taught a new pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
+                return # Stop further processing as this was a learning action
+
+
+    # 2. Conversational Learning (User A says X -> User B replies Y)
+    # Only if the current message is a reply, not from the bot, and not from the owner (as owner has separate learning)
+    if message.reply_to_message and message.from_user and message.from_user.id != OWNER_ID:
+        replied_to_msg = message.reply_to_message
+        # Ensure the replied-to message is not from a bot and not from the same user
+        if replied_to_msg.from_user and not replied_to_msg.from_user.is_bot and replied_to_msg.from_user.id != message.from_user.id:
+            trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
+            
+            if trigger_content:
+                response_data = {
+                    "message_id": message.id,
+                    "user_id": message.from_user.id,
+                    "username": message.from_user.username,
+                    "first_name": message.from_user.first_name,
+                    "chat_id": message.chat.id,
+                    "chat_type": message.chat.type.name,
+                    "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
+                    "timestamp": datetime.now(),
+                    "credits": "Code by @asbhaibsr"
+                }
+                if message.text:
+                    response_data["type"] = "text"
+                    response_data["content"] = message.text
+                elif message.sticker:
+                    response_data["type"] = "sticker"
+                    response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""
+                    response_data["sticker_id"] = message.sticker.file_id
+                
+                conversational_learning_collection.update_one(
+                    {"trigger": trigger_content},
+                    {"$addToSet": {"responses": response_data}}, # Add unique responses
+                    upsert=True
+                )
+                logger.info(f"Learned conversational pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
+                # No direct reply from bot here to avoid interrupting natural conversation, just passive learning
+
+    # --- END NEW LEARNING LOGIC ---
+
+
+    # --- Moderation Checks ---
+    # Moved moderation checks here to ensure they happen even if learning is not triggered
     if is_group_chat:
         current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
         user_id = message.from_user.id if message.from_user else None
@@ -1600,17 +1828,15 @@ async def handle_message_and_reply(client: Client, message: Message):
                 try:
                     await message.delete()
                     sent_delete_alert = await message.reply_text(f"ओहो, ये क्या भेज दिया {message.from_user.mention}? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया! 💨 अब से ध्यान रखना, हाँ?", quote=True, parse_mode=ParseMode.MARKDOWN)
-                    # Schedule deletion of the bot's alert message
                     asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                     logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return # Stop processing this message further
+                    return 
                 except Exception as e:
                     logger.error(f"Error deleting link message {message.id}: {e}")
             elif contains_link(message.text) and is_sender_admin:
                 logger.info(f"Admin's link message {message.id} was not deleted in chat {message.chat.id}.")
 
         # 2. Biolink Deletion Check (links in user's BIO)
-        # This check is only performed if the message has not already been deleted by the linkdel rule
         if current_group_settings and current_group_settings.get("biolinkdel_enabled", False) and user_id:
             try:
                 user_chat_obj = await client.get_chat(user_id)
@@ -1627,10 +1853,9 @@ async def handle_message_and_reply(client: Client, message: Message):
                                 "कृपया अपनी बायो से लिंक हटाएँ। यदि आपको यह अनुमति चाहिए, तो कृपया एडमिन से संपर्क करें और उन्हें `/biolink आपका_यूजरआईडी` कमांड देने को कहें।",
                                 quote=True, parse_mode=ParseMode.MARKDOWN
                             )
-                            # Schedule deletion of the bot's alert message
                             asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                             logger.info(f"Deleted message {message.id} from user {user_id} due to link in bio in chat {message.chat.id}.")
-                            return # Stop processing this message further
+                            return 
                         except Exception as e:
                             logger.error(f"Error deleting message {message.id} due to bio link: {e}")
                 elif (is_sender_admin or is_biolink_exception) and URL_PATTERN.search(user_bio):
@@ -1640,46 +1865,42 @@ async def handle_message_and_reply(client: Client, message: Message):
                 logger.error(f"Error checking user bio for user {user_id} in chat {message.chat.id}: {e}")
 
         # 3. Username Deletion Check (@mentions in message content)
-        # This check is only performed if the message has not already been deleted by the above rules
         if current_group_settings and current_group_settings.get("usernamedel_enabled", False) and message.text:
             if contains_mention(message.text) and not is_sender_admin:
                 try:
                     await message.delete()
                     sent_delete_alert = await message.reply_text(f"टच-टच {message.from_user.mention}! 😬 आपने `@` का इस्तेमाल किया! सॉरी, वो मैसेज तो चला गया आसमान में! 🚀 अगली बार से ध्यान रखना, हाँ? 😉", quote=True, parse_mode=ParseMode.MARKDOWN)
-                    # Schedule deletion of the bot's alert message
                     asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                     logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return # Stop processing this message further
+                    return 
                 except Exception as e:
                     logger.error(f"Error deleting username message {message.id}: {e}")
             elif contains_mention(message.text) and is_sender_admin:
                 logger.info(f"Admin's username mention message {message.id} was not deleted in chat {message.chat.id}.")
-    # --- END NEW CHECKS ---
+    # --- END MODERATION CHECKS ---
 
-    # Only store message and generate reply if it wasn't deleted by any of the above checks AND it's not a command
+    # Only generate reply if message was NOT deleted by any of the above checks AND it's not a command
     if not (message.text and message.text.startswith('/')):
-        await store_message(message)
-
-        logger.info(f"Attempting to generate reply for chat {message.chat.id}. (Logic by @asbhaibsr)")
+        logger.info(f"Attempting to generate reply for chat {message.chat.id}.")
         reply_doc = await generate_reply(message)
 
         if reply_doc:
             try:
                 if reply_doc.get("type") == "text":
                     await message.reply_text(reply_doc["content"], parse_mode=ParseMode.MARKDOWN)
-                    logger.info(f"Replied with text: {reply_doc['content']}. (System by @asbhaibsr)")
+                    logger.info(f"Replied with text: {reply_doc['content']}.")
                 elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
                     await message.reply_sticker(reply_doc["sticker_id"])
-                    logger.info(f"Replied with sticker: {reply_doc['sticker_id']}. (System by @asbhaibsr)")
+                    logger.info(f"Replied with sticker: {reply_doc['sticker_id']}.")
                 else:
-                    logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}. (System by @asbhaibsr)")
+                    logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}.")
             except Exception as e:
-                logger.error(f"Error sending reply for message {message.id}: {e}. (System by @asbhaibsr)")
+                logger.error(f"Error sending reply for message {message.id}: {e}.")
             finally:
                 # Set cooldown AFTER a reply is sent
                 update_message_reply_cooldown(message.chat.id)
         else:
-            logger.info("No suitable reply found. (System by @asbhaibsr)")
+            logger.info("No suitable reply found.")
 
 async def delete_after_delay_for_message(message_obj: Message, delay: int):
     """Utility to delete a specific message after a delay."""
@@ -1692,11 +1913,11 @@ async def delete_after_delay_for_message(message_obj: Message, delay: int):
 
 # --- Main entry point ---
 if __name__ == "__main__":
-    logger.info("Starting Flask health check server in a separate thread... (Code by @asbhaibsr)")
+    logger.info("Starting Flask health check server in a separate thread...")
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.start()
 
-    logger.info("Starting Pyrogram bot... (Code by @asbhaibsr)")
+    logger.info("Starting Pyrogram bot...")
 
     app.run()
 
