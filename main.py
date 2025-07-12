@@ -34,18 +34,44 @@ from flask import Flask, request, jsonify
 if not os.path.exists("ffmpeg"):
     print("Downloading FFmpeg...")
     try:
+        # FFmpeg डाउनलोड करें
         subprocess.run([
             "wget", 
             "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
         ], check=True)
+        
+        # टार फाइल एक्सट्रैक्ट करें
         subprocess.run([
             "tar", "-xf", "ffmpeg-release-amd64-static.tar.xz"
         ], check=True)
+        
+        # एक्सट्रैक्ट किए गए फोल्डर का नाम पता करें
+        extracted_dir = None
+        for dir_name in os.listdir('.'):
+            if dir_name.startswith('ffmpeg-') and os.path.isdir(dir_name):
+                extracted_dir = dir_name
+                break
+                
+        if not extracted_dir:
+            raise Exception("FFmpeg extracted directory not found")
+            
         # FFmpeg बाइनरी को एक्सेसिबल बनाएं
-        os.rename("ffmpeg-*/ffmpeg", "ffmpeg")
+        ffmpeg_path = os.path.join(extracted_dir, "ffmpeg")
+        if not os.path.exists(ffmpeg_path):
+            raise Exception(f"FFmpeg binary not found at {ffmpeg_path}")
+            
+        os.rename(ffmpeg_path, "ffmpeg")
         os.chmod("ffmpeg", 0o755)  # Execute permission
+        
+        # सफाई: टार फाइल और एक्सट्रैक्टेड फोल्डर डिलीट करें
+        os.remove("ffmpeg-release-amd64-static.tar.xz")
+        subprocess.run(["rm", "-rf", extracted_dir], check=True)
+        
     except Exception as e:
-        print(f"FFmpeg डाउनलोड में समस्या: {e}")
+        print(f"FFmpeg डाउनलोड या इंस्टॉलेशन में समस्या: {e}")
+        # क्लीनअप का प्रयास करें
+        if os.path.exists("ffmpeg-release-amd64-static.tar.xz"):
+            os.remove("ffmpeg-release-amd64-static.tar.xz")
 
 # FFmpeg पाथ सेट करें
 os.environ["PATH"] += os.pathsep + os.getcwd()
