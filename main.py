@@ -166,22 +166,6 @@ async def can_reply_to_chat(chat_id):
 def update_message_reply_cooldown(chat_id):
     chat_message_cooldowns[chat_id] = time.time()
 
-# --- गेम्स डेटाबेस ---
-games_db = {
-    "yesno_game": {
-        "name": "🤔 हाँ या नहीं?",
-        "rules": "1. पहला यूजर सवाल पूछेगा\n2. दूसरा जवाब देगा\n3. तीसरा अनुमान लगाएगा",
-        "min_players": 2,
-        "players": [],
-        "countdown": None
-    },
-    "future_game2": {
-        "name": "🎭 ड्रामा क्वीन (जल्द आ रहा)",
-        "rules": "COMING SOON",
-        "min_players": 3,
-        "players": []
-    }
-}
 
 # --- Utility Functions ---
 def extract_keywords(text):
@@ -730,70 +714,8 @@ async def callback_handler(client, callback_query):
             "timestamp": datetime.now(),
             "credit": "by @asbhaibsr"
         })
-    elif callback_query.data.startswith("join_"):
-        await join_game_callback(client, callback_query)
-    elif callback_query.data.startswith("answer_"):
-        await handle_answer(client, callback_query)
 
     logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}. (Code by @asbhaibsr)")
-
-# --- गेम्स हैंडलर्स ---
-@app.on_message(filters.command("startgame") & filters.group)  # सिर्फ ग्रुप्स के लिए
-async def start_game_command(client: Client, message: Message):
-    if is_on_command_cooldown(message.from_user.id):
-        return
-    update_command_cooldown(message.from_user.id)
-
-    buttons = []
-    for game_id, game in games_db.items():
-        btn_text = f"{game['name']}\n{game['rules']}"
-        buttons.append([InlineKeyboardButton(btn_text, callback_data=f"join_{game_id}")])
-    
-    await message.reply_text(
-        "🎮 चुनें गेम:",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-    await store_message(message)
-
-# जॉइन गेम कॉलबैक हैंडलर
-@app.on_callback_query(filters.regex("^join_"))
-async def join_game_callback(client: Client, callback_query):
-    # सिर्फ ग्रुप्स में ही गेम खेलने दें
-    if callback_query.message.chat.type == ChatType.PRIVATE:
-        await callback_query.answer("यह गेम सिर्फ ग्रुप्स में खेला जा सकता है!", show_alert=True)
-        return
-        
-    query = callback_query
-    game_id = query.data.replace("join_", "")
-    game = games_db[game_id]
-    
-    if query.from_user.id in [p["id"] for p in game["players"]]:
-        await query.answer("आप पहले से जुड़े हैं!")
-        return
-    
-    game["players"].append({
-        "id": query.from_user.id,
-        "name": query.from_user.first_name
-    })
-    
-    players_list = "\n".join([p["name"] for p in game["players"]])
-    await query.message.reply_text(
-        f"🎉 {query.from_user.first_name} गेम में शामिल हो गए!\n\nजुड़े खिलाड़ी:\n{players_list}"
-    )
-    
-    if len(game["players"]) >= game["min_players"] and not game["countdown"]:
-        game["countdown"] = asyncio.create_task(start_countdown(game_id, query.message.chat.id, client))
-
-@app.on_callback_query(filters.regex("^answer_"))
-async def handle_answer(client: Client, callback_query):
-    # सिर्फ ग्रुप्स में ही जवाब दें
-    if callback_query.message.chat.type == ChatType.PRIVATE:
-        await callback_query.answer("यह गेम सिर्फ ग्रुप्स में खेला जा सकता है!", show_alert=True)
-        return
-        
-    answer = callback_query.data.replace("answer_", "")
-    await callback_query.answer(f"आपने {answer} चुना!")
-    await callback_query.message.edit_text(f"🧠 आपका जवाब: {answer}")
 
 @app.on_message(filters.command("topusers") & (filters.private | filters.group))
 async def top_users_command(client: Client, message: Message):
