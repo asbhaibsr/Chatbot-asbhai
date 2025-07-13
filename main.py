@@ -53,6 +53,7 @@ ASBHAI_USERNAME = "asbhaibsr" # Owner's username for contact
 ASFILTER_BOT_USERNAME = "asfilter_bot" # The bot for premium rewards
 BOT_PHOTO_URL = "https://envs.sh/FU3.jpg" # Consider updating this URL if it's generic
 REPO_LINK = "https://github.com/asbhaibsr/Chatbot-asbhai.git"
+GAME_ACTIVE_TIMEOUT = 60 # seconds (1 minute)
 
 # Regex for common URL patterns including t.me and typical link formats
 URL_PATTERN = re.compile(r"(?:https?://|www\.|t\.me/)[^\s/$.?#].[^\s]*", re.IGNORECASE)
@@ -166,6 +167,9 @@ async def can_reply_to_chat(chat_id):
 def update_message_reply_cooldown(chat_id):
     chat_message_cooldowns[chat_id] = time.time()
 
+# --- Game State Management ---
+# Key: chat_id, Value: {target_number, player_id, attempts, last_activity_time, game_task}
+game_states = {}
 
 # --- Utility Functions ---
 def extract_keywords(text):
@@ -1347,7 +1351,7 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
         current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
         current_status = current_status_doc.get("biolinkdel_enabled", False) if current_status_doc else False
         status_text = "चालू है (ON)" if current_status else "बंद है (OFF)"
-        await send_and_auto_delete_reply(message, text=f"मेरी 'बायो-लिंक पुलिस' अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/biolinkdel on` या `/biolinkdel off` यूज़ करो. 👮‍♀️", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text=f"मेरी 'बायो-लिंक पुलिस' अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/biolinkdel on` या `/biolinkdel off` यूज़ करो.👮‍♀️", parse_mode=ParseMode.MARKDOWN)
         return
 
     action = message.command[1].lower()
@@ -1710,9 +1714,93 @@ async def left_member_handler(client: Client, message: Message):
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+# --- Game Logic Functions ---
+async def game_timeout_checker(chat_id: int):
+    while chat_id in game_states:
+        game_info = game_states.get(chat_id)
+        if game_info and (time.time() - game_info['last_activity_time']) > GAME_ACTIVE_TIMEOUT:
+            logger.info(f"Game in chat {chat_id} timed out due to inactivity.")
+            await app.send_message(chat_id, 
+                                   f"⌛ खेल ख़त्म! किसी ने 1 मिनट तक जवाब नहीं दिया. सही जवाब था: **{game_info['target_number']}**\n\n"
+                                   "अब आप चैट जारी रख सकते हैं. 😊")
+            del game_states[chat_id]
+            break # Exit the loop as game is over
+        await asyncio.sleep(5) # Check every 5 seconds
 
-@app.on_message(filters.text | filters.sticker | filters.photo | filters.video | filters.document) # Added more filters for comprehensive handling
-async def handle_message_and_reply(client: Client, message: Message):
+@app.on_message(filters.regex("game started", re.IGNORECASE) & filters.group)
+async def start_game(client: Client, message: Message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    user_name = message.from_user.first_name or "खिलाड़ी"
+
+    if chat_id in game_states:
+        await message.reply_text("अरे! एक खेल पहले से ही चल रहा है. उसे ख़त्म होने दो, फिर नया शुरू करेंगे! 😉")
+        return
+    
+    # Initialize game state
+    target_number = random.randint(1, 100)
+    game_states[chat_id] = {
+        'target_number': target_number,
+        'player_id': user_id,
+        'attempts': 0,
+        'last_activity_time': time.time(),
+        'game_task': None # To store the task for cancellation if needed
+    }
+    
+    await message.reply_text(
+        f"🎮 **खेल शुरू!** 🎮\n\n"
+        f"नमस्ते {user_name}! मैंने 1 से 100 के बीच एक संख्या सोची है. इसे 60 सेकंड के भीतर अनुमान लगाओ! 👇\n\n"
+        "संकेत: आप `guess 50` जैसा कुछ भेज सकते हैं."
+    )
+    logger.info(f"Game started in chat {chat_id} by user {user_id}. Target: {target_number}")
+
+    # Start the timeout checker for this game
+    game_states[chat_id]['game_task'] = asyncio.create_task(game_timeout_checker(chat_id))
+
+@app.on_message(filters.text & filters.group & ~filters.command)
+async def handle_game_and_chat(client: Client, message: Message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    # Check if a game is active in this chat
+    if chat_id in game_states:
+        game_info = game_states[chat_id]
+
+        # Only the player can play
+        if user_id != game_info['player_id']:
+            logger.info(f"Ignoring non-player message in active game chat {chat_id} from user {user_id}.")
+            return # Ignore messages from non-players during an active game
+
+        # Process game input
+        try:
+            guess = int(message.text)
+            game_info['attempts'] += 1
+            game_info['last_activity_time'] = time.time() # Reset timeout on activity
+
+            if guess == game_info['target_number']:
+                await message.reply_text(
+                    f"🎉 **वाह!** आपने सही अनुमान लगाया, **{message.from_user.first_name}**! "
+                    f"सही संख्या थी **{game_info['target_number']}** और आपने **{game_info['attempts']}** कोशिशों में जीत हासिल की!\n\n"
+                    "खेल ख़त्म! अब आप चैट जारी रख सकते हैं. 😊"
+                )
+                logger.info(f"Game in chat {chat_id} won by user {user_id} in {game_info['attempts']} attempts.")
+                if game_info['game_task']:
+                    game_info['game_task'].cancel() # Cancel the timeout task
+                del game_states[chat_id] # End the game
+            elif guess < game_info['target_number']:
+                await message.reply_text(f"थोड़ा और ऊपर! 🤔 आपका अनुमान `{guess}` है. कोशिश करते रहो! 🎯")
+            else:
+                await message.reply_text(f"थोड़ा नीचे! 👇 आपका अनुमान `{guess}` है. कोशिश करते रहो! 🎯")
+
+        except ValueError:
+            # If it's not a valid number guess, and a game is active, just ignore it or provide a hint
+            if message.text and "game" in message.text.lower() or "guess" in message.text.lower():
+                 await message.reply_text("कृपया एक संख्या का अनुमान लगाएँ. जैसे: `50` या `guess 75`")
+            logger.debug(f"Non-numeric message '{message.text}' during active game in chat {chat_id}. Ignoring.")
+        
+        return # Important: Stop further processing, bot is in game mode
+
+    # If no game is active, proceed with regular message handling
     # Ignore messages from bots
     if message.from_user and message.from_user.is_bot:
         logger.debug(f"Skipping message from bot user: {message.from_user.id}.")
