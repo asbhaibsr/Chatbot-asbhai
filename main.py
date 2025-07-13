@@ -171,10 +171,12 @@ games_db = {
     "yesno_game": {
         "name": "🤔 हाँ या नहीं?",
         "rules": "1. पहला यूजर सवाल पूछेगा\n2. दूसरा जवाब देगा\n3. तीसरा अनुमान लगाएगा",
-        "min_players": 2,
+        "min_players": 1,  # यहां 2 की जगह 1 करें
         "players": [],
         "countdown": None
     },
+    # ... बाकी गेम्स
+},
     "future_game2": {
         "name": "🎭 ड्रामा क्वीन (जल्द आ रहा)",
         "rules": "COMING SOON",
@@ -781,11 +783,13 @@ async def join_game_callback(client: Client, callback_query):
 
 # काउंटडाउन फंक्शन
 async def start_countdown(game_id, chat_id, client):
+async def start_countdown(game_id, chat_id, client):
     game = games_db[game_id]
     
-    for time_left in [60, 40, 20]:
-        if time_left == 60:
-            text = f"⏳ गेम शुरू होने में 1 मिनट...\nजुड़ने के लिए:\n/startgame"
+    # नया काउंटडाउन टाइम (30, 15, 5 सेकंड)
+    for time_left in [30, 15, 5]:  # पहले [60, 40, 20] था
+        if time_left == 30:
+            text = f"⏳ गेम शुरू होने में 30 सेकंड...\nजुड़ने के लिए:\n/startgame"
         else:
             text = f"⏳ केवल {time_left} सेकंड शेष!\nजल्दी जॉइन करो!"
         
@@ -796,7 +800,7 @@ async def start_countdown(game_id, chat_id, client):
                 [InlineKeyboardButton("🎮 अभी जॉइन करो", callback_data=f"join_{game_id}")]
             ])
         )
-        await asyncio.sleep(20)
+        await asyncio.sleep(time_left/3)  # स्लीप टाइम कम करें
     
     await start_yesno_game(game_id, chat_id, client)
 
