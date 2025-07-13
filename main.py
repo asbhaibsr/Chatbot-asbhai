@@ -563,7 +563,7 @@ async def start_private_command(client: Client, message: Message):
         parse_mode=ParseMode.MARKDOWN
     )
     # Store command usage, not for learning
-    await store_message(message, is_command=True) 
+    await store_message(message) 
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private start command processed for user {message.from_user.id}. (Code by @asbhaibsr)")
@@ -607,7 +607,7 @@ async def start_group_command(client: Client, message: Message):
         parse_mode=ParseMode.MARKDOWN
     )
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.")
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
@@ -800,7 +800,7 @@ async def top_users_command(client: Client, message: Message):
 
     await send_and_auto_delete_reply(message, text="\n".join(earning_messages), reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Top users command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
@@ -844,7 +844,7 @@ async def broadcast_command(client: Client, message: Message):
 
     await send_and_auto_delete_reply(message, text=f"Broadcast ho gaya, darling! ✨ **{sent_count}** chats tak pahunchi, aur **{failed_count}** tak nahi. Koi nahi, next time! 😉 (System by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     logger.info(f"Broadcast command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("stats") & filters.private)
@@ -875,7 +875,7 @@ async def stats_private_command(client: Client, message: Message):
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private stats command processed for user {message.from_user.id}. (Code by @asbhaibsr)")
@@ -907,7 +907,7 @@ async def stats_group_command(client: Client, message: Message):
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
@@ -964,7 +964,7 @@ async def list_groups_command(client: Client, message: Message):
     group_list_text += "\n_Yeh data tracking database se hai, bilkul secret!_ 🤫\n**Code & System By:** @asbhaibsr"
     await send_and_auto_delete_reply(message, text=group_list_text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Groups list command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
 
@@ -1010,7 +1010,7 @@ async def leave_group_command(client: Client, message: Message):
         logger.error(f"Error leaving group {group_id_str}: {e}. (Code by @asbhaibsr)")
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 # --- New Commands ---
@@ -1059,15 +1059,18 @@ async def clear_data_command(client: Client, message: Message):
     if total_owner_taught > 0:
         docs_to_delete_owner = int(total_owner_taught * (percentage / 100))
         oldest_owner_taught_ids = []
-        for doc in owner_taught_responses_collection.find({}).sort("timestamp", 1).limit(docs_to_delete_owner): # Assuming 'timestamp' exists or add one
+        # Find _id of documents to delete based on oldest timestamp
+        for doc in owner_taught_responses_collection.find({}).sort("responses.timestamp", 1).limit(docs_to_delete_owner): # Sort by nested timestamp
             oldest_owner_taught_ids.append(doc['_id'])
         if oldest_owner_taught_ids:
             deleted_count_owner_taught = owner_taught_responses_collection.delete_many({"_id": {"$in": oldest_owner_taught_ids}}).deleted_count
 
+
     if total_conversational > 0:
         docs_to_delete_conv = int(total_conversational * (percentage / 100))
         oldest_conv_ids = []
-        for doc in conversational_learning_collection.find({}).sort("timestamp", 1).limit(docs_to_delete_conv): # Assuming 'timestamp' exists or add one
+        # Find _id of documents to delete based on oldest timestamp
+        for doc in conversational_learning_collection.find({}).sort("responses.timestamp", 1).limit(docs_to_delete_conv): # Sort by nested timestamp
             oldest_conv_ids.append(doc['_id'])
         if oldest_conv_ids:
             deleted_count_conversational = conversational_learning_collection.delete_many({"_id": {"$in": oldest_conv_ids}}).deleted_count
@@ -1081,7 +1084,7 @@ async def clear_data_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Umm, kuch delete karne ke liye mila hi nahi. Lagta hai tumne pehle hi sab clean kar diya hai! 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("deletemessage") & filters.private)
@@ -1107,26 +1110,27 @@ async def delete_specific_message_command(client: Client, message: Message):
         delete_result_old = messages_collection.delete_many({"type": "text", "content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}})
         deleted_count += delete_result_old.deleted_count
         
-        # Delete from owner_taught_responses collection
-        # This will remove the entire pattern if the trigger or any response matches
+        # Delete from owner_taught_responses collection (both trigger and specific responses)
+        # Delete entire documents where the trigger matches
         delete_result_owner_taught_trigger = owner_taught_responses_collection.delete_many({"trigger": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
         deleted_count += delete_result_owner_taught_trigger.deleted_count
         
-        delete_result_owner_taught_response = owner_taught_responses_collection.update_many(
+        # Pull responses where content matches (leaving the trigger if other responses exist)
+        owner_taught_pull_result = owner_taught_responses_collection.update_many(
             {"responses.content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}},
             {"$pull": {"responses": {"content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}}}}
         )
-        deleted_count += delete_result_owner_taught_response.modified_count # Count modified documents
+        deleted_count += owner_taught_pull_result.modified_count
 
-        # Delete from conversational_learning collection
+        # Delete from conversational_learning collection (both trigger and specific responses)
         delete_result_conv_trigger = conversational_learning_collection.delete_many({"trigger": {"$regex": f"^{re.escape(search_query)}$", "$options": "i"}})
         deleted_count += delete_result_conv_trigger.deleted_count
 
-        delete_result_conv_response = conversational_learning_collection.update_many(
+        conv_pull_result = conversational_learning_collection.update_many(
             {"responses.content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}},
             {"$pull": {"responses": {"content": {"$regex": f".*{re.escape(search_query)}.*", "$options": "i"}}}}
         )
-        deleted_count += delete_result_conv_response.modified_count
+        deleted_count += conv_pull_result.modified_count
 
     if deleted_count > 0:
         await send_and_auto_delete_reply(message, text=f"Jaisa hukum mere aaka! 🧞‍♀️ Maine '{search_query}' se milte-julte **{deleted_count}** **text messages** ko dhoondh ke delete kar diya. Ab woh history ka हिस्सा nahi raha! ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -1135,7 +1139,7 @@ async def delete_specific_message_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is query se koi **text message** mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -1181,7 +1185,11 @@ async def delete_specific_sticker_command(client: Client, message: Message):
         {"responses.type": "sticker"},
         {"$pull": {"responses": {"type": "sticker"}}}
     )
-    deleted_count += owner_taught_pull_result.modified_count # Count documents where stickers were pulled
+    # Count how many individual stickers were removed across all matching documents
+    # This is an approximation as modified_count only tells how many documents were updated.
+    # To get exact number of stickers, we'd need to manually count before and after for each document.
+    # For now, let's just count modified documents.
+    deleted_count += owner_taught_pull_result.modified_count 
 
     # Delete from conversational_learning (if any response is a sticker)
     conversational_pull_result = conversational_learning_collection.update_many(
@@ -1198,7 +1206,7 @@ async def delete_specific_sticker_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is query se koi **sticker** mila hi nahi apne database mein. Ya toh sticker hi nahi hai, ya percentage bahot kam hai! 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -1217,7 +1225,7 @@ async def clear_earning_command(client: Client, message: Message):
     logger.info(f"Owner {message.from_user.id} manually triggered earning data reset. (Code by @asbhaibsr)")
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("restart") & filters.private)
@@ -1278,7 +1286,7 @@ async def toggle_chat_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Galat command, darling! `/chat on` ya `/chat off` use karo. 😉", parse_mode=ParseMode.MARKDOWN)
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -1322,7 +1330,7 @@ async def toggle_linkdel_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/linkdel on` या `/linkdel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
 
 
 @app.on_message(filters.command("biolinkdel") & filters.group)
@@ -1363,7 +1371,7 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/biolinkdel on` या `/biolinkdel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
 
 
 @app.on_message(filters.command("biolink") & filters.group)
@@ -1405,7 +1413,7 @@ async def allow_biolink_user_command(client: Client, message: Message):
             await send_and_auto_delete_reply(message, text="उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", parse_mode=ParseMode.MARKDOWN)
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
 
 
 @app.on_message(filters.command("usernamedel") & filters.group)
@@ -1446,7 +1454,7 @@ async def toggle_usernamedel_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/usernamedel on` या `/usernamedel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
 
 # --- NEW: /clearall command (Owner-Only, with confirmation) ---
 @app.on_message(filters.command("clearall") & filters.private)
@@ -1478,7 +1486,7 @@ async def clear_all_dbs_command(client: Client, message: Message):
     )
     logger.info(f"Owner {message.from_user.id} initiated /clearall command. Waiting for confirmation.")
     # Store command usage, not for learning
-    await store_message(message, is_command=True) 
+    await store_message(message) 
 
 @app.on_callback_query(filters.regex("^(confirm_clearall_dbs|cancel_clearall_dbs)$"))
 async def handle_clearall_dbs_callback(client: Client, callback_query):
@@ -1594,7 +1602,7 @@ async def clear_my_data_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text=f"डेटा डिलीट करने में कुछ गड़बड़ हो गई: {e}. ओह नो! 😱", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Error clearing data for user {target_user_id}: {e}")
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -1656,7 +1664,7 @@ async def new_member_handler(client: Client, message: Message):
                     logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -1698,7 +1706,7 @@ async def left_member_handler(client: Client, message: Message):
             return
 
     # Store command usage, not for learning
-    await store_message(message, is_command=True)
+    await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
@@ -1720,7 +1728,8 @@ async def handle_message_and_reply(client: Client, message: Message):
             return
 
     # Apply cooldown for general messages (not commands)
-    if message.from_user and not (message.text and message.text.startswith('/')): # Only apply to non-command messages
+    # Commands are handled by their individual cooldowns
+    if message.from_user and not (message.text and message.text.startswith('/')): 
         chat_id_for_cooldown = message.chat.id
         if not await can_reply_to_chat(chat_id_for_cooldown): # Check cooldown for the specific chat
             logger.info(f"Chat {chat_id_for_cooldown} is on message reply cooldown. Skipping message {message.id}.")
@@ -1827,7 +1836,7 @@ async def handle_message_and_reply(client: Client, message: Message):
             if contains_link(message.text) and not is_sender_admin:
                 try:
                     await message.delete()
-                    sent_delete_alert = await message.reply_text(f"ओहो, ये क्या भेज दिया {message.from_user.mention}? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया! 💨 अब से ध्यान रखना, हाँ?", quote=True, parse_mode=ParseMode.MARKDOWN)
+                    sent_delete_alert = await message.reply_text(f"ओहो, ये क्या भेज दिया {message.from_user.mention}? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया!💨 अब से ध्यान रखना, हाँ?", quote=True, parse_mode=ParseMode.MARKDOWN)
                     asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180)) # 3 minutes
                     logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
                     return 
