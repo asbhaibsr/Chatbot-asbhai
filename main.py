@@ -812,9 +812,13 @@ async def start_countdown(game_id, chat_id, client):
     await start_yesno_game(game_id, chat_id, client)
 
 # हाँ/नहीं गेम लॉजिक
+# ... (join_game_callback फंक्शन के बाद)
+
 async def start_yesno_game(game_id, chat_id, client):
     game = games_db[game_id]
     players = game["players"]
+    
+    logger.info(f"DEBUG: Starting game with players: {players}")  # डिबग लॉग
     
     if len(players) < game["min_players"]:
         await client.send_message(
@@ -823,25 +827,46 @@ async def start_yesno_game(game_id, chat_id, client):
         )
         return
     
-    # पहला यूजर सवाल पूछे
-    await client.send_message(
-        chat_id=players[0]["id"],
-        text=f"🎤 {players[0]['name']}, एक 'हाँ/नहीं' वाला सवाल पूछो:"
-    )
-    
-    # दूसरा यूजर जवाब दे
-    await client.send_message(
-        chat_id=players[1]["id"],
-        text=f"🧠 {players[1]['name']}, आपको जवाब देना है!",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("👍 हाँ", callback_data="answer_yes")],
-            [InlineKeyboardButton("👎 नहीं", callback_data="answer_no")]
-        ])
-    )
-    
-    # गेम स्टेट रीसेट
-    game["players"] = []
-    game["countdown"] = None
+    try:
+        # पहला यूजर सवाल पूछे
+        await client.send_message(
+            chat_id=players[0]["id"],
+            text=f"🎤 {players[0]['name']}, एक 'हाँ/नहीं' वाला सवाल पूछो:"
+        )
+        
+        # दूसरा यूजर जवाब दे (अगर उपलब्ध हो)
+        if len(players) > 1:
+            await client.send_message(
+                chat_id=players[1]["id"],
+                text=f"🧠 {players[1]['name']}, आपको जवाब देना है!",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("👍 हाँ", callback_data="answer_yes")],
+                    [InlineKeyboardButton("👎 नहीं", callback_data="answer_no")]
+                ])
+            )
+        else:
+            # सिंगल प्लेयर मोड
+            await client.send_message(
+                chat_id=players[0]["id"],
+                text="🧠 आपको खुद ही जवाब देना है!",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("👍 हाँ", callback_data="answer_yes")],
+                    [InlineKeyboardButton("👎 नहीं", callback_data="answer_no")]
+                ])
+            )
+    except Exception as e:
+        logger.error(f"Error starting game: {e}")
+        await client.send_message(
+            chat_id=chat_id,
+            text=f"गेम शुरू करने में त्रुटि: {e}"
+        )
+    finally:
+        # गेम स्टेट रीसेट
+        game["players"] = []
+        game["countdown"] = None
+        logger.info("DEBUG: Game state reset after starting")
+
+# ... (handle_answer फंक्शन से पहले)
 
 # उत्तर हैंडलर
 @app.on_callback_query(filters.regex("^answer_"))
