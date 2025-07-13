@@ -47,7 +47,7 @@ async def start_countdown(game_id, chat_id, client):
             text=text,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🎮 अभी जॉइन करो", callback_data=f"join_{game_id}")]
-            )
+            ])
         )
         await asyncio.sleep(30 if time_left != 10 else 10)
     
@@ -96,7 +96,7 @@ async def handle_yesno_answer(client, user_id, answer):
                 )
                 
                 # Notify group
-                guesser_name = next((p["name"] for p in game["players"] if p["id"] == game["current_guesser"]), "कोई"
+                guesser_name = next((p["name"] for p in game["players"] if p["id"] == game["current_guesser"]), "कोई")
                 await client.send_message(
                     chat_id=game["players"][0]["id"],  # Questioner's chat
                     text=f"{guesser_name} अब अनुमान लगाएगा कि जवाब क्या था!"
@@ -142,7 +142,7 @@ async def start_game_command(client: Client, message: Message):
 
     buttons = []
     for game_id, game in games_db.items():
-        btn_text = f"{game['name']}\n{game['rules']}"
+        btn_text = f"{game['name']}"
         buttons.append([InlineKeyboardButton(btn_text, callback_data=f"join_{game_id}")])
     
     await message.reply_text(
@@ -201,7 +201,7 @@ async def game_message_handler(client: Client, message: Message):
                         reply_markup=InlineKeyboardMarkup([
                             [InlineKeyboardButton("👍 हाँ", callback_data="answer_yes")],
                             [InlineKeyboardButton("👎 नहीं", callback_data="answer_no")]
-                        )
+                        ])
                     )
                 return
             
@@ -209,3 +209,12 @@ async def game_message_handler(client: Client, message: Message):
             elif game["current_guesser"] == message.from_user.id and game["current_answer"] is not None:
                 await handle_yesno_guess(client, message.from_user.id, message.text)
                 return
+
+# Add this to your existing callback handler if you have one
+@app.on_callback_query()
+async def callback_handler(client, callback_query):
+    if callback_query.data.startswith("join_"):
+        await join_game_callback(client, callback_query)
+    elif callback_query.data.startswith("answer_"):
+        await handle_answer(client, callback_query)
+    # Add your other callback handlers here
