@@ -738,7 +738,7 @@ async def callback_handler(client, callback_query):
     logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}. (Code by @asbhaibsr)")
 
 # --- गेम्स हैंडलर्स ---
-@app.on_message(filters.command("startgame") & (filters.group | filters.private))
+@app.on_message(filters.command("startgame") & filters.group)  # सिर्फ ग्रुप्स के लिए
 async def start_game_command(client: Client, message: Message):
     if is_on_command_cooldown(message.from_user.id):
         return
