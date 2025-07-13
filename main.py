@@ -1757,7 +1757,7 @@ async def start_game(client: Client, message: Message):
     # Start the timeout checker for this game
     game_states[chat_id]['game_task'] = asyncio.create_task(game_timeout_checker(chat_id))
 
-@app.on_message(filters.text & filters.group & ~filters.command)
+@app.on_message(filters.text & filters.group & -filters.command)
 async def handle_game_and_chat(client: Client, message: Message):
     chat_id = message.chat.id
     user_id = message.from_user.id
