@@ -758,6 +758,11 @@ async def start_game_command(client: Client, message: Message):
 # जॉइन गेम कॉलबैक हैंडलर
 @app.on_callback_query(filters.regex("^join_"))
 async def join_game_callback(client: Client, callback_query):
+    # सिर्फ ग्रुप्स में ही गेम खेलने दें
+    if callback_query.message.chat.type == ChatType.PRIVATE:
+        await callback_query.answer("यह गेम सिर्फ ग्रुप्स में खेला जा सकता है!", show_alert=True)
+        return
+        
     query = callback_query
     game_id = query.data.replace("join_", "")
     game = games_db[game_id]
@@ -779,62 +784,13 @@ async def join_game_callback(client: Client, callback_query):
     if len(game["players"]) >= game["min_players"] and not game["countdown"]:
         game["countdown"] = asyncio.create_task(start_countdown(game_id, query.message.chat.id, client))
 
-# काउंटडाउन फंक्शन
-async def start_countdown(game_id, chat_id, client):
-    game = games_db[game_id]
-    
-    for time_left in [60, 40, 20]:
-        if time_left == 60:
-            text = f"⏳ गेम शुरू होने में 1 मिनट...\nजुड़ने के लिए:\n/startgame"
-        else:
-            text = f"⏳ केवल {time_left} सेकंड शेष!\nजल्दी जॉइन करो!"
-        
-        await client.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎮 अभी जॉइन करो", callback_data=f"join_{game_id}")]
-            ])
-        )
-        await asyncio.sleep(20)
-    
-    await start_yesno_game(game_id, chat_id, client)
-
-# हाँ/नहीं गेम लॉजिक
-async def start_yesno_game(game_id, chat_id, client):
-    game = games_db[game_id]
-    players = game["players"]
-    
-    if len(players) < game["min_players"]:
-        await client.send_message(
-            chat_id=chat_id,
-            text="😢 पर्याप्त खिलाड़ी नहीं हैं। गेम रद्द किया जा रहा है।"
-        )
-        return
-    
-    # पहला यूजर सवाल पूछे
-    await client.send_message(
-        chat_id=players[0]["id"],
-        text=f"🎤 {players[0]['name']}, एक 'हाँ/नहीं' वाला सवाल पूछो:"
-    )
-    
-    # दूसरा यूजर जवाब दे
-    await client.send_message(
-        chat_id=players[1]["id"],
-        text=f"🧠 {players[1]['name']}, आपको जवाब देना है!",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("👍 हाँ", callback_data="answer_yes")],
-            [InlineKeyboardButton("👎 नहीं", callback_data="answer_no")]
-        ])
-    )
-    
-    # गेम स्टेट रीसेट
-    game["players"] = []
-    game["countdown"] = None
-
-# उत्तर हैंडलर
 @app.on_callback_query(filters.regex("^answer_"))
 async def handle_answer(client: Client, callback_query):
+    # सिर्फ ग्रुप्स में ही जवाब दें
+    if callback_query.message.chat.type == ChatType.PRIVATE:
+        await callback_query.answer("यह गेम सिर्फ ग्रुप्स में खेला जा सकता है!", show_alert=True)
+        return
+        
     answer = callback_query.data.replace("answer_", "")
     await callback_query.answer(f"आपने {answer} चुना!")
     await callback_query.message.edit_text(f"🧠 आपका जवाब: {answer}")
