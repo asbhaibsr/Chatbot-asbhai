@@ -183,7 +183,7 @@ async def handle_answer(client: Client, callback_query):
     await callback_query.message.edit_text(f"🧠 आपका जवाब: {answer}")
 
 # मैसेज हैंडलर (सवाल और अनुमान के लिए)
-@Client.on_message(filters.group & filters.text & ~filters.command)
+@Client.on_message(filters.group & filters.text & -filters.command)
 async def game_message_handler(client: Client, message: Message):
     for game_id, game in games_db.items():
         if game.get("active"):
