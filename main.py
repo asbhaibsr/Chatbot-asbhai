@@ -764,6 +764,9 @@ async def join_game_callback(client: Client, callback_query):
     game_id = query.data.replace("join_", "")
     game = games_db[game_id]
     
+    # डिबगिंग लॉग जोड़ें
+    logger.info(f"DEBUG: Current players before join: {game['players']}")
+    
     if query.from_user.id in [p["id"] for p in game["players"]]:
         await query.answer("आप पहले से जुड़े हैं!")
         return
@@ -773,12 +776,16 @@ async def join_game_callback(client: Client, callback_query):
         "name": query.from_user.first_name
     })
     
+    # डिबगिंग लॉग जोड़ें
+    logger.info(f"DEBUG: Current players after join: {game['players']}")
+    
     players_list = "\n".join([p["name"] for p in game["players"]])
     await query.message.reply_text(
         f"🎉 {query.from_user.first_name} गेम में शामिल हो गए!\n\nजुड़े खिलाड़ी:\n{players_list}"
     )
     
     if len(game["players"]) >= game["min_players"] and not game["countdown"]:
+        logger.info("DEBUG: Starting countdown as min players reached")
         game["countdown"] = asyncio.create_task(start_countdown(game_id, query.message.chat.id, client))
 
 # काउंटडाउन फंक्शन
