@@ -11,7 +11,6 @@ import asyncio
 import threading
 import time
 
-from game import games_db, start_countdown, start_yesno_game, handle_yesno_answer, handle_yesno_guess
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.raw.functions.messages import SetTyping
