@@ -1,11 +1,3 @@
-# --- IMPORTANT: THIS BOT CODE IS PROPERTY OF @asbhaibsr ---
-# --- Unauthorized FORKING, REBRANDING, or RESELLING is STRICTLY PROHIBITED. ---
-# Owner Telegram ID: @asbhaibsr
-# Update Channel: @asbhai_bsr
-# Support Group: @aschat_group
-# Contact @asbhaibsr for any official inquiries or custom bots.
-# --- DO NOT REMOVE THESE CREDITS ---
-
 import os
 import asyncio
 import threading
@@ -252,7 +244,7 @@ async def store_message(message: Message, is_owner_taught_pair=False, is_convers
             "chat_type": message.chat.type.name,
             "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
             "timestamp": datetime.now(),
-            "credits": "Code by @asbhaibsr, Support: @aschat_group"
+            "credits": "Code by @asbhaibsr"
         }
 
         if message.text:
@@ -807,6 +799,8 @@ async def top_users_command(client: Client, message: Message):
 
 @app.on_message(filters.command("broadcast") & filters.private)
 async def broadcast_command(client: Client, message: Message):
+    from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError
+
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -815,34 +809,110 @@ async def broadcast_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
 
-    if len(message.command) < 2:
-        await send_and_auto_delete_reply(message, text="Hey, broadcast karne ke liye kuch likho toh sahi! 🙄 Jaise: `/broadcast Aapka message yahan` (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+    # Check if a reply is present (for sticker/photo broadcast) or text is present
+    if not message.reply_to_message and not (len(message.command) > 1):
+        await send_and_auto_delete_reply(message, text="Hey, broadcast karne ke liye kuch likho ya kisi message/sticker/photo ko reply karo toh sahi! 🙄 Jaise: `/broadcast Aapka message yahan` (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
 
-    broadcast_text = " ".join(message.command[1:])
+    broadcast_text = None
+    broadcast_photo = None
+    broadcast_sticker = None
+    broadcast_video = None
+    broadcast_document = None
 
-    group_chat_ids = group_tracking_collection.distinct("_id")
-    private_chat_ids = user_tracking_collection.distinct("_id")
+    if message.reply_to_message:
+        replied_msg = message.reply_to_message
+        if replied_msg.text:
+            broadcast_text = replied_msg.text
+        elif replied_msg.photo:
+            broadcast_photo = replied_msg.photo.file_id
+            broadcast_text = replied_msg.caption # Include caption if available
+        elif replied_msg.sticker:
+            broadcast_sticker = replied_msg.sticker.file_id
+        elif replied_msg.video:
+            broadcast_video = replied_msg.video.file_id
+            broadcast_text = replied_msg.caption
+        elif replied_msg.document:
+            broadcast_document = replied_msg.document.file_id
+            broadcast_text = replied_msg.caption
+    elif len(message.command) > 1:
+        # Use the raw text after the command to preserve newlines
+        broadcast_text = message.text.split(None, 1)[1] 
+
+    if not any([broadcast_text, broadcast_photo, broadcast_sticker, broadcast_video, broadcast_document]):
+        await send_and_auto_delete_reply(message, text="Broadcast karne ke liye koi content nahi mila. Please text, sticker, photo, video, ya document bhejo ya reply karo. 🤔", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    group_chat_ids = [g["_id"] for g in group_tracking_collection.find({})]
+    private_chat_ids = [u["_id"] for u in user_tracking_collection.find({})]
 
     all_target_ids = list(set(group_chat_ids + private_chat_ids))
+    
+    # Remove the owner's private chat from the broadcast targets to avoid sending twice
+    if OWNER_ID in all_target_ids:
+        all_target_ids.remove(OWNER_ID)
 
+    total_targets = len(all_target_ids)
     sent_count = 0
     failed_count = 0
-    logger.info(f"Starting broadcast to {len(all_target_ids)} chats (groups and users). (Broadcast by @asbhaibsr)")
+    
+    status_message = await message.reply_text(f"🚀 **Broadcast Shuru!** 🚀\n"
+                                             f"Cool, main **{total_targets}** chats par message bhej rahi hoon.\n"
+                                             f"Sent: **0** / Failed: **0** (Total: {total_targets})",
+                                             parse_mode=ParseMode.MARKDOWN)
 
-    for chat_id in all_target_ids:
+    logger.info(f"Starting broadcast to {total_targets} chats (groups and users). (Broadcast by @asbhaibsr)")
+
+    for i, chat_id in enumerate(all_target_ids):
         try:
-            if chat_id == message.chat.id and message.chat.type == ChatType.PRIVATE:
-                continue
-
-            await client.send_message(chat_id, broadcast_text)
+            if broadcast_photo:
+                await client.send_photo(chat_id, broadcast_photo, caption=broadcast_text, parse_mode=ParseMode.MARKDOWN)
+            elif broadcast_sticker:
+                await client.send_sticker(chat_id, broadcast_sticker)
+            elif broadcast_video:
+                await client.send_video(chat_id, broadcast_video, caption=broadcast_text, parse_mode=ParseMode.MARKDOWN)
+            elif broadcast_document:
+                await client.send_document(chat_id, broadcast_document, caption=broadcast_text, parse_mode=ParseMode.MARKDOWN)
+            elif broadcast_text:
+                await client.send_message(chat_id, broadcast_text, parse_mode=ParseMode.MARKDOWN)
+            
             sent_count += 1
-            await asyncio.sleep(0.1)
-        except Exception as e:
-            logger.error(f"Failed to send broadcast to chat {chat_id}: {e}. (Broadcast by @asbhaibsr)")
+            # Update status message every 10 messages or at the end
+            if (i + 1) % 10 == 0 or (i + 1) == total_targets:
+                try:
+                    await status_message.edit_text(f"🚀 **Broadcast Progress...** 🚀\n"
+                                                  f"Cool, main **{total_targets}** chats par message bhej rahi hoon.\n"
+                                                  f"Sent: **{sent_count}** / Failed: **{failed_count}** (Total: {total_targets})",
+                                                  parse_mode=ParseMode.MARKDOWN)
+                except Exception as edit_e:
+                    logger.warning(f"Failed to edit broadcast status message: {edit_e}")
+            await asyncio.sleep(0.1) # Small delay to avoid flood waits
+        except (UserIsBlocked, ChatWriteForbidden, PeerIdInvalid) as client_error:
             failed_count += 1
+            logger.warning(f"Skipping broadcast to {chat_id} due to client error (blocked/forbidden/invalid): {client_error}")
+        except FloodWait as fw:
+            failed_count += 1
+            logger.warning(f"FloodWait of {fw.value} seconds encountered. Sleeping... (Broadcast by @asbhaibsr)")
+            await asyncio.sleep(fw.value)
+        except RPCError as rpc_e:
+            failed_count += 1
+            logger.error(f"RPC Error sending broadcast to chat {chat_id}: {rpc_e}. (Broadcast by @asbhaibsr)")
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"Failed to send broadcast to chat {chat_id}: {e}. (Broadcast by @asbhaibsr)")
+        
+    final_message = (f"🎉 **Broadcast Complete!** 🎉\n"
+                     f"Total chats targeted: **{total_targets}**\n"
+                     f"Successfully sent: **{sent_count}** messages ✨\n"
+                     f"Failed to send: **{failed_count}** messages 💔\n\n"
+                     f"Koi nahi, next time! 😉 (System by @asbhaibsr)")
+    
+    try:
+        await status_message.edit_text(final_message, parse_mode=ParseMode.MARKDOWN)
+    except Exception as final_edit_e:
+        logger.error(f"Failed to send final broadcast summary: {final_edit_e}. Sending as new message instead.")
+        await send_and_auto_delete_reply(message, text=final_message, parse_mode=ParseMode.MARKDOWN)
 
-    await send_and_auto_delete_reply(message, text=f"Broadcast ho gaya, darling! ✨ **{sent_count}** chats tak pahunchi, aur **{failed_count}** tak nahi. Koi nahi, next time! 😉 (System by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
     # Store command usage, not for learning
     await store_message(message)
     logger.info(f"Broadcast command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
@@ -948,8 +1018,7 @@ async def list_groups_command(client: Client, message: Message):
                 try:
                     invite_link = await client.export_chat_invite_link(group_id)
                     group_link_display = f" ([Invite Link]({invite_link}))"
-                except Exception as e:
-                    logger.warning(f"Could not get invite link for private group {group_id}: {e}")
+                except Exception:
                     group_link_display = " (Private Group)"
         except Exception as e:
             logger.warning(f"Could not fetch chat info for group {group_id}: {e}")
@@ -1203,7 +1272,7 @@ async def delete_specific_sticker_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text=f"Jaisa hukum mere aaka! 🧞‍♀️ Maine **{percentage}%** stickers ko dhoondh ke delete kar diya. Total **{deleted_count}** stickers removed. Ab woh history ka हिस्सा नहीं रहा! ✨ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Deleted {deleted_count} stickers based on {percentage}% request. (Code by @asbhaibsr)")
     else:
-        await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is query se koi **sticker** mila hi nahi apne database mein. Ya toh sticker hi nahi hai, ya percentage bahot kam hai! 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is query se koi **sticker** mila hi nahi apne database mein. Ya toh sticker ही nahi hai, ya percentage bahot kam hai! 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
 
     # Store command usage, not for learning
     await store_message(message)
@@ -1357,7 +1426,7 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
             {"$set": {"biolinkdel_enabled": True}},
             upsert=True
         )
-        await send_and_auto_delete_reply(message, text="हम्म... 😼 अब से जो भी **यूज़र अपनी बायो में `t.me` या `http/https` लिंक रखेगा**, मैं उसके **मैसेज को चुपचाप हटा दूंगी!** (अगर उसे `/biolink` से छूट नहीं मिली है). ग्रुप में कोई मस्ती नहीं! 🤫", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="हम्म... 😼 अब से जो भी **यूज़र अपनी बायो में `t.me` या `http/https` लिंक रखेगा**, मैं उसके **मैसेज को चुपचाप हटा दूंगी!** (अगर उसे `/biolink` से छूट नहीं मिली है). ग्रुप में कोई मस्ती नहीं!🤫", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Biolink deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
     elif action == "off":
         group_tracking_collection.update_one(
