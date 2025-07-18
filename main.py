@@ -1880,7 +1880,7 @@ async def handle_message_and_reply(client: Client, message: Message):
               "last_active_group_title": current_group_title,
               "last_active_group_username": current_group_username
               },
-     "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr", "group_counts": {}}}, # group_counts को इनिशियलाइज़ करें
+     "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}}, # group_counts को इनिशियलाइज़ करने की ज़रूरत नहीं है
     upsert=True
 )
         logger.info(f"Group message count updated for user {user_id_to_track} in group {current_group_id}. (Earning tracking by @asbhaibsr)")
