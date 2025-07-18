@@ -4,11 +4,12 @@ import re
 import asyncio
 import time
 import logging
+import random # Added this import as 'random' was used in generate_reply without being imported
 from datetime import datetime, timedelta
 
 import pytz
 from pyrogram import Client
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup # <--- Added InlineKeyboardMarkup here
 from pyrogram.enums import ChatMemberStatus, ChatType, ParseMode
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
