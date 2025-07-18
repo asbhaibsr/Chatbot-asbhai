@@ -1871,18 +1871,18 @@ async def handle_message_and_reply(client: Client, message: Message):
         # Use $inc with a dynamic field name for group_counts
         # $set for user details and last active info
         earning_tracking_collection.update_one(
-            {"_id": user_id_to_track},
-            {"$inc": {f"group_counts.{current_group_id}": 1}, # Increment count for THIS group
-             "$set": {"username": username_to_track,
-                      "first_name": first_name_to_track,
-                      "last_active_group_message": datetime.now(),
-                      "last_active_group_id": current_group_id, # This field is less useful with group_counts, but kept for compatibility
-                      "last_active_group_title": current_group_title,
-                      "last_active_group_username": current_group_username
-                      },
-             "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr", "group_counts": {}}}, # Initialize group_counts
-            upsert=True
-        )
+    {"_id": user_id_to_track},
+    {"$inc": {f"group_counts.{current_group_id}": 1}, # इस ग्रुप के लिए संख्या बढ़ाएँ
+     "$set": {"username": username_to_track,
+              "first_name": first_name_to_track,
+              "last_active_group_message": datetime.now(),
+              "last_active_group_id": current_group_id,
+              "last_active_group_title": current_group_title,
+              "last_active_group_username": current_group_username
+              },
+     "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr", "group_counts": {}}}, # group_counts को इनिशियलाइज़ करें
+    upsert=True
+)
         logger.info(f"Group message count updated for user {user_id_to_track} in group {current_group_id}. (Earning tracking by @asbhaibsr)")
 
 
