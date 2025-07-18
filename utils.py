@@ -4,12 +4,12 @@ import re
 import asyncio
 import time
 import logging
-import random # Added this import as 'random' was used in generate_reply without being imported
+import random
 from datetime import datetime, timedelta
 
 import pytz
 from pyrogram import Client
-from pyrogram.types import Message, InlineKeyboardMarkup # <--- Added InlineKeyboardMarkup here
+from pyrogram.types import Message, InlineKeyboardMarkup
 from pyrogram.enums import ChatMemberStatus, ChatType, ParseMode
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
@@ -76,16 +76,20 @@ def contains_mention(text: str):
 
 async def store_message(message: Message, is_owner_taught_pair=False, is_conversational_pair=False, trigger_content=None):
     try:
-        if message.from_user and message.from_user.is_bot:
+        # **Modification 1: Store all non-bot messages for learning/tracking**
+        if message.from_user and message.from_user.is_bot and not message.reply_to_message:
             logger.debug(f"Skipping storage for message from bot: {message.from_user.id}. (Code by @asbhaibsr)")
             return
 
         is_command = message.text and message.text.startswith('/')
 
+        # Original condition for learning pairs
         if not is_owner_taught_pair and not is_conversational_pair and not is_command:
-            logger.debug(f"Skipping general message storage for {message.id} as it's not a learning pair or command.")
-            return
-
+            # We now proceed to store general messages unless they are commands
+            # and not part of a specific learning pair.
+            # This ensures all relevant user messages contribute to the earning system.
+            pass
+        
         message_data = {
             "message_id": message.id,
             "user_id": message.from_user.id if message.from_user else None,
@@ -112,7 +116,18 @@ async def store_message(message: Message, is_owner_taught_pair=False, is_convers
             logger.debug(f"Unsupported message type for storage: {message.id}. (Code by @asbhaibsr)")
             return
         
-        if is_owner_taught_pair and trigger_content:
+        # **Modification 2: Handle replies to the bot for contextual learning**
+        if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self: # Check if bot replied
+            original_bot_message_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
+            
+            if original_bot_message_content:
+                conversational_learning_collection.update_one(
+                    {"trigger": original_bot_message_content},
+                    {"$addToSet": {"responses": message_data}},
+                    upsert=True
+                )
+                logger.info(f"Bot-replied conversational pair stored: Trigger '{original_bot_message_content}', Response '{message_data.get('content') or message_data.get('sticker_id')}'")
+        elif is_owner_taught_pair and trigger_content:
             owner_taught_responses_collection.update_one(
                 {"trigger": trigger_content},
                 {"$addToSet": {"responses": message_data}},
@@ -127,8 +142,10 @@ async def store_message(message: Message, is_owner_taught_pair=False, is_convers
             )
             logger.info(f"Conversational pair stored: Trigger '{trigger_content}', Response '{message_data.get('content') or message_data.get('sticker_id')}'")
         else:
-            messages_collection.insert_one(message_data)
-            logger.info(f"Message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
+            # Store all other non-command, non-bot-reply messages
+            if not is_command: # Ensure commands are not stored as general messages
+                messages_collection.insert_one(message_data)
+                logger.info(f"General message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
 
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and message.from_user and not message.from_user.is_bot:
             user_id_to_track = message.from_user.id
@@ -175,6 +192,17 @@ async def generate_reply(message: Message):
     if message.from_user and message.from_user.id == OWNER_ID:
         pass
 
+    # **Modification 3: Prioritize replies to bot's previous messages**
+    if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
+        # If user is replying to the bot, try to find a direct conversational match
+        original_bot_message_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
+        if original_bot_message_content:
+            conversational_doc = conversational_learning_collection.find_one({"trigger": {"$regex": f"^{re.escape(original_bot_message_content)}$", "$options": "i"}})
+            if conversational_doc and conversational_doc.get('responses'):
+                chosen_response_data = random.choice(conversational_doc['responses'])
+                logger.info(f"Bot-replied contextual reply found for '{original_bot_message_content}'.")
+                return chosen_response_data
+    
     owner_taught_doc = owner_taught_responses_collection.find_one({"trigger": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
     if owner_taught_doc and owner_taught_doc.get('responses'):
         chosen_response_data = random.choice(owner_taught_doc['responses'])
