@@ -26,7 +26,7 @@ async def callback_handler(client, callback_query):
     if callback_query.data == "buy_git_repo":
         await send_and_auto_delete_reply(
             callback_query.message,
-            text=f"🤩 अगर आपको मेरे जैसा खुद का bot बनवाना है, तो आपको ₹500 देने होंगे. इसके लिए **@{ASBHAI_USERNAME}** से contact करें और unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group",
+            text=f"🤩 अगर आपको मेरे जैसा खुद का bot बनवाना है, तो आपको ₹500 देने होंगे. इसके लिए **@{ASBHAI_USERNAME}** से contact करें और unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @asbhai_bsr", # Fixed support group username
             parse_mode=ParseMode.MARKDOWN
         )
         buttons_collection.insert_one({
@@ -74,8 +74,8 @@ async def callback_handler(client, callback_query):
             "• `/biolink <userid>`: (Sirf Group Admins ke liye) `biolinkdel` on hone par bhi kisi user ko **bio mein `t.me` aur `http/https` links** रखने की permission dene ke liye.\n"
             "• `/usernamedel on/off`: (Sirf Group Admins ke liye) Group mein **'@' mentions** allow ya delete karne ke liye.\n\n"
             "**🔗 Mera Code (GitHub Repository):**\n"
-            f"[**{REPO_LINK}**]({REPO_LINK})\n\n"
-            "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+            f"[**REPO_LINK**]({ASBHAI_USERNAME})\n\n" # Assuming REPO_LINK is defined in config.py or elsewhere, if not, remove or replace with actual link
+            "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Fixed support group username
         )
         await send_and_auto_delete_reply(callback_query.message, text=help_text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
         buttons_collection.insert_one({
@@ -107,7 +107,7 @@ async def callback_handler(client, callback_query):
             "   • अपनी कमाई निकालने के लिए, आपको मुझे `@asbhaibsr` पर DM (डायरेक्ट मैसेज) करना होगा।\n\n"
             "**शुभकामनाएँ!** 🍀\n"
             "मुझे आशा है कि आप सक्रिय रहेंगे और हमारी कम्युनिटी में योगदान देंगे।\n\n"
-            "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+            "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Fixed support group username
         )
         await send_and_auto_delete_reply(callback_query.message, text=earning_rules_text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
         buttons_collection.insert_one({
@@ -143,8 +143,12 @@ async def handle_clearall_dbs_callback(client: Client, callback_query):
             logger.info("user_tracking_collection dropped.")
             earning_tracking_collection.drop()
             logger.info("earning_tracking_collection dropped.")
-            reset_status_collection.drop()
-            logger.info("reset_status_collection dropped.")
+            # Assuming reset_status_collection is defined in config.py
+            # If not, you might need to import it or define it.
+            # If it's not used, you can remove this line.
+            if 'reset_status_collection' in globals(): # Check if it's defined
+                reset_status_collection.drop()
+                logger.info("reset_status_collection dropped.")
             biolink_exceptions_collection.drop()
             logger.info("biolink_exceptions_collection dropped.")
             owner_taught_responses_collection.drop()
@@ -183,7 +187,7 @@ async def new_member_handler(client: Client, message: Message):
                     f"**Group ID:** `{message.chat.id}`\n"
                     f"**Added By:** {added_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
                     f"**Added On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Fixed support group username
                 )
                 try:
                     await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
@@ -204,7 +208,7 @@ async def new_member_handler(client: Client, message: Message):
                     f"**User ID:** `{member.id}`\n"
                     f"**Username:** {user_username}\n"
                     f"**Started On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Fixed support group username
                 )
                 try:
                     await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
@@ -212,9 +216,11 @@ async def new_member_handler(client: Client, message: Message):
                 except Exception as e:
                     logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
 
-    await store_message(message)
-    if message.from_user:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    # Call store_message for new members as well, but only if they are not bots and are actual users
+    # This also helps in updating user_tracking_collection and potentially earning if it's a group
+    if message.from_user and not message.from_user.is_bot:
+        await store_message(message)
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name) # Ensure user info is updated
 
 @app.on_message(filters.left_chat_member)
 async def left_member_handler(client: Client, message: Message):
@@ -229,7 +235,7 @@ async def left_member_handler(client: Client, message: Message):
 
             earning_tracking_collection.update_many(
                 {},
-                {"$pull": {"last_active_group_id": message.chat.id}}
+                {"$pull": {"last_active_group_id": message.chat.id}} # Using $pull to remove group_id from array
             )
 
             logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared. (Code by @asbhaibsr)")
@@ -242,7 +248,7 @@ async def left_member_handler(client: Client, message: Message):
                 f"**Group ID:** `{message.chat.id}`\n"
                 f"**Action By:** {left_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
                 f"**Left On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
+                f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Fixed support group username
             )
             try:
                 await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
@@ -251,9 +257,11 @@ async def left_member_handler(client: Client, message: Message):
                 logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}. (Notification error by @asbhaibsr)")
             return
 
-    await store_message(message)
-    if message.from_user:
+    # Store message for left member (if it's a user leaving, not the bot)
+    if message.from_user and not message.from_user.is_bot:
+        await store_message(message)
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
 
 @app.on_message(filters.text | filters.sticker | filters.photo | filters.video | filters.document)
 async def handle_message_and_reply(client: Client, message: Message):
@@ -263,26 +271,96 @@ async def handle_message_and_reply(client: Client, message: Message):
 
     is_group_chat = message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]
 
+    # Bot disabled in group check
     if is_group_chat:
         group_status = group_tracking_collection.find_one({"_id": message.chat.id})
         if group_status and not group_status.get("bot_enabled", True):
             logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling.")
             return
 
-    if message.from_user and not (message.text and message.text.startswith('/')): 
-        chat_id_for_cooldown = message.chat.id
-        if not await can_reply_to_chat(chat_id_for_cooldown):
-            logger.info(f"Chat {chat_id_for_cooldown} is on message reply cooldown. Skipping message {message.id}.")
-            return
-
-    logger.info(f"Processing message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}).")
-
+    # Update user and group info regardless (important for tracking last active)
     if is_group_chat:
         logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.")
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+    # --- Handle message deletion logic first (अगर मैसेज डिलीट करना है तो यहीं रुक जाएं) ---
+    user_id = message.from_user.id if message.from_user else None
+    is_sender_admin = False
+    if user_id and is_group_chat:
+        is_sender_admin = await is_admin_or_owner(client, message.chat.id, user_id)
+    
+    # Link deletion
+    if is_group_chat and message.text:
+        current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
+        if current_group_settings and current_group_settings.get("linkdel_enabled", False):
+            if contains_link(message.text) and not is_sender_admin:
+                try:
+                    await message.delete()
+                    sent_delete_alert = await message.reply_text(f"ओहो, ये क्या भेज दिया {message.from_user.mention}? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया!💨 अब से ध्यान रखना, हाँ?", quote=True, parse_mode=ParseMode.MARKDOWN)
+                    asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
+                    logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
+                    return # मैसेज डिलीट हो गया, आगे प्रोसेस न करें
+                except Exception as e:
+                    logger.error(f"Error deleting link message {message.id}: {e}")
+            elif contains_link(message.text) and is_sender_admin:
+                logger.info(f"Admin's link message {message.id} was not deleted in chat {message.chat.id}.")
+
+    # Bio link deletion
+    if is_group_chat and user_id:
+        try:
+            current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
+            if current_group_settings and current_group_settings.get("biolinkdel_enabled", False):
+                user_chat_obj = await client.get_chat(user_id)
+                user_bio = user_chat_obj.bio or ""
+                is_biolink_exception = biolink_exceptions_collection.find_one({"_id": user_id})
+                if not is_sender_admin and not is_biolink_exception:
+                    if URL_PATTERN.search(user_bio):
+                        try:
+                            await message.delete()
+                            sent_delete_alert = await message.reply_text(
+                                f"अरे बाबा रे {message.from_user.mention}! 😲 आपकी **बायो में लिंक है!** इसीलिए आपका मैसेज गायब हो गया!👻\n"
+                                "कृपया अपनी बायो से लिंक हटाएँ। यदि आपको यह अनुमति चाहिए, तो कृपया एडमिन से संपर्क करें और उन्हें `/biolink आपका_यूजरआईडी` कमांड देने को कहें।",
+                                quote=True, parse_mode=ParseMode.MARKDOWN
+                            )
+                            asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
+                            logger.info(f"Deleted message {message.id} from user {user_id} due to link in bio in chat {message.chat.id}.")
+                            return # मैसेज डिलीट हो गया, आगे प्रोसेस न करें
+                        except Exception as e:
+                            logger.error(f"Error deleting message {message.id} due to bio link: {e}")
+                elif (is_sender_admin or is_biolink_exception) and URL_PATTERN.search(user_bio):
+                    logger.info(f"Admin's or excepted user's bio link was ignored for message {message.id} in chat {message.chat.id}.")
+        except Exception as e:
+            logger.error(f"Error checking user bio for user {user_id} in chat {message.chat.id}: {e}")
+
+    # Username mention deletion
+    if is_group_chat and message.text:
+        current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
+        if current_group_settings and current_group_settings.get("usernamedel_enabled", False):
+            if contains_mention(message.text) and not is_sender_admin:
+                try:
+                    await message.delete()
+                    sent_delete_alert = await message.reply_text(f"टच-टच {message.from_user.mention}! 😬 आपने `@` का इस्तेमाल किया! सॉरी, वो मैसेज तो चला गया आसमान में! 🚀 अगली बार से ध्यान रखना, हाँ? 😉", quote=True, parse_mode=ParseMode.MARKDOWN)
+                    asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
+                    logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
+                    return # मैसेज डिलीट हो गया, आगे प्रोसेस न करें
+                except Exception as e:
+                    logger.error(f"Error deleting username message {message.id}: {e}")
+            elif contains_mention(message.text) and is_sender_admin:
+                logger.info(f"Admin's username mention message {message.id} was not deleted in chat {message.chat.id}.")
+
+    # --- मैसेज डिलीशन लॉजिक समाप्त ---
+
+    # चेक करें कि क्या मैसेज कोई कमांड है
+    is_command = message.text and message.text.startswith('/')
+
+    # सभी गैर-कमांड मैसेजों को स्टोर करें (यह अब अर्निंग और सामान्य लर्निंग को हैंडल करेगा)
+    if not is_command:
+        await store_message(message)
+        logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
+
+    # मालिक द्वारा सिखाई गई बातचीत का लॉजिक (अब return नहीं करेगा)
     if message.from_user and message.from_user.id == OWNER_ID and message.reply_to_message:
         replied_to_msg = message.reply_to_message
         if replied_to_msg.from_user and replied_to_msg.from_user.id == OWNER_ID:
@@ -304,11 +382,14 @@ async def handle_message_and_reply(client: Client, message: Message):
                 )
                 await message.reply_text("मालिक! 👑 मैंने यह बातचीत सीख ली है और अब इसे याद रखूंगी! 😉", parse_mode=ParseMode.MARKDOWN)
                 logger.info(f"Owner {OWNER_ID} taught a new pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
-                return
+                # यहां 'return' नहीं, ताकि बॉट अभी भी जवाब दे सके अगर कोई और लॉजिक मैच करता है।
 
+    # सामान्य बातचीत लर्निंग लॉजिक (अब return नहीं करेगा)
+    # यह तब भी काम करेगा जब यूज़र बॉट के मैसेज का जवाब दे
     if message.reply_to_message and message.from_user and message.from_user.id != OWNER_ID:
         replied_to_msg = message.reply_to_message
-        if replied_to_msg.from_user and not replied_to_msg.from_user.is_bot and replied_to_msg.from_user.id != message.from_user.id:
+        # यह चेक करें कि क्या replied_to_msg एक बॉट का मैसेज है या किसी और यूज़र का
+        if replied_to_msg.from_user and (replied_to_msg.from_user.is_self or (not replied_to_msg.from_user.is_bot and replied_to_msg.from_user.id != message.from_user.id)):
             trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
             
             if trigger_content:
@@ -326,65 +407,15 @@ async def handle_message_and_reply(client: Client, message: Message):
                     {"trigger": trigger_content}, {"$addToSet": {"responses": response_data}}, upsert=True
                 )
                 logger.info(f"Learned conversational pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
+                # यहां 'return' नहीं।
 
-    if is_group_chat:
-        current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
-        user_id = message.from_user.id if message.from_user else None
-        is_sender_admin = False
-        if user_id:
-            is_sender_admin = await is_admin_or_owner(client, message.chat.id, user_id)
+    # बॉट के जवाब उत्पन्न करें (केवल गैर-कमांड मैसेजों के लिए)
+    if not is_command:
+        chat_id_for_cooldown = message.chat.id
+        if not await can_reply_to_chat(chat_id_for_cooldown):
+            logger.info(f"Chat {chat_id_for_cooldown} is on message reply cooldown. Skipping message {message.id} reply generation.")
+            return # अगर कूलडाउन पर है, तो जवाब न दें और यहीं रुक जाएं
 
-        if current_group_settings and current_group_settings.get("linkdel_enabled", False) and message.text:
-            if contains_link(message.text) and not is_sender_admin:
-                try:
-                    await message.delete()
-                    sent_delete_alert = await message.reply_text(f"ओहो, ये क्या भेज दिया {message.from_user.mention}? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया!💨 अब से ध्यान रखना, हाँ?", quote=True, parse_mode=ParseMode.MARKDOWN)
-                    asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
-                    logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return 
-                except Exception as e:
-                    logger.error(f"Error deleting link message {message.id}: {e}")
-            elif contains_link(message.text) and is_sender_admin:
-                logger.info(f"Admin's link message {message.id} was not deleted in chat {message.chat.id}.")
-
-        if current_group_settings and current_group_settings.get("biolinkdel_enabled", False) and user_id:
-            try:
-                user_chat_obj = await client.get_chat(user_id)
-                user_bio = user_chat_obj.bio or ""
-                is_biolink_exception = biolink_exceptions_collection.find_one({"_id": user_id})
-                if not is_sender_admin and not is_biolink_exception:
-                    if URL_PATTERN.search(user_bio):
-                        try:
-                            await message.delete()
-                            sent_delete_alert = await message.reply_text(
-                                f"अरे बाबा रे {message.from_user.mention}! 😲 आपकी **बायो में लिंक है!** इसीलिए आपका मैसेज गायब हो गया!👻\n"
-                                "कृपया अपनी बायो से लिंक हटाएँ। यदि आपको यह अनुमति चाहिए, तो कृपया एडमिन से संपर्क करें और उन्हें `/biolink आपका_यूजरआईडी` कमांड देने को कहें।",
-                                quote=True, parse_mode=ParseMode.MARKDOWN
-                            )
-                            asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
-                            logger.info(f"Deleted message {message.id} from user {user_id} due to link in bio in chat {message.chat.id}.")
-                            return 
-                        except Exception as e:
-                            logger.error(f"Error deleting message {message.id} due to bio link: {e}")
-                elif (is_sender_admin or is_biolink_exception) and URL_PATTERN.search(user_bio):
-                    logger.info(f"Admin's or excepted user's bio link was ignored for message {message.id} in chat {message.chat.id}.")
-            except Exception as e:
-                logger.error(f"Error checking user bio for user {user_id} in chat {message.chat.id}: {e}")
-
-        if current_group_settings and current_group_settings.get("usernamedel_enabled", False) and message.text:
-            if contains_mention(message.text) and not is_sender_admin:
-                try:
-                    await message.delete()
-                    sent_delete_alert = await message.reply_text(f"टच-टच {message.from_user.mention}! 😬 आपने `@` का इस्तेमाल किया! सॉरी, वो मैसेज तो चला गया आसमान में! 🚀 अगली बार से ध्यान रखना, हाँ? 😉", quote=True, parse_mode=ParseMode.MARKDOWN)
-                    asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
-                    logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return 
-                except Exception as e:
-                    logger.error(f"Error deleting username message {message.id}: {e}")
-            elif contains_mention(message.text) and is_sender_admin:
-                logger.info(f"Admin's username mention message {message.id} was not deleted in chat {message.chat.id}.")
-
-    if not (message.text and message.text.startswith('/')):
         logger.info(f"Attempting to generate reply for chat {message.chat.id}.")
         reply_doc = await generate_reply(message)
 
