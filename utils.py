@@ -74,21 +74,18 @@ def contains_mention(text: str):
     mention_pattern = r"@[\w\d\._-]+"
     return bool(re.search(mention_pattern, text))
 
-async def store_message(message: Message, is_owner_taught_pair=False, is_conversational_pair=False, trigger_content=None):
+async def store_message(message: Message):
     try:
-        # **Modification 1: Store all non-bot messages for learning/tracking**
-        if message.from_user and message.from_user.is_bot and not message.reply_to_message:
-            logger.debug(f"Skipping storage for message from bot: {message.from_user.id}. (Code by @asbhaibsr)")
+        # बॉट द्वारा भेजे गए मैसेजों को सामान्य स्टोरेज या कमाई के लिए छोड़ दें
+        if message.from_user and message.from_user.is_bot:
+            logger.debug(f"Skipping general storage for message from bot: {message.from_user.id}. (Code by @asbhaibsr)")
             return
 
+        # कमांड मैसेजों को सामान्य स्टोरेज या कमाई के लिए छोड़ दें
         is_command = message.text and message.text.startswith('/')
-
-        # Original condition for learning pairs
-        if not is_owner_taught_pair and not is_conversational_pair and not is_command:
-            # We now proceed to store general messages unless they are commands
-            # and not part of a specific learning pair.
-            # This ensures all relevant user messages contribute to the earning system.
-            pass
+        if is_command:
+            logger.debug(f"Skipping general storage for command: {message.text}. (Code by @asbhaibsr)")
+            return
         
         message_data = {
             "message_id": message.id,
@@ -113,40 +110,14 @@ async def store_message(message: Message, is_owner_taught_pair=False, is_convers
             message_data["sticker_id"] = message.sticker.file_id
             message_data["keywords"] = extract_keywords(message.sticker.emoji)
         else:
-            logger.debug(f"Unsupported message type for storage: {message.id}. (Code by @asbhaibsr)")
-            return
+            logger.debug(f"Unsupported message type for general storage: {message.id}. (Code by @asbhaibsr)")
+            return # अगर मैसेज का कोई सपोर्टेड टाइप नहीं है तो स्टोर न करें
         
-        # **Modification 2: Handle replies to the bot for contextual learning**
-        if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self: # Check if bot replied
-            original_bot_message_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
-            
-            if original_bot_message_content:
-                conversational_learning_collection.update_one(
-                    {"trigger": original_bot_message_content},
-                    {"$addToSet": {"responses": message_data}},
-                    upsert=True
-                )
-                logger.info(f"Bot-replied conversational pair stored: Trigger '{original_bot_message_content}', Response '{message_data.get('content') or message_data.get('sticker_id')}'")
-        elif is_owner_taught_pair and trigger_content:
-            owner_taught_responses_collection.update_one(
-                {"trigger": trigger_content},
-                {"$addToSet": {"responses": message_data}},
-                upsert=True
-            )
-            logger.info(f"Owner-taught pair stored: Trigger '{trigger_content}', Response '{message_data.get('content') or message_data.get('sticker_id')}'")
-        elif is_conversational_pair and trigger_content:
-            conversational_learning_collection.update_one(
-                {"trigger": trigger_content},
-                {"$addToSet": {"responses": message_data}},
-                upsert=True
-            )
-            logger.info(f"Conversational pair stored: Trigger '{trigger_content}', Response '{message_data.get('content') or message_data.get('sticker_id')}'")
-        else:
-            # Store all other non-command, non-bot-reply messages
-            if not is_command: # Ensure commands are not stored as general messages
-                messages_collection.insert_one(message_data)
-                logger.info(f"General message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
+        # सामान्य मैसेज कलेक्शन में स्टोर करें (गैर-कमांड, गैर-बॉट मैसेज)
+        messages_collection.insert_one(message_data)
+        logger.info(f"General message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
 
+        # ग्रुप मैसेजों के लिए कमाई ट्रैकिंग अपडेट करें (केवल यूज़र्स से, बॉट्स से नहीं)
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and message.from_user and not message.from_user.is_bot:
             user_id_to_track = message.from_user.id
             username_to_track = message.from_user.username
@@ -189,12 +160,13 @@ async def generate_reply(message: Message):
 
     query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
     
+    # मालिक के मैसेजों के लिए विशेष हैंडलिंग अगर आवश्यक हो
     if message.from_user and message.from_user.id == OWNER_ID:
-        pass
+        pass # मालिक के मैसेज भी सामान्य लर्निंग फ्लो से गुजरेंगे
 
-    # **Modification 3: Prioritize replies to bot's previous messages**
+    # --- बॉट के पिछले मैसेज का जवाब मिलने पर सबसे पहले प्रतिक्रिया दें ---
+    # यह 'bot hi user hello to hi and bye ko bhi store kiya jaye' वाले लॉजिक को मजबूत करता है
     if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
-        # If user is replying to the bot, try to find a direct conversational match
         original_bot_message_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
         if original_bot_message_content:
             conversational_doc = conversational_learning_collection.find_one({"trigger": {"$regex": f"^{re.escape(original_bot_message_content)}$", "$options": "i"}})
@@ -203,12 +175,14 @@ async def generate_reply(message: Message):
                 logger.info(f"Bot-replied contextual reply found for '{original_bot_message_content}'.")
                 return chosen_response_data
     
+    # मालिक द्वारा सिखाए गए जवाबों को प्राथमिकता दें
     owner_taught_doc = owner_taught_responses_collection.find_one({"trigger": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
     if owner_taught_doc and owner_taught_doc.get('responses'):
         chosen_response_data = random.choice(owner_taught_doc['responses'])
         logger.info(f"Owner-taught reply found for '{query_content}'.")
         return chosen_response_data
     
+    # सामान्य बातचीत से सीखे गए जवाब
     conversational_doc = conversational_learning_collection.find_one({"trigger": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
     if conversational_doc and conversational_doc.get('responses'):
         chosen_response_data = random.choice(conversational_doc['responses'])
@@ -217,18 +191,19 @@ async def generate_reply(message: Message):
 
     logger.info(f"No specific learning pattern found for '{query_content}'. Falling back to old keyword search if necessary. (Logic by @asbhaibsr)")
 
+    # कीवर्ड-आधारित सामान्य जवाब (सबसे कम प्राथमिकता)
     query_keywords = extract_keywords(query_content)
     if query_keywords:
         keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
         general_replies_cursor = messages_collection.find({
             "type": {"$in": ["text", "sticker"]},
             "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"},
-            "user_id": {"$ne": app.me.id}
+            "user_id": {"$ne": app.me.id} # बॉट के अपने मैसेजों से जवाब न दें
         })
     else:
         general_replies_cursor = messages_collection.find({
             "type": {"$in": ["text", "sticker"]},
-            "user_id": {"$ne": app.me.id}
+            "user_id": {"$ne": app.me.id} # बॉट के अपने मैसेजों से जवाब न दें
         })
 
     potential_replies = []
@@ -337,9 +312,9 @@ async def send_and_auto_delete_reply(message: Message, text: str = None, photo: 
         command_name = message.command[0]
         text_to_send = f"**कमांड:** `{command_name}`{user_info_str}\n\n{text}"
     elif text and message.chat.type == ChatType.PRIVATE and message.from_user and message.from_user.id == OWNER_ID:
-        pass
+        pass # मालिक के निजी चैट में कोई अतिरिक्त उपसर्ग न जोड़ें
     elif text and message.from_user:
-        pass
+        pass # अन्य मामलों में, बस मूल टेक्स्ट भेजें
 
     if photo:
         sent_message = await message.reply_photo(
@@ -360,10 +335,10 @@ async def send_and_auto_delete_reply(message: Message, text: str = None, photo: 
         return None
 
     if message.command and message.command[0] == "start":
-        return sent_message
+        return sent_message # /start कमांड के लिए मैसेज को डिलीट न करें
 
     async def delete_after_delay_task():
-        await asyncio.sleep(180)
+        await asyncio.sleep(180) # 3 मिनट बाद डिलीट करें
         try:
             if sent_message:
                 await sent_message.delete()
@@ -379,3 +354,4 @@ async def delete_after_delay_for_message(message_obj: Message, delay: int):
         await message_obj.delete()
     except Exception as e:
         logger.warning(f"Failed to delete message {message_obj.id} in chat {message_obj.chat.id}: {e}")
+
