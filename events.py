@@ -219,7 +219,9 @@ async def new_member_handler(client: Client, message: Message):
     # Call store_message for new members as well, but only if they are not bots and are actual users
     # This also helps in updating user_tracking_collection and potentially earning if it's a group
     if message.from_user and not message.from_user.is_bot:
-        await store_message(message)
+        # NOTE: store_message will now be called conditionally based on cooldown in handle_message_and_reply
+        # For new_chat_members, we want to ensure user info is updated regardless of cooldown.
+        # So update_user_info is called directly here.
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name) # Ensure user info is updated
 
 @app.on_message(filters.left_chat_member)
@@ -259,7 +261,9 @@ async def left_member_handler(client: Client, message: Message):
 
     # Store message for left member (if it's a user leaving, not the bot)
     if message.from_user and not message.from_user.is_bot:
-        await store_message(message)
+        # NOTE: store_message will now be called conditionally based on cooldown in handle_message_and_reply
+        # For left_chat_member, we want to ensure user info is updated regardless of cooldown.
+        # So update_user_info is called directly here.
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -279,6 +283,7 @@ async def handle_message_and_reply(client: Client, message: Message):
             return
 
     # Update user and group info regardless (important for tracking last active)
+    # यह सामान्य ट्रैकिंग के लिए है, बॉट की प्रतिक्रिया/लर्निंग से संबंधित नहीं है
     if is_group_chat:
         logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.")
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
@@ -286,6 +291,7 @@ async def handle_message_and_reply(client: Client, message: Message):
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
     # --- Handle message deletion logic first (अगर मैसेज डिलीट करना है तो यहीं रुक जाएं) ---
+    # डिलीशन लॉजिक सभी मैसेजों के लिए चलना चाहिए, भले ही बॉट कूलडाउन पर हो, क्योंकि यह एक मॉडरेशन फ़ंक्शन है।
     user_id = message.from_user.id if message.from_user else None
     is_sender_admin = False
     if user_id and is_group_chat:
@@ -355,67 +361,63 @@ async def handle_message_and_reply(client: Client, message: Message):
     # चेक करें कि क्या मैसेज कोई कमांड है
     is_command = message.text and message.text.startswith('/')
 
-    # सभी गैर-कमांड मैसेजों को स्टोर करें (यह अब अर्निंग और सामान्य लर्निंग को हैंडल करेगा)
-    if not is_command:
-        await store_message(message)
-        logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
-
-    # मालिक द्वारा सिखाई गई बातचीत का लॉजिक (अब return नहीं करेगा)
-    if message.from_user and message.from_user.id == OWNER_ID and message.reply_to_message:
-        replied_to_msg = message.reply_to_message
-        if replied_to_msg.from_user and replied_to_msg.from_user.id == OWNER_ID:
-            trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
-            
-            if trigger_content:
-                response_data = {
-                    "message_id": message.id, "user_id": message.from_user.id,
-                    "username": message.from_user.username, "first_name": message.from_user.first_name,
-                    "chat_id": message.chat.id, "chat_type": message.chat.type.name,
-                    "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
-                    "timestamp": datetime.now(), "credits": "Code by @asbhaibsr"
-                }
-                if message.text: response_data["type"] = "text"; response_data["content"] = message.text
-                elif message.sticker: response_data["type"] = "sticker"; response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""; response_data["sticker_id"] = message.sticker.file_id
-                
-                owner_taught_responses_collection.update_one(
-                    {"trigger": trigger_content}, {"$addToSet": {"responses": response_data}}, upsert=True
-                )
-                await message.reply_text("मालिक! 👑 मैंने यह बातचीत सीख ली है और अब इसे याद रखूंगी! 😉", parse_mode=ParseMode.MARKDOWN)
-                logger.info(f"Owner {OWNER_ID} taught a new pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
-                # यहां 'return' नहीं, ताकि बॉट अभी भी जवाब दे सके अगर कोई और लॉजिक मैच करता है।
-
-    # सामान्य बातचीत लर्निंग लॉजिक (अब return नहीं करेगा)
-    # यह तब भी काम करेगा जब यूज़र बॉट के मैसेज का जवाब दे
-    if message.reply_to_message and message.from_user and message.from_user.id != OWNER_ID:
-        replied_to_msg = message.reply_to_message
-        # यह चेक करें कि क्या replied_to_msg एक बॉट का मैसेज है या किसी और यूज़र का
-        if replied_to_msg.from_user and (replied_to_msg.from_user.is_self or (not replied_to_msg.from_user.is_bot and replied_to_msg.from_user.id != message.from_user.id)):
-            trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
-            
-            if trigger_content:
-                response_data = {
-                    "message_id": message.id, "user_id": message.from_user.id,
-                    "username": message.from_user.username, "first_name": message.from_user.first_name,
-                    "chat_id": message.chat.id, "chat_type": message.chat.type.name,
-                    "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
-                    "timestamp": datetime.now(), "credits": "Code by @asbhaibsr"
-                }
-                if message.text: response_data["type"] = "text"; response_data["content"] = message.text
-                elif message.sticker: response_data["type"] = "sticker"; response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""; response_data["sticker_id"] = message.sticker.file_id
-                
-                conversational_learning_collection.update_one(
-                    {"trigger": trigger_content}, {"$addToSet": {"responses": response_data}}, upsert=True
-                )
-                logger.info(f"Learned conversational pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
-                # यहां 'return' नहीं।
-
-    # बॉट के जवाब उत्पन्न करें (केवल गैर-कमांड मैसेजों के लिए)
+    # केवल गैर-कमांड मैसेजों के लिए कूलडाउन लॉजिक लागू करें
     if not is_command:
         chat_id_for_cooldown = message.chat.id
         if not await can_reply_to_chat(chat_id_for_cooldown):
-            logger.info(f"Chat {chat_id_for_cooldown} is on message reply cooldown. Skipping message {message.id} reply generation.")
-            return # अगर कूलडाउन पर है, तो जवाब न दें और यहीं रुक जाएं
+            logger.info(f"Chat {chat_id_for_cooldown} is on message reply cooldown. Skipping message {message.id} reply generation, storage, and learning.")
+            return # अगर कूलडाउन पर है, तो जवाब न दें, स्टोर न करें और सीखें भी नहीं
 
+        # अगर कूलडाउन पर नहीं है, तो स्टोर करने, सीखने और जवाब देने के लिए आगे बढ़ें
+        await store_message(message) # केवल तभी स्टोर करें जब कूलडाउन पर न हो
+        logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
+
+        # मालिक द्वारा सिखाई गई बातचीत का लॉजिक
+        if message.from_user and message.from_user.id == OWNER_ID and message.reply_to_message:
+            replied_to_msg = message.reply_to_message
+            if replied_to_msg.from_user and replied_to_msg.from_user.id == OWNER_ID:
+                trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
+                
+                if trigger_content:
+                    response_data = {
+                        "message_id": message.id, "user_id": message.from_user.id,
+                        "username": message.from_user.username, "first_name": message.from_user.first_name,
+                        "chat_id": message.chat.id, "chat_type": message.chat.type.name,
+                        "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
+                        "timestamp": datetime.now(), "credits": "Code by @asbhaibsr"
+                    }
+                    if message.text: response_data["type"] = "text"; response_data["content"] = message.text
+                    elif message.sticker: response_data["type"] = "sticker"; response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""; response_data["sticker_id"] = message.sticker.file_id
+                    
+                    owner_taught_responses_collection.update_one(
+                        {"trigger": trigger_content}, {"$addToSet": {"responses": response_data}}, upsert=True
+                    )
+                    await message.reply_text("मालिक! 👑 मैंने यह बातचीत सीख ली है और अब इसे याद रखूंगी! 😉", parse_mode=ParseMode.MARKDOWN)
+                    logger.info(f"Owner {OWNER_ID} taught a new pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
+
+        # सामान्य बातचीत लर्निंग लॉजिक
+        if message.reply_to_message and message.from_user and message.from_user.id != OWNER_ID:
+            replied_to_msg = message.reply_to_message
+            if replied_to_msg.from_user and (replied_to_msg.from_user.is_self or (not replied_to_msg.from_user.is_bot and replied_to_msg.from_user.id != message.from_user.id)):
+                trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
+                
+                if trigger_content:
+                    response_data = {
+                        "message_id": message.id, "user_id": message.from_user.id,
+                        "username": message.from_user.username, "first_name": message.from_user.first_name,
+                        "chat_id": message.chat.id, "chat_type": message.chat.type.name,
+                        "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
+                        "timestamp": datetime.now(), "credits": "Code by @asbhaibsr"
+                    }
+                    if message.text: response_data["type"] = "text"; response_data["content"] = message.text
+                    elif message.sticker: response_data["type"] = "sticker"; response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""; response_data["sticker_id"] = message.sticker.file_id
+                    
+                    conversational_learning_collection.update_one(
+                        {"trigger": trigger_content}, {"$addToSet": {"responses": response_data}}, upsert=True
+                    )
+                    logger.info(f"Learned conversational pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
+
+        # बॉट के जवाब उत्पन्न करें
         logger.info(f"Attempting to generate reply for chat {message.chat.id}.")
         reply_doc = await generate_reply(message)
 
