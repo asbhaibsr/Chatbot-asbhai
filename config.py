@@ -39,7 +39,7 @@ API_HASH = os.getenv("API_HASH")
 # --- Constants ---
 MAX_MESSAGES_THRESHOLD = 100000
 PRUNE_PERCENTAGE = 0.30
-UPDATE_CHANNEL_USERNAME = "earntalkchatcash"
+UPDATE_CHANNEL_USERNAME = "asbhai_bsr"
 ASBHAI_USERNAME = "asbhaibsr" # Owner's username for contact
 ASFILTER_BOT_USERNAME = "asfilter_bot" # The bot for premium rewards
 BOT_PHOTO_URL = "https://envs.sh/FU3.jpg" # Consider updating this URL if it's generic
