@@ -1,14 +1,12 @@
-# commands.py
-
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.enums import ChatType, ChatMemberStatus, ParseMode
 from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError
 import asyncio
 import os
-import re
 import sys
 from datetime import datetime
+import re # <-- यह 're' मॉड्यूल यहां जोड़ा गया है
 
 # Import utilities and configurations
 from config import (
@@ -22,6 +20,8 @@ from utils import (
     get_top_earning_users, reset_monthly_earnings_manual, send_and_auto_delete_reply,
     store_message, is_admin_or_owner
 )
+
+import callbacks # <--- यह बहुत ज़रूरी लाइन है, जो callbacks.py को इम्पोर्ट करेगी
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_private_command(client: Client, message: Message):
@@ -871,4 +871,3 @@ async def clear_my_data_command(client: Client, message: Message):
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.id)
-
