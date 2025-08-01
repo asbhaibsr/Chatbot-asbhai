@@ -216,13 +216,8 @@ async def new_member_handler(client: Client, message: Message):
                 except Exception as e:
                     logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
 
-    # Call store_message for new members as well, but only if they are not bots and are actual users
-    # This also helps in updating user_tracking_collection and potentially earning if it's a group
     if message.from_user and not message.from_user.is_bot:
-        # NOTE: store_message will now be called conditionally based on cooldown in handle_message_and_reply
-        # For new_chat_members, we want to ensure user info is updated regardless of cooldown.
-        # So update_user_info is called directly here.
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name) # Ensure user info is updated
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.left_chat_member)
 async def left_member_handler(client: Client, message: Message):
@@ -237,7 +232,7 @@ async def left_member_handler(client: Client, message: Message):
 
             earning_tracking_collection.update_many(
                 {},
-                {"$pull": {"last_active_group_id": message.chat.id}} # Using $pull to remove group_id from array
+                {"$pull": {"last_active_group_id": message.chat.id}}
             )
 
             logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared. (Code by @asbhaibsr)")
@@ -250,7 +245,7 @@ async def left_member_handler(client: Client, message: Message):
                 f"**Group ID:** `{message.chat.id}`\n"
                 f"**Action By:** {left_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
                 f"**Left On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Fixed support group username
+                f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
             )
             try:
                 await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
@@ -259,11 +254,7 @@ async def left_member_handler(client: Client, message: Message):
                 logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}. (Notification error by @asbhaibsr)")
             return
 
-    # Store message for left member (if it's a user leaving, not the bot)
     if message.from_user and not message.from_user.is_bot:
-        # NOTE: store_message will now be called conditionally based on cooldown in handle_message_and_reply
-        # For left_chat_member, we want to ensure user info is updated regardless of cooldown.
-        # So update_user_info is called directly here.
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -275,29 +266,23 @@ async def handle_message_and_reply(client: Client, message: Message):
 
     is_group_chat = message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]
 
-    # Bot disabled in group check
     if is_group_chat:
         group_status = group_tracking_collection.find_one({"_id": message.chat.id})
         if group_status and not group_status.get("bot_enabled", True):
             logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling.")
             return
 
-    # Update user and group info regardless (important for tracking last active)
-    # यह सामान्य ट्रैकिंग के लिए है, बॉट की प्रतिक्रिया/लर्निंग से संबंधित नहीं है
     if is_group_chat:
         logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.")
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
-    # --- Handle message deletion logic first (अगर मैसेज डिलीट करना है तो यहीं रुक जाएं) ---
-    # डिलीशन लॉजिक सभी मैसेजों के लिए चलना चाहिए, भले ही बॉट कूलडाउन पर हो, क्योंकि यह एक मॉडरेशन फ़ंक्शन है।
     user_id = message.from_user.id if message.from_user else None
     is_sender_admin = False
     if user_id and is_group_chat:
         is_sender_admin = await is_admin_or_owner(client, message.chat.id, user_id)
     
-    # Link deletion
     if is_group_chat and message.text:
         current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
         if current_group_settings and current_group_settings.get("linkdel_enabled", False):
@@ -307,13 +292,12 @@ async def handle_message_and_reply(client: Client, message: Message):
                     sent_delete_alert = await message.reply_text(f"ओहो, ये क्या भेज दिया {message.from_user.mention}? 🧐 सॉरी-सॉरी, यहाँ **लिंक्स अलाउड नहीं हैं!** 🚫 आपका मैसेज तो गया!💨 अब से ध्यान रखना, हाँ?", quote=True, parse_mode=ParseMode.MARKDOWN)
                     asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
                     logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return # मैसेज डिलीट हो गया, आगे प्रोसेस न करें
+                    return
                 except Exception as e:
                     logger.error(f"Error deleting link message {message.id}: {e}")
             elif contains_link(message.text) and is_sender_admin:
                 logger.info(f"Admin's link message {message.id} was not deleted in chat {message.chat.id}.")
 
-    # Bio link deletion
     if is_group_chat and user_id:
         try:
             current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
@@ -332,7 +316,7 @@ async def handle_message_and_reply(client: Client, message: Message):
                             )
                             asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
                             logger.info(f"Deleted message {message.id} from user {user_id} due to link in bio in chat {message.chat.id}.")
-                            return # मैसेज डिलीट हो गया, आगे प्रोसेस न करें
+                            return
                         except Exception as e:
                             logger.error(f"Error deleting message {message.id} due to bio link: {e}")
                 elif (is_sender_admin or is_biolink_exception) and URL_PATTERN.search(user_bio):
@@ -340,7 +324,6 @@ async def handle_message_and_reply(client: Client, message: Message):
         except Exception as e:
             logger.error(f"Error checking user bio for user {user_id} in chat {message.chat.id}: {e}")
 
-    # Username mention deletion
     if is_group_chat and message.text:
         current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
         if current_group_settings and current_group_settings.get("usernamedel_enabled", False):
@@ -350,29 +333,24 @@ async def handle_message_and_reply(client: Client, message: Message):
                     sent_delete_alert = await message.reply_text(f"टच-टच {message.from_user.mention}! 😬 आपने `@` का इस्तेमाल किया! सॉरी, वो मैसेज तो चला गया आसमान में! 🚀 अगली बार से ध्यान रखना, हाँ? 😉", quote=True, parse_mode=ParseMode.MARKDOWN)
                     asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
                     logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
-                    return # मैसेज डिलीट हो गया, आगे प्रोसेस न करें
+                    return
                 except Exception as e:
                     logger.error(f"Error deleting username message {message.id}: {e}")
             elif contains_mention(message.text) and is_sender_admin:
                 logger.info(f"Admin's username mention message {message.id} was not deleted in chat {message.chat.id}.")
 
-    # --- मैसेज डिलीशन लॉजिक समाप्त ---
-
-    # चेक करें कि क्या मैसेज कोई कमांड है
     is_command = message.text and message.text.startswith('/')
 
-    # केवल गैर-कमांड मैसेजों के लिए कूलडाउन लॉजिक लागू करें
     if not is_command:
         chat_id_for_cooldown = message.chat.id
         if not await can_reply_to_chat(chat_id_for_cooldown):
             logger.info(f"Chat {chat_id_for_cooldown} is on message reply cooldown. Skipping message {message.id} reply generation, storage, and learning.")
-            return # अगर कूलडाउन पर है, तो जवाब न दें, स्टोर न करें और सीखें भी नहीं
+            return
 
-        # अगर कूलडाउन पर नहीं है, तो स्टोर करने, सीखने और जवाब देने के लिए आगे बढ़ें
-        await store_message(message) # केवल तभी स्टोर करें जब कूलडाउन पर न हो
+        await store_message(client, message)
+
         logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
 
-        # मालिक द्वारा सिखाई गई बातचीत का लॉजिक
         if message.from_user and message.from_user.id == OWNER_ID and message.reply_to_message:
             replied_to_msg = message.reply_to_message
             if replied_to_msg.from_user and replied_to_msg.from_user.id == OWNER_ID:
@@ -395,7 +373,6 @@ async def handle_message_and_reply(client: Client, message: Message):
                     await message.reply_text("मालिक! 👑 मैंने यह बातचीत सीख ली है और अब इसे याद रखूंगी! 😉", parse_mode=ParseMode.MARKDOWN)
                     logger.info(f"Owner {OWNER_ID} taught a new pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
 
-        # सामान्य बातचीत लर्निंग लॉजिक
         if message.reply_to_message and message.from_user and message.from_user.id != OWNER_ID:
             replied_to_msg = message.reply_to_message
             if replied_to_msg.from_user and (replied_to_msg.from_user.is_self or (not replied_to_msg.from_user.is_bot and replied_to_msg.from_user.id != message.from_user.id)):
@@ -417,7 +394,6 @@ async def handle_message_and_reply(client: Client, message: Message):
                     )
                     logger.info(f"Learned conversational pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
 
-        # बॉट के जवाब उत्पन्न करें
         logger.info(f"Attempting to generate reply for chat {message.chat.id}.")
         reply_doc = await generate_reply(message)
 
@@ -432,9 +408,16 @@ async def handle_message_and_reply(client: Client, message: Message):
                 else:
                     logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}.")
             except Exception as e:
-                logger.error(f"Error sending reply for message {message.id}: {e}.")
+                if "CHAT_WRITE_FORBIDDEN" in str(e):
+                    logger.error(f"Permission error: Bot cannot send messages in chat {message.chat.id}. Leaving group.")
+                    try:
+                        await client.leave_chat(message.chat.id)
+                        await client.send_message(OWNER_ID, f"**ALERT:** Bot was removed from group `{message.chat.id}` because it lost permission to send messages.")
+                    except Exception as leave_e:
+                        logger.error(f"Failed to leave chat {message.chat.id} after permission error: {leave_e}")
+                else:
+                    logger.error(f"Error sending reply for message {message.id}: {e}.")
             finally:
                 update_message_reply_cooldown(message.chat.id)
         else:
             logger.info("No suitable reply found.")
-
