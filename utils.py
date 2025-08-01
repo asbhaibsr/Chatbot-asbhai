@@ -1,5 +1,3 @@
-# utils.py
-
 import re
 import asyncio
 import time
