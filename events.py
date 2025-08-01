@@ -26,7 +26,7 @@ async def callback_handler(client, callback_query):
     if callback_query.data == "buy_git_repo":
         await send_and_auto_delete_reply(
             callback_query.message,
-            text=f"🤩 अगर आपको मेरे जैसा खुद का bot बनवाना है, तो आपको ₹500 देने होंगे. इसके लिए **@{ASBHAI_USERNAME}** से contact करें और unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @asbhai_bsr", # Fixed support group username
+            text=f"🤩 अगर आपको मेरे जैसा खुद का bot बनवाना है, तो आपको ₹500 देने होंगे. इसके लिए **@{ASBHAI_USERNAME}** से contact करें और unhe bataiye ki aapko is bot ka code chahiye banwane ke liye. Jaldi karo, deals hot hain! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @asbhai_bsr",
             parse_mode=ParseMode.MARKDOWN
         )
         buttons_collection.insert_one({
@@ -38,7 +38,6 @@ async def callback_handler(client, callback_query):
             "credit": "by @asbhaibsr"
         })
     elif callback_query.data == "show_earning_leaderboard":
-        # Import top_users_command dynamically to avoid circular dependency
         from commands import top_users_command 
         await top_users_command(client, callback_query.message)
         buttons_collection.insert_one({
@@ -74,8 +73,8 @@ async def callback_handler(client, callback_query):
             "• `/biolink <userid>`: (Sirf Group Admins ke liye) `biolinkdel` on hone par bhi kisi user ko **bio mein `t.me` aur `http/https` links** रखने की permission dene ke liye.\n"
             "• `/usernamedel on/off`: (Sirf Group Admins ke liye) Group mein **'@' mentions** allow ya delete karne ke liye.\n\n"
             "**🔗 Mera Code (GitHub Repository):**\n"
-            f"[**REPO_LINK**]({ASBHAI_USERNAME})\n\n" # Assuming REPO_LINK is defined in config.py or elsewhere, if not, remove or replace with actual link
-            "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Fixed support group username
+            f"[**REPO_LINK**]({ASBHAI_USERNAME})\n\n"
+            "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
         )
         await send_and_auto_delete_reply(callback_query.message, text=help_text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
         buttons_collection.insert_one({
@@ -107,7 +106,7 @@ async def callback_handler(client, callback_query):
             "   • अपनी कमाई निकालने के लिए, आपको मुझे `@asbhaibsr` पर DM (डायरेक्ट मैसेज) करना होगा।\n\n"
             "**शुभकामनाएँ!** 🍀\n"
             "मुझे आशा है कि आप सक्रिय रहेंगे और हमारी कम्युनिटी में योगदान देंगे।\n\n"
-            "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Fixed support group username
+            "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
         )
         await send_and_auto_delete_reply(callback_query.message, text=earning_rules_text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
         buttons_collection.insert_one({
@@ -143,10 +142,7 @@ async def handle_clearall_dbs_callback(client: Client, callback_query):
             logger.info("user_tracking_collection dropped.")
             earning_tracking_collection.drop()
             logger.info("earning_tracking_collection dropped.")
-            # Assuming reset_status_collection is defined in config.py
-            # If not, you might need to import it or define it.
-            # If it's not used, you can remove this line.
-            if 'reset_status_collection' in globals(): # Check if it's defined
+            if 'reset_status_collection' in globals():
                 reset_status_collection.drop()
                 logger.info("reset_status_collection dropped.")
             biolink_exceptions_collection.drop()
@@ -169,12 +165,14 @@ async def handle_clearall_dbs_callback(client: Client, callback_query):
 async def new_member_handler(client: Client, message: Message):
     logger.info(f"New chat members detected in chat {message.chat.id}. Bot ID: {client.me.id}. (Event handled by @asbhaibsr)")
 
+    me = await client.get_me()
+
     for member in message.new_chat_members:
         logger.info(f"Processing new member: {member.id} ({member.first_name}) in chat {message.chat.id}. Is bot: {member.is_bot}. (Event handled by @asbhaibsr)")
         
-        if member.id == client.me.id:
+        if member.id == me.id:
             if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-                logger.info(f"DEBUG: Bot {client.me.id} detected as new member in group {message.chat.id}. Calling update_group_info.")
+                logger.info(f"DEBUG: Bot {me.id} detected as new member in group {message.chat.id}. Calling update_group_info.")
                 await update_group_info(message.chat.id, message.chat.title, message.chat.username)
                 logger.info(f"Bot joined new group: {message.chat.title} ({message.chat.id}). (Event handled by @asbhaibsr)")
 
@@ -187,7 +185,7 @@ async def new_member_handler(client: Client, message: Message):
                     f"**Group ID:** `{message.chat.id}`\n"
                     f"**Added By:** {added_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
                     f"**Added On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Fixed support group username
+                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
                 )
                 try:
                     await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
@@ -195,38 +193,21 @@ async def new_member_handler(client: Client, message: Message):
                 except Exception as e:
                     logger.error(f"Could not notify owner about new group {group_title}: {e}. (Notification error by @asbhaibsr)")
                 
-                # Check for admin status after a delay
                 asyncio.create_task(check_and_leave_if_not_admin(client, message.chat.id, message.chat.title, message.from_user))
+        else: # Handle any other new user
             return
-
-        if not member.is_bot and message.chat.type == ChatType.PRIVATE and member.id == message.from_user.id:
-            user_exists = user_tracking_collection.find_one({"_id": member.id})
-            if not user_exists:
-                user_name = member.first_name if member.first_name else "Naya User"
-                user_username = f"@{member.username}" if member.username else "N/A"
-                notification_message = (
-                    f"✨ **New User Alert! (Private Chat)**\n"
-                    f"Ek naye user ne bot ko private mein start kiya hai.\n\n"
-                    f"**User Name:** {user_name}\n"
-                    f"**User ID:** `{member.id}`\n"
-                    f"**Username:** {user_username}\n"
-                    f"**Started On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group" # Fixed support group username
-                )
-                try:
-                    await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
-                    logger.info(f"Owner notified about new private user: {user_name}. (Notification by @asbhaibsr)")
-                except Exception as e:
-                    logger.error(f"Could not notify owner about new private user {user_name}: {e}. (Notification error by @asbhaibsr)")
 
     if message.from_user and not message.from_user.is_bot:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
 
 @app.on_message(filters.left_chat_member)
 async def left_member_handler(client: Client, message: Message):
     logger.info(f"Left chat member detected in chat {message.chat.id}. Left member ID: {message.left_chat_member.id}. Bot ID: {client.me.id}. (Event handled by @asbhaibsr)")
 
-    if message.left_chat_member and message.left_chat_member.id == client.me.id:
+    me = await client.get_me()
+
+    if message.left_chat_member and message.left_chat_member.id == me.id:
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
             group_tracking_collection.delete_one({"_id": message.chat.id})
             messages_collection.delete_many({"chat_id": message.chat.id})
@@ -356,7 +337,7 @@ async def handle_message_and_reply(client: Client, message: Message):
 
         if message.from_user and message.from_user.id == OWNER_ID and message.reply_to_message:
             replied_to_msg = message.reply_to_message
-            if replied_to_msg.from_user and replied_to_msg.from_user.id == OWNER_ID:
+            if replied_to_msg.from_user and replied_to_msg.from_user.is_self:
                 trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
                 
                 if trigger_content:
