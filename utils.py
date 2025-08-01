@@ -14,8 +14,6 @@ from pyrogram.enums import ChatMemberStatus, ChatType, ParseMode
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
 
-# Import collections and logger from config or pass them
-# For simplicity, assuming these are globally available or passed
 from config import (
     messages_collection, owner_taught_responses_collection, conversational_learning_collection,
     group_tracking_collection, user_tracking_collection, earning_tracking_collection,
@@ -23,6 +21,9 @@ from config import (
     MAX_MESSAGES_THRESHOLD, PRUNE_PERCENTAGE, URL_PATTERN, OWNER_ID,
     user_cooldowns, COMMAND_COOLDOWN_TIME, chat_message_cooldowns, MESSAGE_REPLY_COOLDOWN_TIME
 )
+
+# Global dictionary to track the last earning message time for each user
+earning_cooldowns = {}
 
 def extract_keywords(text):
     if not text:
@@ -74,14 +75,12 @@ def contains_mention(text: str):
     mention_pattern = r"@[\w\d\._-]+"
     return bool(re.search(mention_pattern, text))
 
-async def store_message(message: Message):
+async def store_message(client: Client, message: Message):
     try:
-        # बॉट द्वारा भेजे गए मैसेजों को सामान्य स्टोरेज या कमाई के लिए छोड़ दें
         if message.from_user and message.from_user.is_bot:
             logger.debug(f"Skipping general storage for message from bot: {message.from_user.id}. (Code by @asbhaibsr)")
             return
 
-        # कमांड मैसेजों को सामान्य स्टोरेज या कमाई के लिए छोड़ दें
         is_command = message.text and message.text.startswith('/')
         if is_command:
             logger.debug(f"Skipping general storage for command: {message.text}. (Code by @asbhaibsr)")
@@ -111,35 +110,47 @@ async def store_message(message: Message):
             message_data["keywords"] = extract_keywords(message.sticker.emoji)
         else:
             logger.debug(f"Unsupported message type for general storage: {message.id}. (Code by @asbhaibsr)")
-            return # अगर मैसेज का कोई सपोर्टेड टाइप नहीं है तो स्टोर न करें
+            return
         
-        # सामान्य मैसेज कलेक्शन में स्टोर करें (गैर-कमांड, गैर-बॉट मैसेज)
         messages_collection.insert_one(message_data)
         logger.info(f"General message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
 
-        # ग्रुप मैसेजों के लिए कमाई ट्रैकिंग अपडेट करें (केवल यूज़र्स से, बॉट्स से नहीं)
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and message.from_user and not message.from_user.is_bot:
             user_id_to_track = message.from_user.id
-            username_to_track = message.from_user.username
-            first_name_to_track = message.from_user.first_name
-            current_group_id = message.chat.id
-            current_group_title = message.chat.title
-            current_group_username = message.chat.username
 
-            earning_tracking_collection.update_one(
-                {"_id": user_id_to_track},
-                {"$inc": {"group_message_count": 1},
-                 "$set": {"username": username_to_track,
-                          "first_name": first_name_to_track,
-                          "last_active_group_message": datetime.now(),
-                          "last_active_group_id": current_group_id,
-                          "last_active_group_title": current_group_title,
-                          "last_active_group_username": current_group_username
-                          },
-                 "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
-                upsert=True
-            )
-            logger.info(f"Group message count updated for user {user_id_to_track}. (Earning tracking by @asbhaibsr)")
+            if message.reply_to_message:
+                replied_to_user_id = message.reply_to_message.from_user.id if message.reply_to_message.from_user else None
+                if replied_to_user_id and replied_to_user_id != user_id_to_track:
+                    last_earning_time = earning_cooldowns.get(user_id_to_track, 0)
+                    if time.time() - last_earning_time >= 8:
+                        earning_cooldowns[user_id_to_track] = time.time()
+                        
+                        username_to_track = message.from_user.username
+                        first_name_to_track = message.from_user.first_name
+                        current_group_id = message.chat.id
+                        current_group_title = message.chat.title
+                        current_group_username = message.chat.username
+
+                        earning_tracking_collection.update_one(
+                            {"_id": user_id_to_track},
+                            {"$inc": {"group_message_count": 1},
+                             "$set": {"username": username_to_track,
+                                      "first_name": first_name_to_track,
+                                      "last_active_group_message": datetime.now(),
+                                      "last_active_group_id": current_group_id,
+                                      "last_active_group_title": current_group_title,
+                                      "last_active_group_username": current_group_username
+                                      },
+                             "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
+                            upsert=True
+                        )
+                        logger.info(f"Earning message count updated for user {user_id_to_track} due to reply. (Earning tracking by @asbhaibsr)")
+                    else:
+                        logger.info(f"Earning message from user {user_id_to_track} skipped due to 8-second cooldown.")
+                else:
+                    logger.info(f"Earning message from user {user_id_to_track} skipped as it was a self-reply or not a reply.")
+            else:
+                logger.info(f"Earning message from user {user_id_to_track} skipped as it was not a reply.")
 
         await prune_old_messages()
 
@@ -160,12 +171,9 @@ async def generate_reply(message: Message):
 
     query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
     
-    # मालिक के मैसेजों के लिए विशेष हैंडलिंग अगर आवश्यक हो
     if message.from_user and message.from_user.id == OWNER_ID:
-        pass # मालिक के मैसेज भी सामान्य लर्निंग फ्लो से गुजरेंगे
+        pass
 
-    # --- बॉट के पिछले मैसेज का जवाब मिलने पर सबसे पहले प्रतिक्रिया दें ---
-    # यह 'bot hi user hello to hi and bye ko bhi store kiya jaye' वाले लॉजिक को मजबूत करता है
     if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
         original_bot_message_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
         if original_bot_message_content:
@@ -175,14 +183,12 @@ async def generate_reply(message: Message):
                 logger.info(f"Bot-replied contextual reply found for '{original_bot_message_content}'.")
                 return chosen_response_data
     
-    # मालिक द्वारा सिखाए गए जवाबों को प्राथमिकता दें
     owner_taught_doc = owner_taught_responses_collection.find_one({"trigger": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
     if owner_taught_doc and owner_taught_doc.get('responses'):
         chosen_response_data = random.choice(owner_taught_doc['responses'])
         logger.info(f"Owner-taught reply found for '{query_content}'.")
         return chosen_response_data
     
-    # सामान्य बातचीत से सीखे गए जवाब
     conversational_doc = conversational_learning_collection.find_one({"trigger": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
     if conversational_doc and conversational_doc.get('responses'):
         chosen_response_data = random.choice(conversational_doc['responses'])
@@ -191,19 +197,18 @@ async def generate_reply(message: Message):
 
     logger.info(f"No specific learning pattern found for '{query_content}'. Falling back to old keyword search if necessary. (Logic by @asbhaibsr)")
 
-    # कीवर्ड-आधारित सामान्य जवाब (सबसे कम प्राथमिकता)
     query_keywords = extract_keywords(query_content)
     if query_keywords:
         keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
         general_replies_cursor = messages_collection.find({
             "type": {"$in": ["text", "sticker"]},
             "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"},
-            "user_id": {"$ne": app.me.id} # बॉट के अपने मैसेजों से जवाब न दें
+            "user_id": {"$ne": app.me.id}
         })
     else:
         general_replies_cursor = messages_collection.find({
             "type": {"$in": ["text", "sticker"]},
-            "user_id": {"$ne": app.me.id} # बॉट के अपने मैसेजों से जवाब न दें
+            "user_id": {"$ne": app.me.id}
         })
 
     potential_replies = []
@@ -312,9 +317,9 @@ async def send_and_auto_delete_reply(message: Message, text: str = None, photo: 
         command_name = message.command[0]
         text_to_send = f"**कमांड:** `{command_name}`{user_info_str}\n\n{text}"
     elif text and message.chat.type == ChatType.PRIVATE and message.from_user and message.from_user.id == OWNER_ID:
-        pass # मालिक के निजी चैट में कोई अतिरिक्त उपसर्ग न जोड़ें
+        pass
     elif text and message.from_user:
-        pass # अन्य मामलों में, बस मूल टेक्स्ट भेजें
+        pass
 
     if photo:
         sent_message = await message.reply_photo(
@@ -335,10 +340,10 @@ async def send_and_auto_delete_reply(message: Message, text: str = None, photo: 
         return None
 
     if message.command and message.command[0] == "start":
-        return sent_message # /start कमांड के लिए मैसेज को डिलीट न करें
+        return sent_message
 
     async def delete_after_delay_task():
-        await asyncio.sleep(180) # 3 मिनट बाद डिलीट करें
+        await asyncio.sleep(180)
         try:
             if sent_message:
                 await sent_message.delete()
