@@ -1,5 +1,3 @@
-# events.py
-
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ChatType, ParseMode
@@ -255,6 +253,9 @@ async def handle_message_and_reply(client: Client, message: Message):
         if group_status and not group_status.get("bot_enabled", True):
             logger.info(f"Bot is disabled in group {message.chat.id}. Skipping message handling.")
             return
+        
+        # Check and leave if bot is not an admin
+        asyncio.create_task(check_and_leave_if_not_admin(client, message.chat.id, message.chat.title, message.from_user))
 
     if is_group_chat:
         logger.info(f"DEBUG: Message from group/supergroup {message.chat.id}. Calling update_group_info.")
