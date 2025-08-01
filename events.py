@@ -16,7 +16,7 @@ from config import (
 from utils import (
     update_group_info, update_user_info, store_message, generate_reply,
     can_reply_to_chat, update_message_reply_cooldown, delete_after_delay_for_message,
-    is_admin_or_owner, contains_link, contains_mention
+    is_admin_or_owner, contains_link, contains_mention, check_and_leave_if_not_admin
 )
 
 @app.on_callback_query()
@@ -194,6 +194,9 @@ async def new_member_handler(client: Client, message: Message):
                     logger.info(f"Owner notified about new group: {group_title}. (Notification by @asbhaibsr)")
                 except Exception as e:
                     logger.error(f"Could not notify owner about new group {group_title}: {e}. (Notification error by @asbhaibsr)")
+                
+                # Check for admin status after a delay
+                asyncio.create_task(check_and_leave_if_not_admin(client, message.chat.id, message.chat.title, message.from_user))
             return
 
         if not member.is_bot and message.chat.type == ChatType.PRIVATE and member.id == message.from_user.id:
@@ -376,7 +379,7 @@ async def handle_message_and_reply(client: Client, message: Message):
         if message.reply_to_message and message.from_user and message.from_user.id != OWNER_ID:
             replied_to_msg = message.reply_to_message
             if replied_to_msg.from_user and (replied_to_msg.from_user.is_self or (not replied_to_msg.from_user.is_bot and replied_to_msg.from_user.id != message.from_user.id)):
-                trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
+                trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else "")
                 
                 if trigger_content:
                     response_data = {
