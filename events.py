@@ -1,8 +1,9 @@
+# Import necessary libraries
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ChatType, ParseMode
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Import utilities and configurations
 from config import (
@@ -13,9 +14,38 @@ from config import (
 )
 from utils import (
     update_group_info, update_user_info, store_message, generate_reply,
-    can_reply_to_chat, update_message_reply_cooldown, delete_after_delay_for_message,
     is_admin_or_owner, contains_link, contains_mention, check_and_leave_if_not_admin
 )
+
+# -----------------
+# Cooldown Logic
+# -----------------
+
+# Ek dictionary jo har group ke liye aakhri reply ka samay store karega.
+# Yeh bot ko spamming se bachayega.
+last_reply_time = {}
+
+# Kitne seconds tak bot ek group mein reply nahi karega.
+# Aap is samay ko apni zaroorat ke hisaab se badal sakte hain.
+REPLY_COOLDOWN_SECONDS = 8
+
+# -----------------
+# Helper Function for Reply & Auto-Delete
+# -----------------
+
+async def send_and_auto_delete_reply(message, text, parse_mode=None, reply_markup=None, disable_web_page_preview=False, delay=180):
+    sent_message = await message.reply_text(
+        text=text,
+        parse_mode=parse_mode,
+        reply_markup=reply_markup,
+        disable_web_page_preview=disable_web_page_preview
+    )
+    asyncio.create_task(delete_after_delay_for_message(sent_message, delay))
+
+
+# -----------------
+# Callback Handlers
+# -----------------
 
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
@@ -88,20 +118,20 @@ async def callback_handler(client, callback_query):
             "👑 **Earning Rules - VIP Guide!** 👑\n\n"
             "यहाँ बताया गया है कि आप मेरे साथ कैसे कमाई कर सकते हैं:\n\n"
             "**1. सक्रिय रहें (Be Active):**\n"
-            "   • आपको ग्रुप में **वास्तविक और सार्थक बातचीत** करनी होगी।\n"
-            "   • बेतरतीब मैसेज, स्पैमिंग, या सिर्फ़ इमोजी भेजने से आपकी रैंकिंग नहीं बढ़ेगी और आप अयोग्य भी हो सकते हैं।\n"
-            "   • जितनी ज़्यादा अच्छी बातचीत, उतनी ज़्यादा कमाई के अवसर!\n\n"
+            "  • आपको ग्रुप में **वास्तविक और सार्थक बातचीत** करनी होगी।\n"
+            "  • बेतरतीब मैसेज, स्पैमिंग, या सिर्फ़ इमोजी भेजने से आपकी रैंकिंग नहीं बढ़ेगी और आप अयोग्य भी हो सकते हैं।\n"
+            "  • जितनी ज़्यादा अच्छी बातचीत, उतनी ज़्यादा कमाई के अवसर!\n\n"
             "**2. क्या करें, क्या न करें (Do's and Don'ts):**\n"
-            "   • **करें:** सवालों के जवाब दें, चर्चा में भाग लें, नए विषय शुरू करें, अन्य सदस्यों के साथ इंटरैक्ट करें।\n"
-            "   • **न करें:** बार-बार एक ही मैसेज भेजें, सिर्फ़ स्टिकर या GIF भेजें, असंबद्ध सामग्री पोस्ट करें, या ग्रुप के नियमों का उल्लंघन करें।\n\n"
+            "  • **करें:** सवालों के जवाब दें, चर्चा में भाग लें, नए विषय शुरू करें, अन्य सदस्यों के साथ इंटरैक्ट करें।\n"
+            "  • **न करें:** बार-बार एक ही मैसेज भेजें, सिर्फ़ स्टिकर या GIF भेजें, असंबद्ध सामग्री पोस्ट करें, या ग्रुप के नियमों का उल्लंघन करें।\n\n"
             "**3. कमाई का समय (Earning Period):**\n"
-            "   • कमाई हर **महीने** के पहले दिन रीसेट होगी। इसका मतलब है कि हर महीने आपके पास टॉप पर आने का एक नया मौका होगा!\n\n"
+            "  • कमाई हर **महीने** के पहले दिन रीसेट होगी। इसका मतलब है कि हर महीने आपके पास टॉप पर आने का एक नया मौका होगा!\n\n"
             "**4. अयोग्य होना (Disqualification):**\n"
-            "   • यदि आप स्पैमिंग करते हुए पाए जाते हैं, या किसी भी तरह से सिस्टम का दुरुपयोग करने की कोशिश करते हैं, तो आपको लीडरबोर्ड से हटा दिया जाएगा और आप भविष्य की कमाई के लिए अयोग्य घोषित हो सकते हैं।\n"
-            "   • ग्रुप के नियमों का पालन करना अनिवार्य है।\n\n"
+            "  • यदि आप स्पैमिंग करते हुए पाए जाते हैं, या किसी भी तरह से सिस्टम का दुरुपयोग करने की कोशिश करते हैं, तो आपको लीडरबोर्ड से हटा दिया जाएगा और आप भविष्य की कमाई के लिए अयोग्य घोषित हो सकते हैं।\n"
+            "  • ग्रुप के नियमों का पालन करना अनिवार्य है।\n\n"
             "**5. विथड्रावल (Withdrawal):**\n"
-            "   • विथड्रावल हर महीने के **पहले हफ़्ते** में होगा।\n"
-            "   • अपनी कमाई निकालने के लिए, आपको मुझे `@asbhaibsr` पर DM (डायरेक्ट मैसेज) करना होगा।\n\n"
+            "  • विथड्रावल हर महीने के **पहले हफ़्ते** में होगा।\n"
+            "  • अपनी कमाई निकालने के लिए, आपको मुझे `@asbhaibsr` पर DM (डायरेक्ट मैसेज) करना होगा।\n\n"
             "**शुभकामनाएँ!** 🍀\n"
             "मुझे आशा है कि आप सक्रिय रहेंगे और हमारी कम्युनिटी में योगदान देंगे।\n\n"
             "**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
@@ -158,6 +188,10 @@ async def handle_clearall_dbs_callback(client: Client, callback_query):
     elif query.data == 'cancel_clearall_dbs':
         await query.edit_message_text("कार्यवाही रद्द कर दी गई है। आपका डेटा सुरक्षित है। ✅", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Owner {query.from_user.id} cancelled /clearall operation.")
+
+# -----------------
+# Member Handlers
+# -----------------
 
 @app.on_message(filters.new_chat_members)
 async def new_member_handler(client: Client, message: Message):
@@ -239,6 +273,10 @@ async def left_member_handler(client: Client, message: Message):
     if message.from_user and not message.from_user.is_bot:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+
+# -----------------
+# Main Message Handler with Cooldown
+# -----------------
 
 @app.on_message(filters.text | filters.sticker | filters.photo | filters.video | filters.document)
 async def handle_message_and_reply(client: Client, message: Message):
@@ -327,11 +365,17 @@ async def handle_message_and_reply(client: Client, message: Message):
     is_command = message.text and message.text.startswith('/')
 
     if not is_command:
-        chat_id_for_cooldown = message.chat.id
-        if not await can_reply_to_chat(chat_id_for_cooldown):
-            logger.info(f"Chat {chat_id_for_cooldown} is on message reply cooldown. Skipping message {message.id} reply generation, storage, and learning.")
-            return
-
+        chat_id = message.chat.id
+        current_time = datetime.now()
+        
+        # Cooldown check: dekhein kya chat abhi cooldown par hai
+        if chat_id in last_reply_time:
+            time_since_last_reply = (current_time - last_reply_time[chat_id]).total_seconds()
+            if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
+                logger.info(f"Chat {chat_id} is in cooldown. Skipping reply for message {message.id}.")
+                return # Cooldown hai, isliye function se bahar nikal jao
+        
+        # Message ko store karo
         await store_message(client, message)
 
         logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
@@ -392,6 +436,11 @@ async def handle_message_and_reply(client: Client, message: Message):
                     logger.info(f"Replied with sticker: {reply_doc['sticker_id']}.")
                 else:
                     logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}.")
+                
+                # Cooldown update: Successful reply ke baad samay update karo
+                last_reply_time[chat_id] = datetime.now()
+                logger.info(f"Reply sent to chat {chat_id}. Cooldown started for {REPLY_COOLDOWN_SECONDS} seconds.")
+                
             except Exception as e:
                 if "CHAT_WRITE_FORBIDDEN" in str(e):
                     logger.error(f"Permission error: Bot cannot send messages in chat {message.chat.id}. Leaving group.")
@@ -402,7 +451,5 @@ async def handle_message_and_reply(client: Client, message: Message):
                         logger.error(f"Failed to leave chat {message.chat.id} after permission error: {leave_e}")
                 else:
                     logger.error(f"Error sending reply for message {message.id}: {e}.")
-            finally:
-                update_message_reply_cooldown(message.chat.id)
         else:
             logger.info("No suitable reply found.")
