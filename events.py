@@ -29,6 +29,10 @@ last_reply_time = {}
 # Aap is samay ko apni zaroorat ke hisaab se badal sakte hain.
 REPLY_COOLDOWN_SECONDS = 8
 
+# Ek dictionary jo har group ke liye ek lock rakhegi.
+# Yeh ensure karega ki ek group mein ek samay par ek hi reply process ho.
+cooldown_locks = {}
+
 # -----------------
 # Helper Function for Reply & Auto-Delete
 # -----------------
@@ -366,90 +370,95 @@ async def handle_message_and_reply(client: Client, message: Message):
 
     if not is_command:
         chat_id = message.chat.id
-        current_time = datetime.now()
         
-        # Cooldown check: dekhein kya chat abhi cooldown par hai
-        if chat_id in last_reply_time:
-            time_since_last_reply = (current_time - last_reply_time[chat_id]).total_seconds()
-            if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
-                logger.info(f"Chat {chat_id} is in cooldown. Skipping reply for message {message.id}.")
-                return # Cooldown hai, isliye function se bahar nikal jao
-        
-        # Message ko store karo
-        await store_message(client, message)
+        if chat_id not in cooldown_locks:
+            cooldown_locks[chat_id] = asyncio.Lock()
+            
+        async with cooldown_locks[chat_id]:
+            current_time = datetime.now()
+            
+            # Cooldown check: dekhein kya chat abhi cooldown par hai
+            if chat_id in last_reply_time:
+                time_since_last_reply = (current_time - last_reply_time[chat_id]).total_seconds()
+                if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
+                    logger.info(f"Chat {chat_id} is in cooldown. Skipping reply for message {message.id}.")
+                    return # Cooldown hai, isliye function se bahar nikal jao
+            
+            # Message ko store karo
+            await store_message(client, message)
 
-        logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
+            logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
 
-        if message.from_user and message.from_user.id == OWNER_ID and message.reply_to_message:
-            replied_to_msg = message.reply_to_message
-            if replied_to_msg.from_user and replied_to_msg.from_user.is_self:
-                trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
-                
-                if trigger_content:
-                    response_data = {
-                        "message_id": message.id, "user_id": message.from_user.id,
-                        "username": message.from_user.username, "first_name": message.from_user.first_name,
-                        "chat_id": message.chat.id, "chat_type": message.chat.type.name,
-                        "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
-                        "timestamp": datetime.now(), "credits": "Code by @asbhaibsr"
-                    }
-                    if message.text: response_data["type"] = "text"; response_data["content"] = message.text
-                    elif message.sticker: response_data["type"] = "sticker"; response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""; response_data["sticker_id"] = message.sticker.file_id
+            if message.from_user and message.from_user.id == OWNER_ID and message.reply_to_message:
+                replied_to_msg = message.reply_to_message
+                if replied_to_msg.from_user and replied_to_msg.from_user.is_self:
+                    trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
                     
-                    owner_taught_responses_collection.update_one(
-                        {"trigger": trigger_content}, {"$addToSet": {"responses": response_data}}, upsert=True
-                    )
-                    await message.reply_text("मालिक! 👑 मैंने यह बातचीत सीख ली है और अब इसे याद रखूंगी! 😉", parse_mode=ParseMode.MARKDOWN)
-                    logger.info(f"Owner {OWNER_ID} taught a new pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
+                    if trigger_content:
+                        response_data = {
+                            "message_id": message.id, "user_id": message.from_user.id,
+                            "username": message.from_user.username, "first_name": message.from_user.first_name,
+                            "chat_id": message.chat.id, "chat_type": message.chat.type.name,
+                            "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
+                            "timestamp": datetime.now(), "credits": "Code by @asbhaibsr"
+                        }
+                        if message.text: response_data["type"] = "text"; response_data["content"] = message.text
+                        elif message.sticker: response_data["type"] = "sticker"; response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""; response_data["sticker_id"] = message.sticker.file_id
+                        
+                        owner_taught_responses_collection.update_one(
+                            {"trigger": trigger_content}, {"$addToSet": {"responses": response_data}}, upsert=True
+                        )
+                        await message.reply_text("मालिक! 👑 मैंने यह बातचीत सीख ली है और अब इसे याद रखूंगी! 😉", parse_mode=ParseMode.MARKDOWN)
+                        logger.info(f"Owner {OWNER_ID} taught a new pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
 
-        if message.reply_to_message and message.from_user and message.from_user.id != OWNER_ID:
-            replied_to_msg = message.reply_to_message
-            if replied_to_msg.from_user and (replied_to_msg.from_user.is_self or (not replied_to_msg.from_user.is_bot and replied_to_msg.from_user.id != message.from_user.id)):
-                trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else "")
-                
-                if trigger_content:
-                    response_data = {
-                        "message_id": message.id, "user_id": message.from_user.id,
-                        "username": message.from_user.username, "first_name": message.from_user.first_name,
-                        "chat_id": message.chat.id, "chat_type": message.chat.type.name,
-                        "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
-                        "timestamp": datetime.now(), "credits": "Code by @asbhaibsr"
-                    }
-                    if message.text: response_data["type"] = "text"; response_data["content"] = message.text
-                    elif message.sticker: response_data["type"] = "sticker"; response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""; response_data["sticker_id"] = message.sticker.file_id
+            if message.reply_to_message and message.from_user and message.from_user.id != OWNER_ID:
+                replied_to_msg = message.reply_to_message
+                if replied_to_msg.from_user and (replied_to_msg.from_user.is_self or (not replied_to_msg.from_user.is_bot and replied_to_msg.from_user.id != message.from_user.id)):
+                    trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else "")
                     
-                    conversational_learning_collection.update_one(
-                        {"trigger": trigger_content}, {"$addToSet": {"responses": response_data}}, upsert=True
-                    )
-                    logger.info(f"Learned conversational pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
+                    if trigger_content:
+                        response_data = {
+                            "message_id": message.id, "user_id": message.from_user.id,
+                            "username": message.from_user.username, "first_name": message.from_user.first_name,
+                            "chat_id": message.chat.id, "chat_type": message.chat.type.name,
+                            "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
+                            "timestamp": datetime.now(), "credits": "Code by @asbhaibsr"
+                        }
+                        if message.text: response_data["type"] = "text"; response_data["content"] = message.text
+                        elif message.sticker: response_data["type"] = "sticker"; response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""; response_data["sticker_id"] = message.sticker.file_id
+                        
+                        conversational_learning_collection.update_one(
+                            {"trigger": trigger_content}, {"$addToSet": {"responses": response_data}}, upsert=True
+                        )
+                        logger.info(f"Learned conversational pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
 
-        logger.info(f"Attempting to generate reply for chat {message.chat.id}.")
-        reply_doc = await generate_reply(message)
+            logger.info(f"Attempting to generate reply for chat {message.chat.id}.")
+            reply_doc = await generate_reply(message)
 
-        if reply_doc:
-            try:
-                if reply_doc.get("type") == "text":
-                    await message.reply_text(reply_doc["content"], parse_mode=ParseMode.MARKDOWN)
-                    logger.info(f"Replied with text: {reply_doc['content']}.")
-                elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
-                    await message.reply_sticker(reply_doc["sticker_id"])
-                    logger.info(f"Replied with sticker: {reply_doc['sticker_id']}.")
-                else:
-                    logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}.")
-                
-                # Cooldown update: Successful reply ke baad samay update karo
-                last_reply_time[chat_id] = datetime.now()
-                logger.info(f"Reply sent to chat {chat_id}. Cooldown started for {REPLY_COOLDOWN_SECONDS} seconds.")
-                
-            except Exception as e:
-                if "CHAT_WRITE_FORBIDDEN" in str(e):
-                    logger.error(f"Permission error: Bot cannot send messages in chat {message.chat.id}. Leaving group.")
-                    try:
-                        await client.leave_chat(message.chat.id)
-                        await client.send_message(OWNER_ID, f"**ALERT:** Bot was removed from group `{message.chat.id}` because it lost permission to send messages.")
-                    except Exception as leave_e:
-                        logger.error(f"Failed to leave chat {message.chat.id} after permission error: {leave_e}")
-                else:
-                    logger.error(f"Error sending reply for message {message.id}: {e}.")
-        else:
-            logger.info("No suitable reply found.")
+            if reply_doc:
+                try:
+                    if reply_doc.get("type") == "text":
+                        await message.reply_text(reply_doc["content"], parse_mode=ParseMode.MARKDOWN)
+                        logger.info(f"Replied with text: {reply_doc['content']}.")
+                    elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
+                        await message.reply_sticker(reply_doc["sticker_id"])
+                        logger.info(f"Replied with sticker: {reply_doc['sticker_id']}.")
+                    else:
+                        logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}.")
+                    
+                    # Cooldown update: Successful reply ke baad samay update karo
+                    last_reply_time[chat_id] = datetime.now()
+                    logger.info(f"Reply sent to chat {chat_id}. Cooldown started for {REPLY_COOLDOWN_SECONDS} seconds.")
+                    
+                except Exception as e:
+                    if "CHAT_WRITE_FORBIDDEN" in str(e):
+                        logger.error(f"Permission error: Bot cannot send messages in chat {message.chat.id}. Leaving group.")
+                        try:
+                            await client.leave_chat(message.chat.id)
+                            await client.send_message(OWNER_ID, f"**ALERT:** Bot was removed from group `{message.chat.id}` because it lost permission to send messages.")
+                        except Exception as leave_e:
+                            logger.error(f"Failed to leave chat {message.chat.id} after permission error: {leave_e}")
+                    else:
+                        logger.error(f"Error sending reply for message {message.id}: {e}.")
+            else:
+                logger.info("No suitable reply found.")
