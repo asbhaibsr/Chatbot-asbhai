@@ -1,3 +1,5 @@
+# utlis.py
+
 import re
 import asyncio
 import time
@@ -65,47 +67,7 @@ async def is_admin_or_owner(client: Client, chat_id: int, user_id: int):
         logger.error(f"Error checking admin status for user {user_id} in chat {chat_id}: {e}")
     return False
 
-async def check_and_leave_if_not_admin(client: Client, chat_id: int, chat_title: str, added_by: User):
-    await asyncio.sleep(120)  # Wait for 2 minutes
-    is_bot_admin = False
-    try:
-        me = await client.get_me()
-        member = await client.get_chat_member(chat_id, me.id)
-        if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-            is_bot_admin = True
-    except Exception as e:
-        logger.error(f"Error checking bot admin status in chat {chat_id} after 2 minutes: {e}")
-
-    if not is_bot_admin:
-        try:
-            await client.send_message(
-                chat_id,
-                "⚠️ **ध्यान दें:** मुझे इस ग्रुप में एडमिन नहीं बनाया गया है।\n"
-                "सुरक्षा कारणों से, मैं अब यह ग्रुप छोड़ रही हूँ।\n"
-                "अगर आप चाहते हैं कि मैं रहूँ, तो कृपया मुझे एडमिन बनाएं और फिर से जोड़ें।\n\n"
-                "धन्यवाद! 🙏",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            await asyncio.sleep(5)  # Give some time for the message to be sent
-            await client.leave_chat(chat_id)
-            logger.info(f"Bot left group {chat_title} ({chat_id}) after 2 minutes because it was not an admin. (Action by @asbhaibsr)")
-
-            added_by_mention = f"[{added_by.first_name}](tg://user?id={added_by.id})"
-            
-            notification_message = (
-                f"💔 **Group Left Alert! (Auto-Leave)**\n"
-                f"Bot ko `{chat_title}` ({chat_id}) se **admin na hone ke karan** hata diya gaya hai.\n"
-                f"**Added By:** {added_by_mention} ({added_by.id if added_by else 'N/A'})\n"
-                f"**Left On:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr"
-            )
-            await client.send_message(OWNER_ID, notification_message, parse_mode=ParseMode.MARKDOWN)
-
-        except Exception as e:
-            logger.error(f"Failed to leave chat {chat_id} after admin check: {e}")
-    else:
-        logger.info(f"Bot is an admin in group {chat_title} ({chat_id}). Staying. (Check by @asbhaibsr)")
-
+# `check_and_leave_if_not_admin` function ko yahan se hata diya gaya hai.
 
 def contains_link(text: str):
     if not text:
