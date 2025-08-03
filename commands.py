@@ -354,7 +354,7 @@ async def list_groups_command(client: Client, message: Message):
                 except Exception:
                     group_link_display = " (Private Group)"
         except Exception as e:
-            logger.warning(f"Could not fetch chat info for group ID {group_id}: {e}")
+            logger.warning(f"Could not fetch chat info for group {group_id}: {e}")
             group_link_display = " (Info N/A)"
 
         group_list_text += (
@@ -670,24 +670,15 @@ async def toggle_linkdel_command(client: Client, message: Message):
 
     action = message.command[1].lower()
     if action == "on":
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-        )
         group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"linkdel_enabled": True}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="ही ही ही! 🤭 अब कोई भी शरारती लिंक भेजेगा, तो मैं उसे जादू से गायब कर दूंगी! 🪄 ग्रुप को एकदम साफ़-सुथरा रखना है न! 😉", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="ही ही ही! 🤭 अब कोई भी शरारती लिंक भेजेगा, तो मैं उसे जादू से गायब कर दूंगी! 🪄 ग्रुप को एकदम साफ़-सुथरा रखना है न! 😉", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Link deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
     elif action == "off":
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-        )
         group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"linkdel_enabled": False}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="ठीक है, ठीक है! मैंने अपनी 'लिंक जादू' की छड़ी रख दी है! 😇 अब आप जो चाहे लिंक भेज सकते हैं! पर ध्यान से, ओके?", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="ठीक है, ठीक है! मैंने अपनी 'लिंक जादू' की छड़ी रख दी है! 😇 अब आप जो चाहे लिंक भेज सकते हैं! पर ध्यान से, ओके?", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Link deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
     else:
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-        )
-        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/linkdel on` या `/linkdel off` यूज़ करो, प्लीज़! ✨", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/linkdel on` या `/linkdel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
     await store_message(message)
 
 @app.on_message(filters.command("biolinkdel") & filters.group)
@@ -709,24 +700,15 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
 
     action = message.command[1].lower()
     if action == "on":
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-        )
         group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"biolinkdel_enabled": True}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="हम्म... 😼 अब से जो भी **यूज़र अपनी बायो में `t.me` या `http/https` लिंक रखेगा**, मैं उसके **मैसेज को चुपचाप हटा दूंगी!** (अगर उसे `/biolink` से छूट नहीं मिली है). ग्रुप में कोई मस्ती नहीं!🤫", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="हम्म... 😼 अब से जो भी **यूज़र अपनी बायो में `t.me` या `http/https` लिंक रखेगा**, मैं उसके **मैसेज को चुपचाप हटा दूंगी!** (अगर उसे `/biolink` से छूट नहीं मिली है). ग्रुप में कोई मस्ती नहीं!🤫", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Biolink deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
     elif action == "off":
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-        )
         group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"biolinkdel_enabled": False}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="ओके डार्लिंग्स! 😇 अब मैं यूज़र्स की बायो में `t.me` और `http/https` लिंक्स को चेक करना बंद कर रही हूँ! सब फ्री-फ्री! 🎉", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="ओके डार्लिंग्स! 😇 अब मैं यूज़र्स की बायो में `t.me` और `http/https` लिंक्स को चेक करना बंद कर रही हूँ! सब फ्री-फ्री! 🎉", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Biolink deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
     else:
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-        )
-        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/biolinkdel on` या `/biolinkdel off` यूज़ करो, प्लीज़! ✨", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/biolinkdel on` या `/biolinkdel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
     await store_message(message)
 
 @app.on_message(filters.command("biolink") & filters.group)
@@ -740,10 +722,7 @@ async def allow_biolink_user_command(client: Client, message: Message):
         return
 
     if len(message.command) < 2:
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-        )
-        await send_and_auto_delete_reply(message, text="किस यूज़र को बायो-लिंक की छूट देनी है? मुझे उसकी User ID दो ना, जैसे: `/biolink 123456789` या `/biolink remove 123456789`! 😉", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="किस यूज़र को बायो-लिंक की छूट देनी है? मुझे उसकी User ID दो ना, जैसे: `/biolink 123456789` या `/biolink remove 123456789`! 😉", parse_mode=ParseMode.MARKDOWN)
         return
 
     action_or_user_id = message.command[1].lower()
@@ -753,10 +732,7 @@ async def allow_biolink_user_command(client: Client, message: Message):
         try:
             target_user_id = int(message.command[2])
             biolink_exceptions_collection.delete_one({"_id": target_user_id})
-            keyboard = InlineKeyboardMarkup(
-                [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-            )
-            await send_and_auto_delete_reply(message, text=f"ओके! ✨ यूज़र `{target_user_id}` को अब बायो में लिंक रखने की छूट नहीं मिलेगी! बाय-बाय परमिशन! 👋", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+            await send_and_auto_delete_reply(message, text=f"ओके! ✨ यूज़र `{target_user_id}` को अब बायो में लिंक रखने की छूट नहीं मिलेगी! बाय-बाय परमिशन! 👋", parse_mode=ParseMode.MARKDOWN)
             logger.info(f"Removed user {target_user_id} from biolink exceptions in group {message.chat.id}.")
         except ValueError:
             await send_and_auto_delete_reply(message, text="उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", parse_mode=ParseMode.MARKDOWN)
@@ -768,10 +744,7 @@ async def allow_biolink_user_command(client: Client, message: Message):
                 {"$set": {"allowed_by_admin": True, "added_on": datetime.now(), "credit": "by @asbhaibsr"}},
                 upsert=True
             )
-            keyboard = InlineKeyboardMarkup(
-                [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-            )
-            await send_and_auto_delete_reply(message, text=f"याय! 🎉 मैंने यूज़र `{target_user_id}` को स्पेशल परमिशन दे दी है! अब ये **अपनी बायो में `t.me` या `http/https` लिंक्स** रख पाएंगे और उनके मैसेज डिलीट नहीं होंगे! क्यूंकि एडमिन ने बोला, तो बोला!👑", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+            await send_and_auto_delete_reply(message, text=f"याय! 🎉 मैंने यूज़र `{target_user_id}` को स्पेशल परमिशन दे दी है! अब ये **अपनी बायो में `t.me` या `http/https` लिंक्स** रख पाएंगे और उनके मैसेज डिलीट नहीं होंगे! क्यूंकि एडमिन ने बोला, तो बोला!👑", parse_mode=ParseMode.MARKDOWN)
             logger.info(f"Added user {target_user_id} to biolink exceptions in group {message.chat.id}.")
         except ValueError:
             await send_and_auto_delete_reply(message, text="उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", parse_mode=ParseMode.MARKDOWN)
@@ -796,24 +769,15 @@ async def toggle_usernamedel_command(client: Client, message: Message):
 
     action = message.command[1].lower()
     if action == "on":
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-        )
         group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"usernamedel_enabled": True}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="चीं-चीं! 🐦 अब से कोई भी `@` करके किसी को भी परेशान नहीं कर पाएगा! जो करेगा, उसका मैसेज मैं फट से उड़ा दूंगी!💨 मुझे डिस्टर्बेंस पसंद नहीं! 😠", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="चीं-चीं! 🐦 अब से कोई भी `@` करके किसी को भी परेशान नहीं कर पाएगा! जो करेगा, उसका मैसेज मैं फट से उड़ा दूंगी!💨 मुझे डिस्टर्बेंस पसंद नहीं! 😠", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Username deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
     elif action == "off":
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-        )
         group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"usernamedel_enabled": False}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="ठीक है! आज से मेरी @ वाली आंखें बंद! 😴 अब आप जो चाहे @ करो! पर ज़्यादा तंग मत करना किसी को! 🥺", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="ठीक है! आज से मेरी @ वाली आंखें बंद! 😴 अब आप जो चाहे @ करो! पर ज़्यादा तंग मत करना किसी को! 🥺", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Username deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
     else:
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-        )
-        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/usernamedel on` या `/usernamedel off` यूज़ करो, प्लीज़! ✨", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/usernamedel on` या `/usernamedel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
     await store_message(message)
 
 @app.on_message(filters.command("clearall") & filters.private)
@@ -907,67 +871,3 @@ async def clear_my_data_command(client: Client, message: Message):
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.id)
-@app.on_message(filters.text & filters.group)
-async def handle_group_messages(client: Client, message: Message):
-    if not message.from_user or message.from_user.is_bot:
-        return
-    
-    group_doc = group_tracking_collection.find_one({"_id": message.chat.id})
-    if not group_doc or not group_doc.get("bot_enabled", True):
-        return
-
-    user_mention = f"[{message.from_user.first_name}](tg://user?id={message.from_user.id})"
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
-    )
-
-    # Check for biolink
-    if group_doc.get("biolinkdel_enabled", False):
-        user_id = message.from_user.id
-        is_exception = biolink_exceptions_collection.find_one({"_id": user_id})
-        if not is_exception:
-            try:
-                user_info = await client.get_chat(user_id)
-                if user_info.bio and any(link in user_info.bio for link in ["t.me/", "http://", "https://"]):
-                    warning_text = (
-                        f"**❌ Aisa Mat Karo {user_mention}! ❌**\n\n"
-                        f"<blockquote>\n"
-                        f"**🚫 Stop it!** This group does not allow **links in your bio**. Please follow the rules, otherwise I'll have to take stricter action. 🥺\n"
-                        f"</blockquote>"
-                    )
-                    await send_and_auto_delete_reply(message, text=warning_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-                    await message.delete()
-                    return
-            except Exception as e:
-                logger.warning(f"Could not get user bio for {user_id}: {e}")
-
-    # Check for general links
-    if group_doc.get("linkdel_enabled", False) and message.text:
-        if any(link in message.text for link in ["t.me/", "http://", "https://"]):
-            warning_text = (
-                f"**❌ Aisa Mat Karo {user_mention}! ❌**\n\n"
-                f"<blockquote>\n"
-                f"**🚫 Stop it!** This group does not allow **sending links**. Please follow the rules, otherwise I'll have to take stricter action. 🥺\n"
-                f"</blockquote>"
-            )
-            await send_and_auto_delete_reply(message, text=warning_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-            await message.delete()
-            return
-
-    # Check for username tags
-    if group_doc.get("usernamedel_enabled", False) and message.text:
-        if "@" in message.text and len(message.text.split()) > 1 and not message.text.startswith("@"):
-            warning_text = (
-                f"**❌ Aisa Mat Karo {user_mention}! ❌**\n\n"
-                f"<blockquote>\n"
-                f"**🚫 Stop it!** This group does not allow **tagging other users**. Please follow the rules, otherwise I'll have to take stricter action. 🥺\n"
-                f"</blockquote>"
-            )
-            await send_and_auto_delete_reply(message, text=warning_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-            await message.delete()
-            return
-
-    # If no violations, continue with your existing code
-    await store_message(client, message)
-    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    await update_group_info(message.chat.id, message.chat.title, message.chat.username)
