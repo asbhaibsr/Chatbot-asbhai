@@ -18,7 +18,8 @@ from config import (
 from utils import (
     is_on_command_cooldown, update_command_cooldown, update_group_info, update_user_info,
     get_top_earning_users, reset_monthly_earnings_manual, send_and_auto_delete_reply,
-    store_message, is_admin_or_owner, delete_after_delay_for_message, contains_link, contains_mention
+    store_message, is_admin_or_owner, delete_after_delay_for_message, contains_link, contains_mention,
+    generate_reply # यह लाइन अब मैंने जोड़ी है
 )
 
 # Import callbacks.py for callback handlers
@@ -489,7 +490,7 @@ async def start_private_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
-    await store_message(message) 
+    await store_message(client, message) # Line changed
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private start command processed for user {message.from_user.id}. (Code by @asbhaibsr)")
@@ -526,7 +527,7 @@ async def start_group_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
-    await store_message(message)
+    await store_message(client, message) # Line changed
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.")
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
@@ -591,7 +592,7 @@ async def top_users_command(client: Client, message: Message):
     
     earning_messages.append(
         "\n_Har mahine ki pehli tarikh ko yeh system reset hota hai!_\n"
-        "_Group ke niyamon ko janne ke liye `/help` ka upayog karen._"
+        "_Group ke niyamon ko janne ke liye `/help` ka upyog karen._"
     )
     keyboard = InlineKeyboardMarkup(
         [
@@ -602,7 +603,7 @@ async def top_users_command(client: Client, message: Message):
         ]
     )
     await send_and_auto_delete_reply(message, text="\n".join(earning_messages), reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-    await store_message(message)
+    await store_message(client, message) # Line changed
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Top users command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
@@ -700,7 +701,7 @@ async def broadcast_command(client: Client, message: Message):
         logger.error(f"Failed to send final broadcast summary: {final_edit_e}. Sending as new message instead.")
         await send_and_auto_delete_reply(message, text=final_message, parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    await store_message(client, message) # Line changed
     logger.info(f"Broadcast command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
 
 @app.on_message(filters.command("stats") & filters.private)
@@ -729,7 +730,7 @@ async def stats_private_command(client: Client, message: Message):
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
+    await store_message(client, message) # Line changed
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private stats command processed for user {message.from_user.id}. (Code by @asbhaibsr)")
@@ -760,7 +761,7 @@ async def stats_group_command(client: Client, message: Message):
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
+    await store_message(client, message) # Line changed
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
@@ -812,7 +813,7 @@ async def list_groups_command(client: Client, message: Message):
 
     group_list_text += "\n_Yeh data tracking database se hai, bilkul secret!_ 🤫\n**Code & System By:** @asbhaibsr"
     await send_and_auto_delete_reply(message, text=group_list_text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-    await store_message(message)
+    await store_message(client, message) # Line changed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Groups list command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
 
@@ -855,7 +856,7 @@ async def leave_group_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text=f"Group se bahar nikalte samay galti ho gayi: {e}. Oh no! 😢 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Error leaving group {group_id_str}: {e}. (Code by @asbhaibsr)")
 
-    await store_message(message)
+    await store_message(client, message) # Line changed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("cleardata") & filters.private)
@@ -922,7 +923,7 @@ async def clear_data_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="Umm, kuch delete karne ke liye mila hi nahi. Lagta hai tumne pehle hi sab clean kar diya hai! 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    await store_message(client, message) # Line changed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("deletemessage") & filters.private)
@@ -970,7 +971,7 @@ async def delete_specific_message_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is query se koi **text message** mila hi nahi apne database mein. Spelling check kar lo? 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    await store_message(client, message) # Line changed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("delsticker") & filters.private)
@@ -1026,7 +1027,7 @@ async def delete_specific_sticker_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="Umm, mujhe tumhare is query se koi **sticker** mila hi nahi apne database mein. Ya toh sticker hi nahi hai, ya percentage bahot kam hai! 🤔 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    await store_message(client, message) # Line changed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("clearearning") & filters.private)
@@ -1043,7 +1044,7 @@ async def clear_earning_command(client: Client, message: Message):
     await send_and_auto_delete_reply(message, text="💰 **Earning data successfully cleared!** Ab sab phir se zero se shuru karenge! 😉 (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
     logger.info(f"Owner {message.from_user.id} manually triggered earning data reset. (Code by @asbhaibsr)")
 
-    await store_message(message)
+    await store_message(client, message) # Line changed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("restart") & filters.private)
@@ -1095,7 +1096,7 @@ async def toggle_chat_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="Galat command, darling! `/chat on` ya `/chat off` use karo. 😉", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    await store_message(client, message) # Line changed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 @app.on_message(filters.command("linkdel") & filters.group)
@@ -1135,7 +1136,7 @@ async def toggle_linkdel_command(client: Client, message: Message):
             [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
         )
         await send_and_auto_delete_reply(message, text="Umm... mujhe samajh nahi aaya! 😕 `/linkdel on` ya `/linkdel off` use karo, please! ✨", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
+    await store_message(client, message) # Line changed
 
 @app.on_message(filters.command("biolinkdel") & filters.group)
 async def toggle_biolinkdel_command(client: Client, message: Message):
@@ -1174,7 +1175,7 @@ async def toggle_biolinkdel_command(client: Client, message: Message):
             [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
         )
         await send_and_auto_delete_reply(message, text="Umm... mujhe samajh nahi aaya! 😕 `/biolinkdel on` ya `/biolinkdel off` use karo, please! ✨", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
+    await store_message(client, message) # Line changed
 
 @app.on_message(filters.command("biolink") & filters.group)
 async def allow_biolink_user_command(client: Client, message: Message):
@@ -1222,7 +1223,7 @@ async def allow_biolink_user_command(client: Client, message: Message):
             logger.info(f"Added user {target_user_id} to biolink exceptions in group {message.chat.id}.")
         except ValueError:
             await send_and_auto_delete_reply(message, text="Umm, galat User ID! 🧐 User ID ek number hoti hai. Fir se try karo, please! 😉", parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
+    await store_message(client, message) # Line changed
 
 @app.on_message(filters.command("usernamedel") & filters.group)
 async def toggle_usernamedel_command(client: Client, message: Message):
@@ -1261,7 +1262,7 @@ async def toggle_usernamedel_command(client: Client, message: Message):
             [[InlineKeyboardButton("✨ ᴋɪᴅɴᴀᴘ ᴍᴇ ᴅᴀʀʟɪɴɢ ✨", url=f"https://t.me/{client.me.username}?startgroup=true")]]
         )
         await send_and_auto_delete_reply(message, text="Umm... mujhe samajh nahi aaya! 😕 `/usernamedel on` ya `/usernamedel off` use karo, please! ✨", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
+    await store_message(client, message) # Line changed
 
 @app.on_message(filters.command("clearall") & filters.private)
 async def clear_all_dbs_command(client: Client, message: Message):
@@ -1291,7 +1292,7 @@ async def clear_all_dbs_command(client: Client, message: Message):
         parse_mode=ParseMode.MARKDOWN
     )
     logger.info(f"Owner {message.from_user.id} initiated /clearall command. Waiting for confirmation.")
-    await store_message(message) 
+    await store_message(client, message) # Line changed
 
 @app.on_message(filters.command("clearmydata"))
 async def clear_my_data_command(client: Client, message: Message):
@@ -1351,7 +1352,7 @@ async def clear_my_data_command(client: Client, message: Message):
     except Exception as e:
         await send_and_auto_delete_reply(message, text=f"Data delete karne mein kuch gadbad ho gayi: {e}. Oh no! 😱", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Error clearing data for user {target_user_id}: {e}")
-    await store_message(message)
+    await store_message(client, message) # Line changed
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 @app.on_message(filters.text & filters.group)
