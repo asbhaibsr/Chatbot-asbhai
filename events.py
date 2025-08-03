@@ -47,6 +47,41 @@ async def send_and_auto_delete_reply(message, text, parse_mode=None, reply_marku
     asyncio.create_task(delete_after_delay_for_message(sent_message, delay))
 
 # -----------------
+# New User Notification Handler
+# -----------------
+
+@app.on_message(filters.private & filters.incoming & ~filters.me)
+async def handle_new_user_message(client: Client, message: Message):
+    # Check if this is the first message from the user
+    user_exists = user_tracking_collection.find_one({"_id": message.from_user.id})
+    
+    if not user_exists:
+        # This is a new user
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        
+        # Prepare notification message
+        notification_text = (
+            f"🆕 New User Alert!\n"
+            f"एक नया यूजर बॉट से जुड़ा है!\n\n"
+            f"• User ID: `{message.from_user.id}`\n"
+            f"• Username: @{message.from_user.username if message.from_user.username else 'N/A'}\n"
+            f"• Name: {message.from_user.first_name or ''} {message.from_user.last_name or ''}\n"
+            f"• First Message: {message.text or 'N/A (media message)'}\n"
+            f"• Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"Code By: @asbhaibsr\nUpdates: @asbhai_bsr"
+        )
+        
+        try:
+            await client.send_message(
+                chat_id=OWNER_ID,
+                text=notification_text,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.info(f"Sent new user notification to owner for user {message.from_user.id}")
+        except Exception as e:
+            logger.error(f"Failed to send new user notification: {e}")
+
+# -----------------
 # Callback Handlers
 # -----------------
 
@@ -256,8 +291,8 @@ async def left_member_handler(client: Client, message: Message):
             group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
             left_by_user = message.from_user.first_name if message.from_user else "Unknown User"
             notification_message = (
-                f"💔 **Group Left Alert!**\n"
-                f"Bot ko ek group se remove kiya gaya hai ya woh khud leave kar gaya.\n\n"
+                f"💔 Group Left Alert!\n"
+                f"बॉट को एक ग्रुप से निकाला गया है!\n\n"
                 f"**Group Name:** {group_title}\n"
                 f"**Group ID:** `{message.chat.id}`\n"
                 f"**Action By:** {left_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
