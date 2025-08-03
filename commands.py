@@ -968,6 +968,6 @@ async def handle_group_messages(client: Client, message: Message):
             return
 
     # If no violations, continue with your existing code
-    await store_message(message)
+    await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     await update_group_info(message.chat.id, message.chat.title, message.chat.username)
