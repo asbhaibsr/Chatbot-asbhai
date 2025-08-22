@@ -158,6 +158,7 @@ async def store_message(client: Client, message: Message):
     except Exception as e:
         logger.error(f"Error storing message {message.id}: {e}. (System by @asbhaibsr)")
 
+# Start of the modified function
 async def generate_reply(message: Message):
     await app.invoke(
         SetTyping(
@@ -172,51 +173,59 @@ async def generate_reply(message: Message):
 
     query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
     
-    # 1. Exact pattern dhoondhe (Owner Taught, Conversational Learning)
-    # Owner-taught responses have the highest priority
+    # 1. Check for exact patterns in owner-taught or conversational learning collections
     owner_taught_doc = owner_taught_responses_collection.find_one({"trigger": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
     if owner_taught_doc and owner_taught_doc.get('responses'):
         chosen_response_data = random.choice(owner_taught_doc['responses'])
         logger.info(f"Owner-taught reply found for '{query_content}'.")
         return chosen_response_data
     
-    # If not owner-taught, check general conversational patterns
     conversational_doc = conversational_learning_collection.find_one({"trigger": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
     if conversational_doc and conversational_doc.get('responses'):
         chosen_response_data = random.choice(conversational_doc['responses'])
         logger.info(f"Conversational reply found for '{query_content}'.")
         return chosen_response_data
 
-    # 2. Agar exact pattern nahi mila, to keywords se dhoondhe
-    logger.info(f"No specific learning pattern found for '{query_content}'. Falling back to keyword search. (Logic by @asbhaibsr)")
+    # 2. If no direct pattern, search for a matching message in the general message collection
+    logger.info(f"No specific learning pattern found for '{query_content}'. Falling back to pattern-based search in general messages.")
 
-    query_keywords = extract_keywords(query_content)
-    if query_keywords:
-        # Build a regex pattern to find documents containing any of the keywords
-        keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
-        
-        # Find messages that contain the keywords, excluding the bot's own messages
+    if message.text:
         potential_replies_cursor = messages_collection.find({
             "type": "text",
-            "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"},
+            "content": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"},
             "user_id": {"$ne": app.me.id}
         })
-        
         potential_replies = list(potential_replies_cursor)
         
         if potential_replies:
             chosen_reply = random.choice(potential_replies)
-            logger.info(f"Keyword-based fallback reply found for '{query_content}': {chosen_reply.get('content')}.")
+            logger.info(f"Pattern-based text reply found for '{query_content}': {chosen_reply.get('content')}.")
             return chosen_reply
     
-    # 3. Agar keywords se bhi kuch nahi mila, to random sticker ka use kre
-    logger.info(f"No suitable text reply found for: '{query_content}'. Falling back to random sticker.")
+    # 3. If it's a sticker, try to find a similar sticker based on its emoji
+    logger.info(f"No suitable text reply found for: '{query_content}'. Falling back to sticker search.")
     
-    # Find a random sticker from the database
-    random_sticker_doc = messages_collection.aggregate([
+    if message.sticker and message.sticker.emoji:
+        potential_sticker_replies_cursor = messages_collection.find({
+            "type": "sticker",
+            "content": {"$regex": f"^{re.escape(message.sticker.emoji)}$", "$options": "i"},
+            "user_id": {"$ne": app.me.id}
+        })
+        potential_sticker_replies = list(potential_sticker_replies_cursor)
+        if potential_sticker_replies:
+            chosen_sticker_reply = random.choice(potential_sticker_replies)
+            logger.info(f"Emoji-based sticker reply found for '{message.sticker.emoji}': {chosen_sticker_reply.get('sticker_id')}.")
+            return {"type": "sticker", "sticker_id": chosen_sticker_reply.get('sticker_id'), "content": chosen_sticker_reply.get('content')}
+    
+    # 4. Final fallback: send a completely random sticker
+    logger.info(f"No suitable text or sticker reply found. Falling back to random sticker.")
+    
+    random_sticker_doc_cursor = messages_collection.aggregate([
         {"$match": {"type": "sticker", "user_id": {"$ne": app.me.id}}},
         {"$sample": {"size": 1}}
-    ]).next()
+    ])
+    
+    random_sticker_doc = next(random_sticker_doc_cursor, None)
     
     if random_sticker_doc:
         logger.info(f"Random sticker found: {random_sticker_doc.get('sticker_id')}.")
@@ -224,7 +233,8 @@ async def generate_reply(message: Message):
     else:
         logger.warning("No stickers found in the database. No reply will be sent.")
         return {"type": None}
-    
+# End of the modified function
+
 async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None):
     try:
         group_tracking_collection.update_one(
