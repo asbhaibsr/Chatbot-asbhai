@@ -179,11 +179,22 @@ async def store_message(client: Client, message: Message):
 
     except Exception as e:
         logger.error(f"Error storing message {message.id}: {e}. (System by @asbhaibsr)")
-        
+
 # ---
 # Start of the modified generate_reply function
 # ---
 async def generate_reply(message: Message):
+    # Check if the message is a reply to another user's message
+    # if it's a reply and not a reply to the bot itself
+    if message.reply_to_message and message.reply_to_message.from_user and not message.reply_to_message.from_user.is_self:
+        logger.info(f"Skipping reply for message {message.id} as it's a reply to another user.")
+        return {"type": None}
+    
+    # Check if the message is a reply to the bot itself
+    if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
+        logger.info(f"Replying to a direct message to the bot.")
+        # Continue with the original logic to generate a reply
+    
     await app.invoke(
         SetTyping(
             peer=await app.resolve_peer(message.chat.id),
@@ -383,4 +394,3 @@ async def delete_after_delay_for_message(message_obj: Message, delay: int):
         await message_obj.delete()
     except Exception as e:
         logger.warning(f"Failed to delete message {message_obj.id} in chat {message_obj.chat.id}: {e}")
-
