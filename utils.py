@@ -259,7 +259,7 @@ async def update_user_info(user_id: int, username: str, first_name: str):
     try:
         user_tracking_collection.update_one(
             {"_id": user_id},
-            {"$set": {"username": username, "first_name": first_name, "last_active": datetime.2ow()},
+            {"$set": {"username": username, "first_name": first_name, "last_active": datetime.now()},
              "$setOnInsert": {"joined_on": datetime.now(), "credit": "by @asbhaibsr"}},
             upsert=True
         )
