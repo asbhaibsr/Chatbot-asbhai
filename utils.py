@@ -1,5 +1,3 @@
-# utlis.py
-
 import re
 import asyncio
 import time
@@ -66,8 +64,6 @@ async def is_admin_or_owner(client: Client, chat_id: int, user_id: int):
             return False
         logger.error(f"Error checking admin status for user {user_id} in chat {chat_id}: {e}")
     return False
-
-# `check_and_leave_if_not_admin` function ko yahan se hata diya gaya hai.
 
 def contains_link(text: str):
     if not text:
@@ -176,9 +172,7 @@ async def generate_reply(message: Message):
 
     query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
     
-    if message.from_user and message.from_user.id == OWNER_ID:
-        pass
-
+    # 1. Exact pattern dhoondhe
     if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
         original_bot_message_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
         if original_bot_message_content:
@@ -200,7 +194,8 @@ async def generate_reply(message: Message):
         logger.info(f"Conversational reply found for '{query_content}'.")
         return chosen_response_data
 
-    logger.info(f"No specific learning pattern found for '{query_content}'. Falling back to old keyword search if necessary. (Logic by @asbhaibsr)")
+    # 2. Agar exact pattern nahi mila, to keywords se dhoondhe
+    logger.info(f"No specific learning pattern found for '{query_content}'. Falling back to keyword search. (Logic by @asbhaibsr)")
 
     query_keywords = extract_keywords(query_content)
     if query_keywords:
@@ -224,8 +219,9 @@ async def generate_reply(message: Message):
         chosen_reply = random.choice(potential_replies)
         logger.info(f"Keyword-based fallback reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}.")
         return chosen_reply
-
-    logger.info(f"No suitable reply found for: '{query_content}'.")
+    
+    # 3. Agar keywords se bhi kuch nahi mila, to reply na kare
+    logger.info(f"No suitable reply found for: '{query_content}'. No reply will be sent.")
     return None
 
 async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None):
