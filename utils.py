@@ -168,26 +168,19 @@ async def generate_reply(message: Message):
     await asyncio.sleep(0.5)
 
     if not message.text and not message.sticker:
-        return
+        return {"type": None}
 
     query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
     
-    # 1. Exact pattern dhoondhe
-    if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
-        original_bot_message_content = message.reply_to_message.text if message.reply_to_message.text else (message.reply_to_message.sticker.emoji if message.reply_to_message.sticker else "")
-        if original_bot_message_content:
-            conversational_doc = conversational_learning_collection.find_one({"trigger": {"$regex": f"^{re.escape(original_bot_message_content)}$", "$options": "i"}})
-            if conversational_doc and conversational_doc.get('responses'):
-                chosen_response_data = random.choice(conversational_doc['responses'])
-                logger.info(f"Bot-replied contextual reply found for '{original_bot_message_content}'.")
-                return chosen_response_data
-    
+    # 1. Exact pattern dhoondhe (Owner Taught, Conversational Learning)
+    # Owner-taught responses have the highest priority
     owner_taught_doc = owner_taught_responses_collection.find_one({"trigger": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
     if owner_taught_doc and owner_taught_doc.get('responses'):
         chosen_response_data = random.choice(owner_taught_doc['responses'])
         logger.info(f"Owner-taught reply found for '{query_content}'.")
         return chosen_response_data
     
+    # If not owner-taught, check general conversational patterns
     conversational_doc = conversational_learning_collection.find_one({"trigger": {"$regex": f"^{re.escape(query_content)}$", "$options": "i"}})
     if conversational_doc and conversational_doc.get('responses'):
         chosen_response_data = random.choice(conversational_doc['responses'])
@@ -199,31 +192,39 @@ async def generate_reply(message: Message):
 
     query_keywords = extract_keywords(query_content)
     if query_keywords:
+        # Build a regex pattern to find documents containing any of the keywords
         keyword_regex = "|".join([re.escape(kw) for kw in query_keywords])
-        general_replies_cursor = messages_collection.find({
-            "type": {"$in": ["text", "sticker"]},
+        
+        # Find messages that contain the keywords, excluding the bot's own messages
+        potential_replies_cursor = messages_collection.find({
+            "type": "text",
             "content": {"$regex": f".*({keyword_regex}).*", "$options": "i"},
             "user_id": {"$ne": app.me.id}
         })
-    else:
-        general_replies_cursor = messages_collection.find({
-            "type": {"$in": ["text", "sticker"]},
-            "user_id": {"$ne": app.me.id}
-        })
-
-    potential_replies = []
-    for doc in general_replies_cursor:
-        potential_replies.append(doc)
-
-    if potential_replies:
-        chosen_reply = random.choice(potential_replies)
-        logger.info(f"Keyword-based fallback reply found for '{query_content}': {chosen_reply.get('content') or chosen_reply.get('sticker_id')}.")
-        return chosen_reply
+        
+        potential_replies = list(potential_replies_cursor)
+        
+        if potential_replies:
+            chosen_reply = random.choice(potential_replies)
+            logger.info(f"Keyword-based fallback reply found for '{query_content}': {chosen_reply.get('content')}.")
+            return chosen_reply
     
-    # 3. Agar keywords se bhi kuch nahi mila, to reply na kare
-    logger.info(f"No suitable reply found for: '{query_content}'. No reply will be sent.")
-    return None
-
+    # 3. Agar keywords se bhi kuch nahi mila, to random sticker ka use kre
+    logger.info(f"No suitable text reply found for: '{query_content}'. Falling back to random sticker.")
+    
+    # Find a random sticker from the database
+    random_sticker_doc = messages_collection.aggregate([
+        {"$match": {"type": "sticker", "user_id": {"$ne": app.me.id}}},
+        {"$sample": {"size": 1}}
+    ]).next()
+    
+    if random_sticker_doc:
+        logger.info(f"Random sticker found: {random_sticker_doc.get('sticker_id')}.")
+        return {"type": "sticker", "sticker_id": random_sticker_doc.get('sticker_id'), "content": random_sticker_doc.get('content')}
+    else:
+        logger.warning("No stickers found in the database. No reply will be sent.")
+        return {"type": None}
+    
 async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None):
     try:
         group_tracking_collection.update_one(
@@ -304,7 +305,7 @@ async def can_reply_to_chat(chat_id):
 def update_message_reply_cooldown(chat_id):
     chat_message_cooldowns[chat_id] = time.time()
 
-async def send_and_auto_delete_reply(message: Message, text: str = None, photo: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
+async def send_and_auto_delete_reply(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
     sent_message = None
     user_info_str = ""
     if message.from_user:
@@ -335,6 +336,10 @@ async def send_and_auto_delete_reply(message: Message, text: str = None, photo: 
             reply_markup=reply_markup,
             parse_mode=parse_mode,
             disable_web_page_preview=disable_web_page_preview
+        )
+    elif sticker:
+        sent_message = await message.reply_sticker(
+            sticker=sticker
         )
     else:
         logger.warning(f"send_and_auto_delete_reply called with no text or photo for message {message.id}.")
