@@ -90,24 +90,42 @@ async def store_message(client: Client, message: Message):
         # New conversational learning logic
         if message.reply_to_message and message.reply_to_message.from_user and not message.reply_to_message.from_user.is_bot:
             replied_to_message = message.reply_to_message
-            trigger_content = replied_to_message.text if replied_to_message.text else replied_to_message.sticker.file_id
-            trigger_type = "text" if replied_to_message.text else "sticker"
-
-            reply_content = message.text if message.text else message.sticker.file_id
-            reply_type = "text" if message.text else "sticker"
             
-            conversational_learning_collection.update_one(
-                {"trigger_content": trigger_content, "trigger_type": trigger_type},
-                {"$push": {
-                    "responses": {
-                        "content": reply_content,
-                        "type": reply_type,
-                        "timestamp": datetime.now()
-                    }
-                }},
-                upsert=True
-            )
-            logger.info(f"Conversational pattern stored: '{trigger_content}' -> '{reply_content}'.")
+            trigger_content = None
+            trigger_type = None
+
+            if replied_to_message.text:
+                trigger_content = replied_to_message.text
+                trigger_type = "text"
+            elif replied_to_message.sticker:
+                trigger_content = replied_to_message.sticker.file_id
+                trigger_type = "sticker"
+            
+            if trigger_content and trigger_type:
+                reply_content = None
+                reply_type = None
+                
+                if message.text:
+                    reply_content = message.text
+                    reply_type = "text"
+                elif message.sticker:
+                    reply_content = message.sticker.file_id
+                    reply_type = "sticker"
+                
+                if reply_content and reply_type:
+                    conversational_learning_collection.update_one(
+                        {"trigger_content": trigger_content, "trigger_type": trigger_type},
+                        {"$push": {
+                            "responses": {
+                                "content": reply_content,
+                                "type": reply_type,
+                                "timestamp": datetime.now()
+                            }
+                        }},
+                        upsert=True
+                    )
+                    logger.info(f"Conversational pattern stored: '{trigger_content}' -> '{reply_content}'.")
+
 
         message_data = {
             "message_id": message.id,
@@ -180,20 +198,10 @@ async def store_message(client: Client, message: Message):
     except Exception as e:
         logger.error(f"Error storing message {message.id}: {e}. (System by @asbhaibsr)")
 
-# ---
-# Start of the modified generate_reply function
-# ---
 async def generate_reply(message: Message):
-    # Check if the message is a reply to another user's message
-    # if it's a reply and not a reply to the bot itself
     if message.reply_to_message and message.reply_to_message.from_user and not message.reply_to_message.from_user.is_self:
         logger.info(f"Skipping reply for message {message.id} as it's a reply to another user.")
         return {"type": None}
-    
-    # Check if the message is a reply to the bot itself
-    if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_self:
-        logger.info(f"Replying to a direct message to the bot.")
-        # Continue with the original logic to generate a reply
     
     await app.invoke(
         SetTyping(
@@ -206,7 +214,7 @@ async def generate_reply(message: Message):
     if not message.text and not message.sticker:
         return {"type": None}
 
-    query_content = message.text if message.text else (message.sticker.emoji if message.sticker else "")
+    query_content = message.text if message.text else (message.sticker.file_id if message.sticker else "")
     query_type = "text" if message.text else "sticker"
 
     # 1. Search for a conversational learning pattern (exact match)
@@ -222,17 +230,18 @@ async def generate_reply(message: Message):
 
     # 2. Search for a conversational learning pattern (partial match)
     if message.text:
-        # Split the message and take the first few words
-        partial_query = " ".join(query_content.split()[:3])
-        if len(partial_query) > 0:
-            conversational_doc = conversational_learning_collection.find_one({
-                "trigger_content": {"$regex": f"^{re.escape(partial_query)}.*", "$options": "i"},
-                "trigger_type": "text"
-            })
-            if conversational_doc and conversational_doc.get('responses'):
-                chosen_response_data = random.choice(conversational_doc['responses'])
-                logger.info(f"Partial conversational pattern reply found for '{query_content}'.")
-                return chosen_response_data
+        words = query_content.split()
+        for i in range(min(5, len(words)), 0, -1):
+            partial_query = " ".join(words[:i])
+            if len(partial_query) > 0:
+                conversational_doc = conversational_learning_collection.find_one({
+                    "trigger_content": {"$regex": f"^{re.escape(partial_query)}.*", "$options": "i"},
+                    "trigger_type": "text"
+                })
+                if conversational_doc and conversational_doc.get('responses'):
+                    chosen_response_data = random.choice(conversational_doc['responses'])
+                    logger.info(f"Partial conversational pattern reply found for '{query_content}'.")
+                    return chosen_response_data
     
     # 3. Final fallback: send a completely random sticker
     logger.info("No suitable pattern found. Falling back to random sticker.")
@@ -250,9 +259,6 @@ async def generate_reply(message: Message):
     else:
         logger.warning("No stickers found in the database. No reply will be sent.")
         return {"type": None}
-# ---
-# End of the modified generate_reply function
-# ---
 
 async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None):
     try:
@@ -394,3 +400,4 @@ async def delete_after_delay_for_message(message_obj: Message, delay: int):
         await message_obj.delete()
     except Exception as e:
         logger.warning(f"Failed to delete message {message_obj.id} in chat {message_obj.chat.id}: {e}")
+
