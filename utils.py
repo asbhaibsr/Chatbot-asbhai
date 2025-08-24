@@ -340,3 +340,63 @@ async def can_reply_to_chat(chat_id):
 def update_message_reply_cooldown(chat_id):
     chat_message_cooldowns[chat_id] = time.time()
 
+async def send_and_auto_delete_reply(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
+    sent_message = None
+    user_info_str = ""
+    if message.from_user:
+        if message.from_user.username:
+            user_info_str = f" (द्वारा: @{message.from_user.username})"
+        else:
+            user_info_str = f" (द्वारा: {message.from_user.first_name})"
+
+    text_to_send = text
+    if message.command and text:
+        command_name = message.command[0]
+        text_to_send = f"**कमांड:** `{command_name}`{user_info_str}\n\n{text}"
+    elif text and message.chat.type == ChatType.PRIVATE and message.from_user and message.from_user.id == OWNER_ID:
+        pass
+    elif text and message.from_user:
+        pass
+
+    if photo:
+        sent_message = await message.reply_photo(
+            photo=photo,
+            caption=text_to_send,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+    elif text:
+        sent_message = await message.reply_text(
+            text_to_send,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            disable_web_page_preview=disable_web_page_preview
+        )
+    elif sticker:
+        sent_message = await message.reply_sticker(
+            sticker=sticker
+        )
+    else:
+        logger.warning(f"send_and_auto_delete_reply called with no text or photo for message {message.id}.")
+        return None
+
+    if message.command and message.command[0] == "start":
+        return sent_message
+
+    async def delete_after_delay_task():
+        await asyncio.sleep(180)
+        try:
+            if sent_message:
+                await sent_message.delete()
+        except Exception as e:
+            logger.warning(f"Failed to delete message {sent_message.id if sent_message else 'N/A'} in chat {message.chat.id}: {e}")
+
+    asyncio.create_task(delete_after_delay_task())
+    return sent_message
+
+async def delete_after_delay_for_message(message_obj: Message, delay: int):
+    await asyncio.sleep(delay)
+    try:
+        await message_obj.delete()
+    except Exception as e:
+        logger.warning(f"Failed to delete message {message_obj.id} in chat {message_obj.chat.id}: {e}")
