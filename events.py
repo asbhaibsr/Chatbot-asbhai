@@ -14,7 +14,7 @@ from config import (
 )
 from utils import (
     update_group_info, update_user_info, store_message, generate_reply,
-    is_admin_or_owner, contains_link, contains_mention
+    is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message
 )
 
 # -----------------
@@ -45,13 +45,6 @@ async def send_and_auto_delete_reply(message, text, parse_mode=None, reply_marku
         disable_web_page_preview=disable_web_page_preview
     )
     asyncio.create_task(delete_after_delay_for_message(sent_message, delay))
-
-async def delete_after_delay_for_message(message_obj: Message, delay: int):
-    await asyncio.sleep(delay)
-    try:
-        await message_obj.delete()
-    except Exception as e:
-        logger.warning(f"Failed to delete message {message_obj.id} in chat {message_obj.chat.id}: {e}")
 
 # -----------------
 # New User Notification Handler
@@ -432,6 +425,8 @@ async def handle_message_and_reply(client: Client, message: Message):
                 time_since_last_reply = (current_time - last_reply_time[chat_id]).total_seconds()
                 if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
                     logger.info(f"Chat {chat_id} is in cooldown. Skipping reply for message {message.id}.")
+                    # Message ko store karo, par reply mat bhejo
+                    await store_message(client, message)
                     return # Cooldown hai, isliye function se bahar nikal jao
             
             # Message ko store karo
@@ -483,9 +478,15 @@ async def handle_message_and_reply(client: Client, message: Message):
                         logger.info(f"Learned conversational pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
 
             logger.info(f"Attempting to generate reply for chat {message.chat.id}.")
+            
+            # Reply generate karne ki koshish karein
             reply_doc = await generate_reply(message)
 
-            if reply_doc:
+            # Ab cooldown time update karein, chahe reply mila ho ya na mila ho
+            last_reply_time[chat_id] = datetime.now()
+            logger.info(f"Cooldown updated for chat {chat_id}. Next reply possible after {REPLY_COOLDOWN_SECONDS} seconds.")
+
+            if reply_doc and reply_doc.get("type"):
                 try:
                     if reply_doc.get("type") == "text":
                         await message.reply_text(reply_doc["content"], parse_mode=ParseMode.MARKDOWN)
@@ -495,11 +496,6 @@ async def handle_message_and_reply(client: Client, message: Message):
                         logger.info(f"Replied with sticker: {reply_doc['sticker_id']}.")
                     else:
                         logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}.")
-                    
-                    # Cooldown update: Successful reply ke baad samay update karo
-                    last_reply_time[chat_id] = datetime.now()
-                    logger.info(f"Reply sent to chat {chat_id}. Cooldown started for {REPLY_COOLDOWN_SECONDS} seconds.")
-                    
                 except Exception as e:
                     if "CHAT_WRITE_FORBIDDEN" in str(e):
                         logger.error(f"Permission error: Bot cannot send messages in chat {message.chat.id}. Leaving group.")
@@ -512,4 +508,3 @@ async def handle_message_and_reply(client: Client, message: Message):
                         logger.error(f"Error sending reply for message {message.id}: {e}.")
             else:
                 logger.info("No suitable reply found.")
-
