@@ -46,6 +46,13 @@ async def send_and_auto_delete_reply(message, text, parse_mode=None, reply_marku
     )
     asyncio.create_task(delete_after_delay_for_message(sent_message, delay))
 
+async def delete_after_delay_for_message(message_obj: Message, delay: int):
+    await asyncio.sleep(delay)
+    try:
+        await message_obj.delete()
+    except Exception as e:
+        logger.warning(f"Failed to delete message {message_obj.id} in chat {message_obj.chat.id}: {e}")
+
 # -----------------
 # New User Notification Handler
 # -----------------
@@ -505,3 +512,4 @@ async def handle_message_and_reply(client: Client, message: Message):
                         logger.error(f"Error sending reply for message {message.id}: {e}.")
             else:
                 logger.info("No suitable reply found.")
+
