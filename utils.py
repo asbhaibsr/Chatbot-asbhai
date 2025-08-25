@@ -203,6 +203,7 @@ async def generate_reply(message: Message):
         logger.info(f"Skipping reply for message {message.id} as it's a reply to another user.")
         return {"type": None}
     
+    # Wait to simulate typing
     await app.invoke(
         SetTyping(
             peer=await app.resolve_peer(message.chat.id),
@@ -217,33 +218,43 @@ async def generate_reply(message: Message):
     query_content = message.text if message.text else (message.sticker.file_id if message.sticker else "")
     query_type = "text" if message.text else "sticker"
 
-    # 1. Search for a conversational learning pattern (exact match)
-    conversational_doc = conversational_learning_collection.find_one({
-        "trigger_content": query_content,
-        "trigger_type": query_type
-    })
-    
-    if conversational_doc and conversational_doc.get('responses'):
-        chosen_response_data = random.choice(conversational_doc['responses'])
-        logger.info(f"Conversational pattern reply found for '{query_content}'.")
-        return chosen_response_data
+    # Rule 1: Exact match for a single message
+    if len(query_content.split()) <= 3:
+        conversational_doc = conversational_learning_collection.find_one({
+            "trigger_content": query_content,
+            "trigger_type": query_type
+        })
+        if conversational_doc and conversational_doc.get('responses'):
+            chosen_response_data = random.choice(conversational_doc['responses'])
+            logger.info(f"Exact match reply found for '{query_content}'.")
+            return chosen_response_data
 
-    # 2. Search for a conversational learning pattern (partial match)
+    # Rule 2: Partial match (first 2-3 words) for longer messages
     if message.text:
         words = query_content.split()
-        for i in range(min(5, len(words)), 0, -1):
-            partial_query = " ".join(words[:i])
-            if len(partial_query) > 0:
-                conversational_doc = conversational_learning_collection.find_one({
-                    "trigger_content": {"$regex": f"^{re.escape(partial_query)}.*", "$options": "i"},
-                    "trigger_type": "text"
-                })
-                if conversational_doc and conversational_doc.get('responses'):
-                    chosen_response_data = random.choice(conversational_doc['responses'])
-                    logger.info(f"Partial conversational pattern reply found for '{query_content}'.")
-                    return chosen_response_data
+        if len(words) > 3:
+            # Check for 3 words, then 2 words
+            for i in [3, 2]:
+                if len(words) >= i:
+                    partial_query = " ".join(words[:i])
+                    # Using a regex to find documents that start with the partial query
+                    docs = list(conversational_learning_collection.find({
+                        "trigger_content": {"$regex": f"^{re.escape(partial_query)}.*", "$options": "i"},
+                        "trigger_type": "text"
+                    }))
+
+                    if docs:
+                        # Find all possible responses from the matching documents
+                        all_responses = []
+                        for doc in docs:
+                            all_responses.extend(doc.get('responses', []))
+                        
+                        if all_responses:
+                            chosen_response_data = random.choice(all_responses)
+                            logger.info(f"Partial conversational pattern reply found for '{query_content}' using '{partial_query}'.")
+                            return chosen_response_data
     
-    # 3. Final fallback: send a completely random sticker
+    # Rule 3: Final fallback to a random sticker or a pre-defined generic reply
     logger.info("No suitable pattern found. Falling back to random sticker.")
     
     random_sticker_doc_cursor = messages_collection.aggregate([
@@ -257,8 +268,10 @@ async def generate_reply(message: Message):
         logger.info(f"Random sticker found: {random_sticker_doc.get('sticker_id')}.")
         return {"type": "sticker", "sticker_id": random_sticker_doc.get('sticker_id'), "content": random_sticker_doc.get('content')}
     else:
-        logger.warning("No stickers found in the database. No reply will be sent.")
-        return {"type": None}
+        logger.warning("No stickers found in the database. Sending a generic text reply.")
+        # Fallback to a generic text reply if no stickers are found
+        generic_replies = ["Han bolo.", "Kya hua?", "Main sun raha hu.", "Ji, boliye."]
+        return {"type": "text", "content": random.choice(generic_replies)}
 
 async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None):
     try:
