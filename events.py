@@ -21,16 +21,9 @@ from utils import (
 # Cooldown Logic
 # -----------------
 
-# Ek dictionary jo har group ke liye aakhri reply ka samay store karega.
-# Yeh bot ko spamming se bachayega.
+# Cooldown logic for group replies
 last_reply_time = {}
-
-# Kitne seconds tak bot ek group mein reply nahi karega.
-# Aap is samay ko apni zaroorat ke hisaab se badal sakte hain.
 REPLY_COOLDOWN_SECONDS = 8
-
-# Ek dictionary jo har group ke liye ek lock rakhegi.
-# Yeh ensure karega ki ek group mein ek samay par ek hi reply process ho.
 cooldown_locks = {}
 
 # -----------------
@@ -52,14 +45,11 @@ async def send_and_auto_delete_reply(message, text, parse_mode=None, reply_marku
 
 @app.on_message(filters.private & filters.incoming & ~filters.me)
 async def handle_new_user_message(client: Client, message: Message):
-    # Check if this is the first message from the user
     user_exists = user_tracking_collection.find_one({"_id": message.from_user.id})
     
     if not user_exists:
-        # This is a new user
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
         
-        # Prepare notification message
         notification_text = (
             f"🆕 New User Alert!\n"
             f"एक नया यूजर बॉट से जुड़ा है!\n\n"
@@ -434,52 +424,9 @@ async def handle_message_and_reply(client: Client, message: Message):
 
             logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
 
-            if message.from_user and message.from_user.id == OWNER_ID and message.reply_to_message:
-                replied_to_msg = message.reply_to_message
-                if replied_to_msg.from_user and replied_to_msg.from_user.is_self:
-                    trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else None)
-                    
-                    if trigger_content:
-                        response_data = {
-                            "message_id": message.id, "user_id": message.from_user.id,
-                            "username": message.from_user.username, "first_name": message.from_user.first_name,
-                            "chat_id": message.chat.id, "chat_type": message.chat.type.name,
-                            "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
-                            "timestamp": datetime.now(), "credits": "Code by @asbhaibsr"
-                        }
-                        if message.text: response_data["type"] = "text"; response_data["content"] = message.text
-                        elif message.sticker: response_data["type"] = "sticker"; response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""; response_data["sticker_id"] = message.sticker.file_id
-                        
-                        owner_taught_responses_collection.update_one(
-                            {"trigger": trigger_content}, {"$addToSet": {"responses": response_data}}, upsert=True
-                        )
-                        await message.reply_text("मालिक! 👑 मैंने यह बातचीत सीख ली है और अब इसे याद रखूंगी! 😉", parse_mode=ParseMode.MARKDOWN)
-                        logger.info(f"Owner {OWNER_ID} taught a new pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
-
-            if message.reply_to_message and message.from_user and message.from_user.id != OWNER_ID:
-                replied_to_msg = message.reply_to_message
-                if replied_to_msg.from_user and (replied_to_msg.from_user.is_self or (not replied_to_msg.from_user.is_bot and replied_to_msg.from_user.id != message.from_user.id)):
-                    trigger_content = replied_to_msg.text if replied_to_msg.text else (replied_to_msg.sticker.emoji if replied_to_msg.sticker else "")
-                    
-                    if trigger_content:
-                        response_data = {
-                            "message_id": message.id, "user_id": message.from_user.id,
-                            "username": message.from_user.username, "first_name": message.from_user.first_name,
-                            "chat_id": message.chat.id, "chat_type": message.chat.type.name,
-                            "chat_title": message.chat.title if message.chat.type != ChatType.PRIVATE else None,
-                            "timestamp": datetime.now(), "credits": "Code by @asbhaibsr"
-                        }
-                        if message.text: response_data["type"] = "text"; response_data["content"] = message.text
-                        elif message.sticker: response_data["type"] = "sticker"; response_data["content"] = message.sticker.emoji if message.sticker.emoji else ""; response_data["sticker_id"] = message.sticker.file_id
-                        
-                        conversational_learning_collection.update_one(
-                            {"trigger": trigger_content}, {"$addToSet": {"responses": response_data}}, upsert=True
-                        )
-                        logger.info(f"Learned conversational pattern: '{trigger_content}' -> '{response_data.get('content') or response_data.get('sticker_id')}'")
-
+            # New: Generate reply from the centralized learning system in util.py
             logger.info(f"Attempting to generate reply for chat {message.chat.id}.")
             
-            # Reply generate karne ki koshish karein
             reply_doc = await generate_reply(message)
 
             # Ab cooldown time update karein, chahe reply mila ho ya na mila ho
