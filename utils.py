@@ -23,6 +23,50 @@ from config import (
 # Global dictionary to track the last earning message time for each user
 earning_cooldowns = {}
 
+# New: Global dictionary to store chat context (last 5 messages)
+chat_contexts = {}
+MAX_CONTEXT_SIZE = 5
+
+def build_markov_chain(messages):
+    """ Builds a simple Markov chain from a list of messages. """
+    chain = {}
+    words = []
+    for msg in messages:
+        if isinstance(msg, dict) and msg.get('content') and msg.get('type') == 'text':
+            words.extend(re.findall(r'\b\w+\b', msg['content'].lower()))
+    
+    if not words or len(words) < 2:
+        return {}
+
+    for i in range(len(words) - 1):
+        current_word = words[i]
+        next_word = words[i+1]
+        
+        if current_word not in chain:
+            chain[current_word] = []
+        chain[current_word].append(next_word)
+        
+    return chain
+
+def generate_sentence(chain, length=10):
+    """ Generates a sentence from the Markov chain. """
+    if not chain:
+        return ""
+    
+    start_word = random.choice(list(chain.keys()))
+    sentence = [start_word]
+
+    current_word = start_word
+    for _ in range(length - 1):
+        if current_word in chain and chain[current_word]:
+            next_word = random.choice(chain[current_word])
+            sentence.append(next_word)
+            current_word = next_word
+        else:
+            break
+            
+    return " ".join(sentence)
+
 def extract_keywords(text):
     if not text:
         return []
@@ -87,6 +131,21 @@ async def store_message(client: Client, message: Message):
             logger.debug(f"Skipping general storage for command: {message.text}. (Code by @asbhaibsr)")
             return
         
+        # New: Store message in the in-memory chat context
+        chat_id = message.chat.id
+        if chat_id not in chat_contexts:
+            chat_contexts[chat_id] = []
+        
+        # Store only the message content and type
+        message_to_store = {
+            "content": message.text if message.text else message.sticker.file_id,
+            "type": "text" if message.text else "sticker"
+        }
+        
+        chat_contexts[chat_id].append(message_to_store)
+        if len(chat_contexts[chat_id]) > MAX_CONTEXT_SIZE:
+            chat_contexts[chat_id].pop(0)
+
         # New conversational learning logic
         if message.reply_to_message and message.reply_to_message.from_user and not message.reply_to_message.from_user.is_bot:
             replied_to_message = message.reply_to_message
@@ -218,6 +277,24 @@ async def generate_reply(message: Message):
     query_content = message.text if message.text else (message.sticker.file_id if message.sticker else "")
     query_type = "text" if message.text else "sticker"
 
+    # New: Check for conversational context
+    chat_id = message.chat.id
+    current_context = chat_contexts.get(chat_id, [])
+    
+    if current_context:
+        # Check if the query matches the last message in the context
+        last_message = current_context[-1]
+        if last_message.get("content") == query_content:
+            # If so, we can try to find a follow-up response in the DB
+            conversational_doc = conversational_learning_collection.find_one({
+                "trigger_content": last_message["content"],
+                "trigger_type": last_message["type"]
+            })
+            if conversational_doc and conversational_doc.get('responses'):
+                chosen_response_data = random.choice(conversational_doc['responses'])
+                logger.info(f"Contextual reply found for '{query_content}'.")
+                return chosen_response_data
+
     # Rule 1: Exact match for a single message
     if len(query_content.split()) <= 3:
         conversational_doc = conversational_learning_collection.find_one({
@@ -254,7 +331,16 @@ async def generate_reply(message: Message):
                             logger.info(f"Partial conversational pattern reply found for '{query_content}' using '{partial_query}'.")
                             return chosen_response_data
     
-    # Rule 3: Final fallback to a random sticker or a pre-defined generic reply
+    # New Rule 3: Dynamic reply using Markov chain from chat history
+    if current_context and random.random() < 0.3:  # 30% chance to generate a dynamic reply
+        chain = build_markov_chain(current_context)
+        if chain:
+            dynamic_reply_text = generate_sentence(chain)
+            if dynamic_reply_text:
+                logger.info("Generating dynamic reply from chat history.")
+                return {"type": "text", "content": dynamic_reply_text}
+
+    # Final fallback to a random sticker or a pre-defined generic reply
     logger.info("No suitable pattern found. Falling back to random sticker.")
     
     random_sticker_doc_cursor = messages_collection.aggregate([
