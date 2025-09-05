@@ -356,7 +356,7 @@ async def generate_reply(message: Message):
     else:
         logger.warning("No stickers found in the database. Sending a generic text reply.")
         # Fallback to a generic text reply if no stickers are found
-        generic_replies = ["Han bolo.", "Kya hua?", "Main sun raha hu.", "Ji, boliye."]
+        generic_replies = ["Han bolo.", "Kya hua?", "Main sun rahi hu.", "kiya haal hai baby.", "tum thore se pagal ho kiya", "kiya ho raha hai", "baby", "janu", "Ji, boliye."]
         return {"type": "text", "content": random.choice(generic_replies)}
 
 async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None):
