@@ -15,8 +15,6 @@ from pyrogram.raw.types import SendMessageTypingAction
 # New imports for advanced AI
 from textblob import TextBlob
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
-from sentence_transformers import SentenceTransformer, util
-import numpy as np
 
 from config import (
     messages_collection, owner_taught_responses_collection, conversational_learning_collection,
@@ -33,10 +31,9 @@ earning_cooldowns = {}
 chat_contexts = {}
 MAX_CONTEXT_SIZE = 5
 
-# Initialize sentiment analyzer and sentence transformer
+# Initialize sentiment analyzer
 analyser = SentimentIntensityAnalyzer()
-model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-# You can use 'distilbert-base-nli-stsb-mean-tokens' for English-only better performance
+# You only need to initialize VADER once.
 
 def get_sentiment(text):
     if not text:
@@ -46,7 +43,6 @@ def get_sentiment(text):
     blob_sentiment = TextBlob(text).sentiment.polarity
     vader_sentiment = analyser.polarity_scores(text)['compound']
     
-    # Combine or choose based on your preference. VADER is often better for social media-like text.
     if vader_sentiment >= 0.05:
         return "positive"
     elif vader_sentiment <= -0.05:
@@ -55,7 +51,6 @@ def get_sentiment(text):
         return "neutral"
 
 def build_markov_chain(messages):
-    """ Builds a simple Markov chain from a list of messages. """
     chain = {}
     words = []
     for msg in messages:
@@ -76,7 +71,6 @@ def build_markov_chain(messages):
     return chain
 
 def generate_sentence(chain, length=10):
-    """ Generates a sentence from the Markov chain. """
     if not chain:
         return ""
     
@@ -158,12 +152,11 @@ async def store_message(client: Client, message: Message):
             logger.debug(f"Skipping general storage for command: {message.text}. (Code by @asbhaibsr)")
             return
         
-        # New: Store message in the in-memory chat context
+        # Store message in the in-memory chat context
         chat_id = message.chat.id
         if chat_id not in chat_contexts:
             chat_contexts[chat_id] = []
         
-        # Store only the message content and type
         message_to_store = {
             "content": message.text if message.text else message.sticker.file_id,
             "type": "text" if message.text else "sticker"
@@ -173,7 +166,7 @@ async def store_message(client: Client, message: Message):
         if len(chat_contexts[chat_id]) > MAX_CONTEXT_SIZE:
             chat_contexts[chat_id].pop(0)
 
-        # New conversational learning logic
+        # Conversational learning logic
         if message.reply_to_message and message.reply_to_message.from_user and not message.reply_to_message.from_user.is_bot:
             replied_to_message = message.reply_to_message
             
@@ -303,7 +296,7 @@ async def generate_reply(message: Message):
     query_content = message.text if message.text else (message.sticker.file_id if message.sticker else "")
     query_type = "text" if message.text else "sticker"
     
-    # New: 1. Sentiment-based replies
+    # 1. Sentiment-based replies
     if message.text:
         sentiment = get_sentiment(message.text)
         if sentiment == "negative":
@@ -314,37 +307,6 @@ async def generate_reply(message: Message):
             ]
             return {"type": "text", "content": random.choice(sad_replies)}
         
-    # New: 2. Semantic Similarity Search (Using SentenceTransformer)
-    if message.text:
-        # Get all stored text messages for comparison
-        stored_texts = list(messages_collection.find({"type": "text"}, {"content": 1, "_id": 0}))
-        
-        if stored_texts:
-            stored_sentences = [d['content'] for d in stored_texts if d.get('content')]
-            if stored_sentences:
-                # Calculate embeddings for the user's message and stored messages
-                user_embedding = model.encode(message.text, convert_to_tensor=True)
-                stored_embeddings = model.encode(stored_sentences, convert_to_tensor=True)
-                
-                # Find the most similar message
-                cosine_scores = util.pytorch_cos_sim(user_embedding, stored_embeddings)[0]
-                best_match_index = np.argmax(cosine_scores)
-                similarity_score = cosine_scores[best_match_index].item()
-                
-                # Set a similarity threshold (e.g., 0.6)
-                if similarity_score > 0.6:
-                    matched_message_content = stored_sentences[best_match_index]
-                    # Find a good reply to that matched message from conversational learning
-                    conversational_doc = conversational_learning_collection.find_one({
-                        "trigger_content": matched_message_content,
-                        "trigger_type": "text"
-                    })
-                    
-                    if conversational_doc and conversational_doc.get('responses'):
-                        chosen_response_data = random.choice(conversational_doc['responses'])
-                        logger.info(f"Semantic similarity reply found. Matched: '{matched_message_content}'. Score: {similarity_score:.2f}")
-                        return chosen_response_data
-
     # Existing logic: Check for conversational context
     chat_id = message.chat.id
     current_context = chat_contexts.get(chat_id, [])
@@ -393,7 +355,7 @@ async def generate_reply(message: Message):
                             return chosen_response_data
     
     # New Rule 3: Dynamic reply using Markov chain from chat history
-    if current_context and random.random() < 0.3:  # 30% chance to generate a dynamic reply
+    if current_context and random.random() < 0.3:
         chain = build_markov_chain(current_context)
         if chain:
             dynamic_reply_text = generate_sentence(chain)
@@ -416,7 +378,6 @@ async def generate_reply(message: Message):
         return {"type": "sticker", "sticker_id": random_sticker_doc.get('sticker_id'), "content": random_sticker_doc.get('content')}
     else:
         logger.warning("No stickers found in the database. Sending a generic text reply.")
-        # Fallback to a generic text reply if no stickers are found
         generic_replies = ["Han bolo.", "Kya hua?", "Main sun raha hu.", "Ji, boliye."]
         return {"type": "text", "content": random.choice(generic_replies)}
 
