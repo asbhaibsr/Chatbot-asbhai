@@ -9,21 +9,21 @@ import sys
 
 # NLTK data download check and setup
 try:
+    # Set the NLTK data path to a writeable directory within the workspace.
+    # This is important for platforms like Koyeb where root access is limited.
+    data_dir = os.path.join(os.getcwd(), '.nltk_data')
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+    nltk.data.path.append(data_dir)
+
     # First, try to find the lexicon. This will raise a LookupError if not found.
     nltk.data.find('sentiment/vader_lexicon.zip')
     print("vader_lexicon is already downloaded.")
 except LookupError:
     # If a LookupError occurs, it means the data needs to be downloaded.
     print("vader_lexicon not found. Downloading now...")
-
-    # Set the NLTK data path to a writeable directory before downloading.
-    # This is important for platforms like Koyeb.
-    data_dir = '/usr/share/nltk_data'
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
-    nltk.data.path.append(data_dir)
     
-    # Download the lexicon to the specified path.
+    # Set the NLTK data path and then download the lexicon.
     nltk.download('vader_lexicon', download_dir=data_dir)
     print("Download complete.")
 except Exception as e:
