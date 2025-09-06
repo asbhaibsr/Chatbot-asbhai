@@ -6,6 +6,5 @@ dnspython
 tgcrypto==1.2.2
 Flask
 pytz
-sentence-transformers
 textblob
 nltk
