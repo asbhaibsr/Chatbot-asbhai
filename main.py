@@ -3,20 +3,33 @@
 import threading
 import logging
 from pyrogram import idle
-import nltk # NLTK library import kiya
-import os # OS library import kiya
+import nltk
+import os
+import sys
 
-# NLTK data download check
-# Agar 'vader_lexicon' pehle se downloaded nahi hai, toh download karega.
-# Yeh step aapke bot ko kisi bhi naye environment mein chalne ke liye aasan banata hai.
+# NLTK data download check and setup
 try:
+    # First, try to find the lexicon. This will raise a LookupError if not found.
     nltk.data.find('sentiment/vader_lexicon.zip')
-except nltk.downloader.DownloadError:
-    print("vader_lexicon not found, downloading now...")
-    # NLTK data ke liye ek path set karein taaki woh usko sahi jagah par store kare.
-    nltk.download('vader_lexicon', download_dir='/usr/share/nltk_data')
-    os.environ['NLTK_DATA'] = '/usr/share/nltk_data'
+    print("vader_lexicon is already downloaded.")
+except LookupError:
+    # If a LookupError occurs, it means the data needs to be downloaded.
+    print("vader_lexicon not found. Downloading now...")
+
+    # Set the NLTK data path to a writeable directory before downloading.
+    # This is important for platforms like Koyeb.
+    data_dir = '/usr/share/nltk_data'
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+    nltk.data.path.append(data_dir)
+    
+    # Download the lexicon to the specified path.
+    nltk.download('vader_lexicon', download_dir=data_dir)
     print("Download complete.")
+except Exception as e:
+    # Handle any other unexpected errors gracefully.
+    print(f"An unexpected error occurred: {e}", file=sys.stderr)
+    sys.exit(1)
 
 # Import necessary components from other files
 from config import app, logger, flask_app
