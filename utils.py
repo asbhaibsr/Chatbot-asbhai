@@ -12,6 +12,12 @@ from pyrogram.enums import ChatMemberStatus, ChatType, ParseMode
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
 
+# New imports for advanced AI
+from textblob import TextBlob
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from sentence_transformers import SentenceTransformer, util
+import numpy as np
+
 from config import (
     messages_collection, owner_taught_responses_collection, conversational_learning_collection,
     group_tracking_collection, user_tracking_collection, earning_tracking_collection,
@@ -26,6 +32,27 @@ earning_cooldowns = {}
 # New: Global dictionary to store chat context (last 5 messages)
 chat_contexts = {}
 MAX_CONTEXT_SIZE = 5
+
+# Initialize sentiment analyzer and sentence transformer
+analyser = SentimentIntensityAnalyzer()
+model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+# You can use 'distilbert-base-nli-stsb-mean-tokens' for English-only better performance
+
+def get_sentiment(text):
+    if not text:
+        return "neutral"
+    
+    # Use TextBlob for general sentiment and VADER for nuanced sentiment
+    blob_sentiment = TextBlob(text).sentiment.polarity
+    vader_sentiment = analyser.polarity_scores(text)['compound']
+    
+    # Combine or choose based on your preference. VADER is often better for social media-like text.
+    if vader_sentiment >= 0.05:
+        return "positive"
+    elif vader_sentiment <= -0.05:
+        return "negative"
+    else:
+        return "neutral"
 
 def build_markov_chain(messages):
     """ Builds a simple Markov chain from a list of messages. """
@@ -262,7 +289,6 @@ async def generate_reply(message: Message):
         logger.info(f"Skipping reply for message {message.id} as it's a reply to another user.")
         return {"type": None}
     
-    # Wait to simulate typing
     await app.invoke(
         SetTyping(
             peer=await app.resolve_peer(message.chat.id),
@@ -276,16 +302,56 @@ async def generate_reply(message: Message):
 
     query_content = message.text if message.text else (message.sticker.file_id if message.sticker else "")
     query_type = "text" if message.text else "sticker"
+    
+    # New: 1. Sentiment-based replies
+    if message.text:
+        sentiment = get_sentiment(message.text)
+        if sentiment == "negative":
+            sad_replies = [
+                "अरे यार, सब ठीक है ना? 🤔",
+                "क्या हुआ? कोई दिक्कत है तो बताओ।",
+                "परेशान मत हो, मैं तुम्हारे साथ हूँ। ❤️"
+            ]
+            return {"type": "text", "content": random.choice(sad_replies)}
+        
+    # New: 2. Semantic Similarity Search (Using SentenceTransformer)
+    if message.text:
+        # Get all stored text messages for comparison
+        stored_texts = list(messages_collection.find({"type": "text"}, {"content": 1, "_id": 0}))
+        
+        if stored_texts:
+            stored_sentences = [d['content'] for d in stored_texts if d.get('content')]
+            if stored_sentences:
+                # Calculate embeddings for the user's message and stored messages
+                user_embedding = model.encode(message.text, convert_to_tensor=True)
+                stored_embeddings = model.encode(stored_sentences, convert_to_tensor=True)
+                
+                # Find the most similar message
+                cosine_scores = util.pytorch_cos_sim(user_embedding, stored_embeddings)[0]
+                best_match_index = np.argmax(cosine_scores)
+                similarity_score = cosine_scores[best_match_index].item()
+                
+                # Set a similarity threshold (e.g., 0.6)
+                if similarity_score > 0.6:
+                    matched_message_content = stored_sentences[best_match_index]
+                    # Find a good reply to that matched message from conversational learning
+                    conversational_doc = conversational_learning_collection.find_one({
+                        "trigger_content": matched_message_content,
+                        "trigger_type": "text"
+                    })
+                    
+                    if conversational_doc and conversational_doc.get('responses'):
+                        chosen_response_data = random.choice(conversational_doc['responses'])
+                        logger.info(f"Semantic similarity reply found. Matched: '{matched_message_content}'. Score: {similarity_score:.2f}")
+                        return chosen_response_data
 
-    # New: Check for conversational context
+    # Existing logic: Check for conversational context
     chat_id = message.chat.id
     current_context = chat_contexts.get(chat_id, [])
     
     if current_context:
-        # Check if the query matches the last message in the context
         last_message = current_context[-1]
         if last_message.get("content") == query_content:
-            # If so, we can try to find a follow-up response in the DB
             conversational_doc = conversational_learning_collection.find_one({
                 "trigger_content": last_message["content"],
                 "trigger_type": last_message["type"]
@@ -295,7 +361,7 @@ async def generate_reply(message: Message):
                 logger.info(f"Contextual reply found for '{query_content}'.")
                 return chosen_response_data
 
-    # Rule 1: Exact match for a single message
+    # Existing logic: Exact match for a single message
     if len(query_content.split()) <= 3:
         conversational_doc = conversational_learning_collection.find_one({
             "trigger_content": query_content,
@@ -306,26 +372,21 @@ async def generate_reply(message: Message):
             logger.info(f"Exact match reply found for '{query_content}'.")
             return chosen_response_data
 
-    # Rule 2: Partial match (first 2-3 words) for longer messages
+    # Existing logic: Partial match (first 2-3 words) for longer messages
     if message.text:
         words = query_content.split()
         if len(words) > 3:
-            # Check for 3 words, then 2 words
             for i in [3, 2]:
                 if len(words) >= i:
                     partial_query = " ".join(words[:i])
-                    # Using a regex to find documents that start with the partial query
                     docs = list(conversational_learning_collection.find({
                         "trigger_content": {"$regex": f"^{re.escape(partial_query)}.*", "$options": "i"},
                         "trigger_type": "text"
                     }))
-
                     if docs:
-                        # Find all possible responses from the matching documents
                         all_responses = []
                         for doc in docs:
                             all_responses.extend(doc.get('responses', []))
-                        
                         if all_responses:
                             chosen_response_data = random.choice(all_responses)
                             logger.info(f"Partial conversational pattern reply found for '{query_content}' using '{partial_query}'.")
@@ -356,7 +417,7 @@ async def generate_reply(message: Message):
     else:
         logger.warning("No stickers found in the database. Sending a generic text reply.")
         # Fallback to a generic text reply if no stickers are found
-        generic_replies = ["Han bolo.", "Kya hua?", "Main sun rahi hu.", "kiya haal hai baby.", "tum thore se pagal ho kiya", "kiya ho raha hai", "baby", "janu", "Ji, boliye."]
+        generic_replies = ["Han bolo.", "Kya hua?", "Main sun raha hu.", "Ji, boliye."]
         return {"type": "text", "content": random.choice(generic_replies)}
 
 async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None):
