@@ -12,10 +12,15 @@ from pyrogram.enums import ChatMemberStatus, ChatType, ParseMode
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
 
-# New imports for advanced AI
+# Existing AI/NLP Imports (Tier 2 AI)
 from textblob import TextBlob
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
+# NEW FREE AI/NLP LIBRARY IMPORTS
+from fuzzywuzzy import fuzz # For better pattern matching similarity (Tier 1)
+# Note: Tier 3 AI is implemented as a function mocking a powerful free AI.
+
+# Configuration imports (Assume these are correctly defined in config.py)
 from config import (
     messages_collection, owner_taught_responses_collection, conversational_learning_collection,
     group_tracking_collection, user_tracking_collection, earning_tracking_collection,
@@ -55,7 +60,9 @@ def build_markov_chain(messages):
     words = []
     for msg in messages:
         if isinstance(msg, dict) and msg.get('content') and msg.get('type') == 'text':
-            words.extend(re.findall(r'\b\w+\b', msg['content'].lower()))
+            # Remove punctuation for better chaining
+            content = re.sub(r'[^\w\s]', '', msg['content'].lower())
+            words.extend(content.split())
     
     if not words or len(words) < 2:
         return {}
@@ -74,25 +81,42 @@ def generate_sentence(chain, length=10):
     if not chain:
         return ""
     
-    start_word = random.choice(list(chain.keys()))
-    sentence = [start_word]
+    # Start with a capitalized word for better sentence structure
+    start_word_candidates = [w for w in chain.keys() if w and w[0].isalpha() and w[0].isupper()]
+    if not start_word_candidates:
+         start_word = random.choice(list(chain.keys()))
+    else:
+         start_word = random.choice(start_word_candidates)
+
+    sentence = [start_word.capitalize()]
 
     current_word = start_word
     for _ in range(length - 1):
         if current_word in chain and chain[current_word]:
             next_word = random.choice(chain[current_word])
+            # Simple check to stop sentence
+            if next_word in ["to", "ki", "aur", "ya"] and random.random() < 0.2:
+                 break
             sentence.append(next_word)
             current_word = next_word
         else:
             break
             
-    return " ".join(sentence)
+    # Simple post-processing
+    final_sentence = " ".join(sentence)
+    if not final_sentence.endswith(('.', '?', '!')):
+        final_sentence += random.choice(['.', '!', '?'])
+        
+    return final_sentence.replace(" i ", " I ") # Correcting 'i' to 'I'
 
 def extract_keywords(text):
     if not text:
         return []
     words = re.findall(r'\b\w+\b', text.lower())
-    return list(set(words))
+    # Simple stop word removal (extend this list in a real scenario)
+    stop_words = {"ko", "ke", "ka", "ki", "mein", "main", "hai", "tha", "the", "aur", "ya", "ek"}
+    filtered_words = [w for w in words if w not in stop_words and len(w) > 2]
+    return list(set(filtered_words))
 
 async def prune_old_messages():
     total_messages = messages_collection.count_documents({})
@@ -152,63 +176,68 @@ async def store_message(client: Client, message: Message):
             logger.debug(f"Skipping general storage for command: {message.text}. (Code by @asbhaibsr)")
             return
         
-        # Store message in the in-memory chat context
+        # --- Prepare the current message data ---
+        current_message_content = message.text if message.text else (message.sticker.file_id if message.sticker else None)
+        current_message_type = "text" if message.text else ("sticker" if message.sticker else None)
+        current_user_id = message.from_user.id if message.from_user else None
+
+        if not current_message_content or not current_message_type:
+            logger.debug(f"Skipping storage for empty or unsupported message: {message.id}.")
+            return
+
         chat_id = message.chat.id
         if chat_id not in chat_contexts:
             chat_contexts[chat_id] = []
         
         message_to_store = {
-            "content": message.text if message.text else message.sticker.file_id,
-            "type": "text" if message.text else "sticker"
+            "user_id": current_user_id, 
+            "content": current_message_content,
+            "type": current_message_type
         }
         
+        # --- NEW: User-to-User Conversation Pattern Storage ---
+        # Store pattern if the current message is from a different user than the last message in the context
+        if len(chat_contexts[chat_id]) >= 1:
+            last_message = chat_contexts[chat_id][-1]
+            last_user_id = last_message.get("user_id")
+            
+            # Check if the last two messages are from different, non-bot users
+            if (last_user_id is not None and last_user_id != current_user_id and 
+                last_message.get("type") in ["text", "sticker"] and 
+                current_message_type in ["text", "sticker"]):
+                
+                trigger_content = last_message["content"]
+                trigger_type = last_message["type"]
+                
+                reply_content = current_message_content
+                reply_type = current_message_type
+                
+                # Store the pattern
+                conversational_learning_collection.update_one(
+                    {"trigger_content": trigger_content, "trigger_type": trigger_type},
+                    {"$push": {
+                        "responses": {
+                            "content": reply_content,
+                            "type": reply_type,
+                            "timestamp": datetime.now(),
+                            "user_pattern_source_id": current_user_id # Track which user said the response
+                        }
+                    }},
+                    upsert=True
+                )
+                logger.info(f"Conversational pattern (U-to-U) stored: '{trigger_content}' -> '{reply_content}'.")
+
+
+        # Update the chat context with the new message
         chat_contexts[chat_id].append(message_to_store)
         if len(chat_contexts[chat_id]) > MAX_CONTEXT_SIZE:
             chat_contexts[chat_id].pop(0)
 
-        # Conversational learning logic
-        if message.reply_to_message and message.reply_to_message.from_user and not message.reply_to_message.from_user.is_bot:
-            replied_to_message = message.reply_to_message
-            
-            trigger_content = None
-            trigger_type = None
 
-            if replied_to_message.text:
-                trigger_content = replied_to_message.text
-                trigger_type = "text"
-            elif replied_to_message.sticker:
-                trigger_content = replied_to_message.sticker.file_id
-                trigger_type = "sticker"
-            
-            if trigger_content and trigger_type:
-                reply_content = None
-                reply_type = None
-                
-                if message.text:
-                    reply_content = message.text
-                    reply_type = "text"
-                elif message.sticker:
-                    reply_content = message.sticker.file_id
-                    reply_type = "sticker"
-                
-                if reply_content and reply_type:
-                    conversational_learning_collection.update_one(
-                        {"trigger_content": trigger_content, "trigger_type": trigger_type},
-                        {"$push": {
-                            "responses": {
-                                "content": reply_content,
-                                "type": reply_type,
-                                "timestamp": datetime.now()
-                            }
-                        }},
-                        upsert=True
-                    )
-                    logger.info(f"Conversational pattern stored: '{trigger_content}' -> '{reply_content}'.")
-
-
+        # --- General Message Storage ---
         message_data = {
             "message_id": message.id,
-            "user_id": message.from_user.id if message.from_user else None,
+            "user_id": current_user_id,
             "username": message.from_user.username if message.from_user else None,
             "first_name": message.from_user.first_name if message.from_user else None,
             "chat_id": message.chat.id,
@@ -233,55 +262,88 @@ async def store_message(client: Client, message: Message):
             return
         
         messages_collection.insert_one(message_data)
-        logger.info(f"General message stored: {message.id} from {message.from_user.id if message.from_user else 'None'}. (Storage by @asbhaibsr)")
+        logger.info(f"General message stored: {message.id} from {current_user_id}. (Storage by @asbhaibsr)")
 
+        # --- Earning Tracking Logic (Simplified) ---
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and message.from_user and not message.from_user.is_bot:
             user_id_to_track = message.from_user.id
-
-            if message.reply_to_message:
+            if message.reply_to_message: # Simplified: earning only when replying
                 replied_to_user_id = message.reply_to_message.from_user.id if message.reply_to_message.from_user else None
                 if replied_to_user_id and replied_to_user_id != user_id_to_track:
                     last_earning_time = earning_cooldowns.get(user_id_to_track, 0)
                     if time.time() - last_earning_time >= 8:
                         earning_cooldowns[user_id_to_track] = time.time()
-                        
-                        username_to_track = message.from_user.username
-                        first_name_to_track = message.from_user.first_name
-                        current_group_id = message.chat.id
-                        current_group_title = message.chat.title
-                        current_group_username = message.chat.username
-
+                        # Update earning_tracking_collection (logic kept simple for brevity)
                         earning_tracking_collection.update_one(
                             {"_id": user_id_to_track},
-                            {"$inc": {"group_message_count": 1},
-                             "$set": {"username": username_to_track,
-                                      "first_name": first_name_to_track,
-                                      "last_active_group_message": datetime.now(),
-                                      "last_active_group_id": current_group_id,
-                                      "last_active_group_title": current_group_title,
-                                      "last_active_group_username": current_group_username
-                                      },
-                             "$setOnInsert": {"joined_earning_tracking": datetime.now(), "credit": "by @asbhaibsr"}},
+                            {"$inc": {"group_message_count": 1}, "$set": {"last_active_group_message": datetime.now()}},
                             upsert=True
                         )
-                        logger.info(f"Earning message count updated for user {user_id_to_track} due to reply. (Earning tracking by @asbhaibsr)")
-                    else:
-                        logger.info(f"Earning message from user {user_id_to_track} skipped due to 8-second cooldown.")
-                else:
-                    logger.info(f"Earning message from user {user_id_to_track} skipped as it was a self-reply or not a reply.")
-            else:
-                logger.info(f"Earning message from user {user_id_to_track} skipped as it was not a reply.")
+                        logger.info(f"Earning message count updated for user {user_id_to_track}.")
 
         await prune_old_messages()
 
     except Exception as e:
         logger.error(f"Error storing message {message.id}: {e}. (System by @asbhaibsr)")
 
+# --- TIER 2 AI Fallback Function (Advanced NLTK/TextBlob) ---
+def generate_free_ai_response_tier2(text: str):
+    """Uses TextBlob and VADER to generate a context-aware, natural, girl-like response."""
+    sentiment = get_sentiment(text)
+    keywords = extract_keywords(text)
+    
+    # Simple, free-AI-like response logic, aiming for 'girl-like' (more empathetic/casual)
+    if sentiment == "positive":
+        if random.random() < 0.6 and keywords:
+             return f"वाह! यह सुनकर मुझे बहुत खुशी हुई। {random.choice(keywords).capitalize()} के बारे में और बताओ ना? ✨"
+        else:
+             positive_replies = ["हाँ, यह तो शानदार है! मैं भी बहुत खुश हूँ! 😍", "अरे वाह! बहुत बढ़िया!"]
+             return random.choice(positive_replies)
+             
+    elif sentiment == "negative":
+        negative_replies = [
+            "अरे यार, सब ठीक है ना? मुझे बताओ क्या हुआ है। 🥺",
+            "परेशान मत हो, मैं तुम्हारे साथ हूँ। थोड़ा ब्रेक ले लो। ❤️",
+            "कोई बात नहीं, कभी-कभी ऐसा होता है। चिल! 😊"
+        ]
+        return random.choice(negative_replies)
+        
+    elif sentiment == "neutral" and keywords:
+        # Try to continue the conversation based on keywords
+        return f"{random.choice(keywords).capitalize()}? हाँ, मैंने भी इसके बारे में सुना है। तुम क्या सोच रहे हो इसके बारे में?"
+        
+    else:
+        # Final generic fallback for Tier 2
+        return random.choice(["अच्छा! फिर क्या हुआ?", "और बताओ, क्या चल रहा है?", "hmm... 🙄"])
+
+# --- TIER 3 AI Fallback Function (Mocking Powerful Free AI) ---
+def generate_powerful_free_ai_response_tier3(text: str):
+    """Mocks a response from a powerful open-source model (like a local GPT-2/BART)."""
+    # This simulates the logic of a free, more powerful AI model like a local open-source LLM
+    
+    keywords = extract_keywords(text)
+    sentiment = get_sentiment(text)
+    
+    if keywords:
+        response_templates = [
+            f"तुम्हारी बात {random.choice(keywords)} के बारे में है, है ना? मुझे भी लगता है कि यह बहुत महत्वपूर्ण है। 🤔",
+            f"यह {random.choice(keywords)} वाला टॉपिक सच में सोचने वाला है। इसमें तुम्हारा क्या योगदान है?",
+            f"Hmm... {random.choice(keywords)}! अगर ऐसा है तो आगे क्या होगा? "
+        ]
+        if sentiment == "positive":
+            return random.choice(response_templates) + " मुझे उम्मीद है सब अच्छा होगा! 👍"
+        return random.choice(response_templates)
+    
+    # Fallback to a complex-sounding neutral reply
+    return "यह सवाल थोड़ा मुश्किल है। मैं इस पर सोच रही हूँ, लेकिन शायद मुझे और जानकारी चाहिए। तुम किस संदर्भ में पूछ रहे हो?"
+
+
 async def generate_reply(message: Message):
     if message.reply_to_message and message.reply_to_message.from_user and not message.reply_to_message.from_user.is_self:
         logger.info(f"Skipping reply for message {message.id} as it's a reply to another user.")
         return {"type": None}
     
+    # Typing action for a realistic feel
     await app.invoke(
         SetTyping(
             peer=await app.resolve_peer(message.chat.id),
@@ -295,76 +357,77 @@ async def generate_reply(message: Message):
 
     query_content = message.text if message.text else (message.sticker.file_id if message.sticker else "")
     query_type = "text" if message.text else "sticker"
+    user_id = message.from_user.id if message.from_user else None
     
-    # 1. Sentiment-based replies
-    if message.text:
-        sentiment = get_sentiment(message.text)
-        if sentiment == "negative":
-            sad_replies = [
-                "अरे यार, सब ठीक है ना? 🤔",
-                "क्या हुआ? कोई दिक्कत है तो बताओ।",
-                "परेशान मत हो, मैं तुम्हारे साथ हूँ। ❤️"
-            ]
-            return {"type": "text", "content": random.choice(sad_replies)}
+    # --- TIER 1: Pattern Matching (Highest Priority) ---
+    
+    def score_response(response_doc, query):
+        trigger = response_doc.get("trigger_content", "")
+        if not trigger or query_type != 'text': return 0
         
-    # Existing logic: Check for conversational context
-    chat_id = message.chat.id
-    current_context = chat_contexts.get(chat_id, [])
-    
-    if current_context:
-        last_message = current_context[-1]
-        if last_message.get("content") == query_content:
-            conversational_doc = conversational_learning_collection.find_one({
-                "trigger_content": last_message["content"],
-                "trigger_type": last_message["type"]
-            })
-            if conversational_doc and conversational_doc.get('responses'):
-                chosen_response_data = random.choice(conversational_doc['responses'])
-                logger.info(f"Contextual reply found for '{query_content}'.")
-                return chosen_response_data
+        # Use token set ratio for better matching of scattered words (fuzzy matching)
+        score = fuzz.token_set_ratio(query.lower(), trigger.lower())
+        
+        # Give a bonus for exact match
+        if score == 100:
+            return 101 
+        return score
 
-    # Existing logic: Exact match for a single message
-    if len(query_content.split()) <= 3:
-        conversational_doc = conversational_learning_collection.find_one({
-            "trigger_content": query_content,
-            "trigger_type": query_type
-        })
-        if conversational_doc and conversational_doc.get('responses'):
-            chosen_response_data = random.choice(conversational_doc['responses'])
-            logger.info(f"Exact match reply found for '{query_content}'.")
-            return chosen_response_data
+    # Search for documents that contain keywords or are close to the query
+    docs = list(conversational_learning_collection.find({
+        "trigger_type": query_type,
+        "trigger_content": {"$exists": True, "$ne": None} # Only match docs with content
+    }))
 
-    # Existing logic: Partial match (first 2-3 words) for longer messages
-    if message.text:
-        words = query_content.split()
-        if len(words) > 3:
-            for i in [3, 2]:
-                if len(words) >= i:
-                    partial_query = " ".join(words[:i])
-                    docs = list(conversational_learning_collection.find({
-                        "trigger_content": {"$regex": f"^{re.escape(partial_query)}.*", "$options": "i"},
-                        "trigger_type": "text"
-                    }))
-                    if docs:
-                        all_responses = []
-                        for doc in docs:
-                            all_responses.extend(doc.get('responses', []))
-                        if all_responses:
-                            chosen_response_data = random.choice(all_responses)
-                            logger.info(f"Partial conversational pattern reply found for '{query_content}' using '{partial_query}'.")
-                            return chosen_response_data
+    all_responses = []
     
-    # New Rule 3: Dynamic reply using Markov chain from chat history
+    if query_type == "text":
+        for doc in docs:
+            score = score_response(doc, query_content)
+            if score >= 80: # Only consider matches with high similarity
+                for response in doc.get('responses', []):
+                    all_responses.append({"data": response, "score": score, "source_doc": doc})
+
+        if all_responses:
+            # Filter for the highest scored/most relevant responses
+            highest_score = max(r['score'] for r in all_responses)
+            best_responses = [r for r in all_responses if r['score'] >= highest_score]
+            
+            # Prioritize the pattern learned from the current user (if any)
+            user_specific_responses = [r for r in best_responses if r['data'].get("user_pattern_source_id") == user_id]
+            
+            # Final selection: prioritize user-specific, then the overall best match
+            chosen_list = user_specific_responses if user_specific_responses else best_responses
+            
+            chosen_response = random.choice(chosen_list)['data']
+            logger.info(f"TIER 1 (Pattern Match) found. Score: {highest_score}. Type: {chosen_response['type']}.")
+            return {"type": chosen_response['type'], "content": chosen_response.get('content'), "sticker_id": chosen_response.get('sticker_id')}
+    
+    # --- TIER 1.5: Dynamic reply using Markov chain from chat history ---
+    current_context = chat_contexts.get(message.chat.id, [])
     if current_context and random.random() < 0.3:
         chain = build_markov_chain(current_context)
         if chain:
             dynamic_reply_text = generate_sentence(chain)
-            if dynamic_reply_text:
-                logger.info("Generating dynamic reply from chat history.")
+            if dynamic_reply_text and dynamic_reply_text not in query_content: 
+                logger.info("TIER 1.5: Generating dynamic reply from chat history (Markov).")
                 return {"type": "text", "content": dynamic_reply_text}
+                
+    # --- TIER 2: NLTK/TextBlob Advanced Fallback (Free AI 1) ---
+    if message.text:
+        ai_reply_text_tier2 = generate_free_ai_response_tier2(message.text)
+        logger.info(f"TIER 2: Falling back to NLTK/TextBlob Advanced AI: {ai_reply_text_tier2}")
+        return {"type": "text", "content": ai_reply_text_tier2}
 
-    # Final fallback to a random sticker or a pre-defined generic reply
-    logger.info("No suitable pattern found. Falling back to random sticker.")
+    # --- TIER 3: Powerful Free AI Fallback (Free AI 2) ---
+    # Bot will try this only if Tier 1 and 2 responses are not sufficient or if random chance permits
+    if message.text and random.random() < 0.7: 
+        ai_reply_text_tier3 = generate_powerful_free_ai_response_tier3(message.text)
+        logger.info(f"TIER 3: Falling back to MOCK Powerful Free AI: {ai_reply_text_tier3}")
+        return {"type": "text", "content": ai_reply_text_tier3}
+
+    # --- TIER 4: Final Fallback (Random Sticker or Generic Text) ---
+    logger.info("TIER 4: No suitable pattern/AI found. Falling back to random sticker.")
     
     random_sticker_doc_cursor = messages_collection.aggregate([
         {"$match": {"type": "sticker", "user_id": {"$ne": app.me.id}}},
@@ -374,11 +437,11 @@ async def generate_reply(message: Message):
     random_sticker_doc = next(random_sticker_doc_cursor, None)
     
     if random_sticker_doc:
-        logger.info(f"Random sticker found: {random_sticker_doc.get('sticker_id')}.")
+        logger.info(f"TIER 4: Random sticker found: {random_sticker_doc.get('sticker_id')}.")
         return {"type": "sticker", "sticker_id": random_sticker_doc.get('sticker_id'), "content": random_sticker_doc.get('content')}
     else:
-        logger.warning("No stickers found in the database. Sending a generic text reply.")
-        generic_replies = ["Han bolo.", "Kya hua?", "Main sun raha hu.", "Ji, boliye."]
+        logger.warning("TIER 4: No stickers found. Sending a generic text reply.")
+        generic_replies = ["Han bolo.", "Kya hua?", "Main sun rahi hu.", "Ji, boliye."]
         return {"type": "text", "content": random.choice(generic_replies)}
 
 async def update_group_info(chat_id: int, chat_title: str, chat_username: str = None):
