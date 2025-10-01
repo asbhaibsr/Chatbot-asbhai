@@ -1,4 +1,4 @@
-# utils.py
+# utils.py (No Changes)
 
 import re
 import asyncio
@@ -595,5 +595,3 @@ async def can_reply_to_chat(chat_id):
 
 def update_message_reply_cooldown(chat_id):
     chat_message_cooldowns[chat_id] = time.time()
-
-# --- END OF UTILITY.PY ---
