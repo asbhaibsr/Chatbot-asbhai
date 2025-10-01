@@ -6,7 +6,7 @@ import asyncio
 import os
 import sys
 from datetime import datetime
-import re # <-- यह 're' मॉड्यूल यहां जोड़ा गया है
+import re # <-- यह 're' मॉड्यूल यहां जोड़ा गया
 
 # Import utilities and configurations
 from config import (
@@ -22,6 +22,10 @@ from utils import (
 )
 
 import callbacks # <--- यह बहुत ज़रूरी लाइन है, जो callbacks.py को इम्पोर्ट करेगी
+
+# -----------------------------------------------------
+# PRIVATE CHAT COMMANDS (Unchanged)
+# -----------------------------------------------------
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_private_command(client: Client, message: Message):
@@ -60,48 +64,9 @@ async def start_private_command(client: Client, message: Message):
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private start command processed for user {message.from_user.id}. (Code by @asbhaibsr)")
 
-@app.on_message(filters.command("start") & filters.group)
-async def start_group_command(client: Client, message: Message):
-    if is_on_command_cooldown(message.from_user.id):
-        return
-    update_command_cooldown(message.from_user.id)
-
-    user_name = message.from_user.first_name if message.from_user else "Dost"
-    welcome_message = (
-        f"🌟 हे **{user_name}** जानू! आपका स्वागत है! 🌟\n\n"
-        "मैं ग्रुप की सभी बातें सुनने और सीखने के लिए तैयार हूँ!\n"
-        "अपनी सभी कमांड्स देखने के लिए नीचे दिए गए 'सहायता' बटन पर क्लिक करें।"
-    )
-    keyboard = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("➕ मुझे ग्रुप में जोड़ें", url=f"https://t.me/{client.me.username}?startgroup=true")],
-            [
-                InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
-                InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
-            ],
-            [
-                InlineKeyboardButton("ℹ️ सहायता ❓", callback_data="show_help_menu"),
-                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard")
-            ]
-        ]
-    )
-    await send_and_auto_delete_reply(
-        message,
-        text=welcome_message,
-        photo=BOT_PHOTO_URL,
-        reply_markup=keyboard,
-        parse_mode=ParseMode.MARKDOWN
-    )
-    await store_message(message)
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.")
-        await update_group_info(message.chat.id, message.chat.title, message.chat.username)
-    if message.from_user:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-    logger.info(f"Group start command processed in chat {message.chat.id}. (Code by @asbhaibsr)")
-
 @app.on_message(filters.command("topusers") & (filters.private | filters.group))
 async def top_users_command(client: Client, message: Message):
+    # ... [Rest of /topusers command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -173,8 +138,10 @@ async def top_users_command(client: Client, message: Message):
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Top users command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
 
+
 @app.on_message(filters.command("broadcast") & filters.private)
 async def broadcast_command(client: Client, message: Message):
+    # ... [Rest of /broadcast command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -256,8 +223,10 @@ async def broadcast_command(client: Client, message: Message):
     await store_message(message)
     logger.info(f"Broadcast command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
 
+
 @app.on_message(filters.command("stats") & filters.private)
 async def stats_private_command(client: Client, message: Message):
+    # ... [Rest of /stats private command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -289,6 +258,7 @@ async def stats_private_command(client: Client, message: Message):
 
 @app.on_message(filters.command("stats") & filters.group)
 async def stats_group_command(client: Client, message: Message):
+    # ... [Rest of /stats group command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -319,8 +289,10 @@ async def stats_group_command(client: Client, message: Message):
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+
 @app.on_message(filters.command("groups") & filters.private)
 async def list_groups_command(client: Client, message: Message):
+    # ... [Rest of /groups command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -371,6 +343,7 @@ async def list_groups_command(client: Client, message: Message):
 
 @app.on_message(filters.command("leavegroup") & filters.private)
 async def leave_group_command(client: Client, message: Message):
+    # ... [Rest of /leavegroup command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -411,8 +384,10 @@ async def leave_group_command(client: Client, message: Message):
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+
 @app.on_message(filters.command("cleardata") & filters.private)
 async def clear_data_command(client: Client, message: Message):
+    # ... [Rest of /cleardata command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -478,8 +453,10 @@ async def clear_data_command(client: Client, message: Message):
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+
 @app.on_message(filters.command("deletemessage") & filters.private)
 async def delete_specific_message_command(client: Client, message: Message):
+    # ... [Rest of /deletemessage command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -526,8 +503,10 @@ async def delete_specific_message_command(client: Client, message: Message):
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+
 @app.on_message(filters.command("delsticker") & filters.private)
 async def delete_specific_sticker_command(client: Client, message: Message):
+    # ... [Rest of /delsticker command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -582,8 +561,10 @@ async def delete_specific_sticker_command(client: Client, message: Message):
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+
 @app.on_message(filters.command("clearearning") & filters.private)
 async def clear_earning_command(client: Client, message: Message):
+    # ... [Rest of /clearearning command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -599,8 +580,10 @@ async def clear_earning_command(client: Client, message: Message):
     await store_message(message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
+
 @app.on_message(filters.command("restart") & filters.private)
 async def restart_command(client: Client, message: Message):
+    # ... [Rest of /restart command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -614,174 +597,9 @@ async def restart_command(client: Client, message: Message):
     await asyncio.sleep(0.5)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
-@app.on_message(filters.command("chat") & filters.group)
-async def toggle_chat_command(client: Client, message: Message):
-    if is_on_command_cooldown(message.from_user.id):
-        return
-    update_command_cooldown(message.from_user.id)
-
-    if not message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        await send_and_auto_delete_reply(message, text="Yeh command sirf groups mein kaam karti hai, darling! 😉", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status not in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR]:
-        await send_and_auto_delete_reply(message, text="Maaf karna, yeh command sirf group admins hi use kar sakte hain. 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    if len(message.command) < 2:
-        current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
-        current_status = current_status_doc.get("bot_enabled", True) if current_status_doc else True
-        status_text = "chaalu hai (ON)" if current_status else "band hai (OFF)"
-        await send_and_auto_delete_reply(message, text=f"Main abhi is group mein **{status_text}** hoon. Use `/chat on` ya `/chat off` control karne ke liye. (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    action = message.command[1].lower()
-    if action == "on":
-        group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"bot_enabled": True}})
-        await send_and_auto_delete_reply(message, text="🚀 Main phir se aa gayi! Ab main is group mein baatein karungi aur seekhungi. 😊", parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Bot enabled in group {message.chat.id} by admin {message.from_user.id}. (Code by @asbhaibsr)")
-    elif action == "off":
-        group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"bot_enabled": False}})
-        await send_and_auto_delete_reply(message, text="😴 Main abhi thodi der ke liye chup ho rahi hoon. Jab meri zaroorat ho, `/chat on` karke bula lena. Bye-bye! 👋", parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Bot disabled in group {message.chat.id} by admin {message.from_user.id}. (Code by @asbhaibsr)")
-    else:
-        await send_and_auto_delete_reply(message, text="Galat command, darling! `/chat on` ya `/chat off` use karo. 😉", parse_mode=ParseMode.MARKDOWN)
-
-    await store_message(message)
-    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-
-@app.on_message(filters.command("linkdel") & filters.group)
-async def toggle_linkdel_command(client: Client, message: Message):
-    if is_on_command_cooldown(message.from_user.id):
-        return
-    update_command_cooldown(message.from_user.id)
-
-    if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
-        await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    if len(message.command) < 2:
-        current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
-        current_status = current_status_doc.get("linkdel_enabled", False) if current_status_doc else False
-        status_text = "चालू है (ON)" if current_status else "बंद है (OFF)"
-        await send_and_auto_delete_reply(message, text=f"मेरी 'लिंक जादू' की छड़ी अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/linkdel on` या `/linkdel off` यूज़ करो. 😉", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    action = message.command[1].lower()
-    if action == "on":
-        group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"linkdel_enabled": True}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="ही ही ही! 🤭 अब कोई भी शरारती लिंक भेजेगा, तो मैं उसे जादू से गायब कर दूंगी! 🪄 ग्रुप को एकदम साफ़-सुथरा रखना है न! 😉", parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Link deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
-    elif action == "off":
-        group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"linkdel_enabled": False}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="ठीक है, ठीक है! मैंने अपनी 'लिंक जादू' की छड़ी रख दी है! 😇 अब आप जो चाहे लिंक भेज सकते हैं! पर ध्यान से, ओके?", parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Link deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
-    else:
-        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/linkdel on` या `/linkdel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
-
-@app.on_message(filters.command("biolinkdel") & filters.group)
-async def toggle_biolinkdel_command(client: Client, message: Message):
-    if is_on_command_cooldown(message.from_user.id):
-        return
-    update_command_cooldown(message.from_user.id)
-
-    if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
-        await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    if len(message.command) < 2:
-        current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
-        current_status = current_status_doc.get("biolinkdel_enabled", False) if current_status_doc else False
-        status_text = "चालू है (ON)" if current_status else "बंद है (OFF)"
-        await send_and_auto_delete_reply(message, text=f"मेरी 'बायो-लिंक पुलिस' अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/biolinkdel on` या `/biolinkdel off` यूज़ करो. 👮‍♀️", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    action = message.command[1].lower()
-    if action == "on":
-        group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"biolinkdel_enabled": True}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="हम्म... 😼 अब से जो भी **यूज़र अपनी बायो में `t.me` या `http/https` लिंक रखेगा**, मैं उसके **मैसेज को चुपचाप हटा दूंगी!** (अगर उसे `/biolink` से छूट नहीं मिली है). ग्रुप में कोई मस्ती नहीं!🤫", parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Biolink deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
-    elif action == "off":
-        group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"biolinkdel_enabled": False}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="ओके डार्लिंग्स! 😇 अब मैं यूज़र्स की बायो में `t.me` और `http/https` लिंक्स को चेक करना बंद कर रही हूँ! सब फ्री-फ्री! 🎉", parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Biolink deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
-    else:
-        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/biolinkdel on` या `/biolinkdel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
-
-@app.on_message(filters.command("biolink") & filters.group)
-async def allow_biolink_user_command(client: Client, message: Message):
-    if is_on_command_cooldown(message.from_user.id):
-        return
-    update_command_cooldown(message.from_user.id)
-
-    if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
-        await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    if len(message.command) < 2:
-        await send_and_auto_delete_reply(message, text="किस यूज़र को बायो-लिंक की छूट देनी है? मुझे उसकी User ID दो ना, जैसे: `/biolink 123456789` या `/biolink remove 123456789`! 😉", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    action_or_user_id = message.command[1].lower()
-    target_user_id = None
-
-    if action_or_user_id == "remove" and len(message.command) > 2:
-        try:
-            target_user_id = int(message.command[2])
-            biolink_exceptions_collection.delete_one({"_id": target_user_id})
-            await send_and_auto_delete_reply(message, text=f"ओके! ✨ यूज़र `{target_user_id}` को अब बायो में लिंक रखने की छूट नहीं मिलेगी! बाय-बाय परमिशन! 👋", parse_mode=ParseMode.MARKDOWN)
-            logger.info(f"Removed user {target_user_id} from biolink exceptions in group {message.chat.id}.")
-        except ValueError:
-            await send_and_auto_delete_reply(message, text="उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", parse_mode=ParseMode.MARKDOWN)
-    else:
-        try:
-            target_user_id = int(action_or_user_id)
-            biolink_exceptions_collection.update_one(
-                {"_id": target_user_id},
-                {"$set": {"allowed_by_admin": True, "added_on": datetime.now(), "credit": "by @asbhaibsr"}},
-                upsert=True
-            )
-            await send_and_auto_delete_reply(message, text=f"याय! 🎉 मैंने यूज़र `{target_user_id}` को स्पेशल परमिशन दे दी है! अब ये **अपनी बायो में `t.me` या `http/https` लिंक्स** रख पाएंगे और उनके मैसेज डिलीट नहीं होंगे! क्यूंकि एडमिन ने बोला, तो बोला!👑", parse_mode=ParseMode.MARKDOWN)
-            logger.info(f"Added user {target_user_id} to biolink exceptions in group {message.chat.id}.")
-        except ValueError:
-            await send_and_auto_delete_reply(message, text="उम्म, गलत यूज़रआईडी! 🧐 यूज़रआईडी एक नंबर होती है. फिर से ट्राई करो, प्लीज़! 😉", parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
-
-@app.on_message(filters.command("usernamedel") & filters.group)
-async def toggle_usernamedel_command(client: Client, message: Message):
-    if is_on_command_cooldown(message.from_user.id):
-        return
-    update_command_cooldown(message.from_user.id)
-
-    if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
-        await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन) ही यूज़ कर सकते हैं! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    if len(message.command) < 2:
-        current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
-        current_status = current_status_doc.get("usernamedel_enabled", False) if current_status_doc else False
-        status_text = "चालू है (ON)" if current_status else "बंद है (OFF)"
-        await send_and_auto_delete_reply(message, text=f"मेरी '@' टैग पुलिस अभी **{status_text}** है. इसे कंट्रोल करने के लिए `/usernamedel on` या `/usernamedel off` यूज़ करो.🚨", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    action = message.command[1].lower()
-    if action == "on":
-        group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"usernamedel_enabled": True}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="चीं-चीं! 🐦 अब से कोई भी `@` करके किसी को भी परेशान नहीं कर पाएगा! जो करेगा, उसका मैसेज मैं फट से उड़ा दूंगी!💨 मुझे डिस्टर्बेंस पसंद नहीं! 😠", parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Username deletion enabled in group {message.chat.id} by admin {message.from_user.id}.")
-    elif action == "off":
-        group_tracking_collection.update_one({"_id": message.chat.id}, {"$set": {"usernamedel_enabled": False}}, upsert=True)
-        await send_and_auto_delete_reply(message, text="ठीक है! आज से मेरी @ वाली आंखें बंद! 😴 अब आप जो चाहे @ करो! पर ज़्यादा तंग मत करना किसी को! 🥺", parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Username deletion disabled in group {message.chat.id} by admin {message.from_user.id}.")
-    else:
-        await send_and_auto_delete_reply(message, text="उम्म... मुझे समझ नहीं आया! 😕 `/usernamedel on` या `/usernamedel off` यूज़ करो, प्लीज़! ✨", parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
-
 @app.on_message(filters.command("clearall") & filters.private)
 async def clear_all_dbs_command(client: Client, message: Message):
+    # ... [Rest of /clearall command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -812,6 +630,7 @@ async def clear_all_dbs_command(client: Client, message: Message):
 
 @app.on_message(filters.command("clearmydata"))
 async def clear_my_data_command(client: Client, message: Message):
+    # ... [Rest of /clearmydata command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -871,3 +690,153 @@ async def clear_my_data_command(client: Client, message: Message):
     await store_message(message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.id)
+
+
+# -----------------------------------------------------
+# GROUP COMMANDS (Modified/New)
+# -----------------------------------------------------
+
+@app.on_message(filters.command("start") & filters.group)
+async def start_group_command(client: Client, message: Message):
+    # ... [Rest of /start group command logic is unchanged] ...
+    if is_on_command_cooldown(message.from_user.id):
+        return
+    update_command_cooldown(message.from_user.id)
+
+    user_name = message.from_user.first_name if message.from_user else "Dost"
+    welcome_message = (
+        f"🌟 हे **{user_name}** जानू! आपका स्वागत है! 🌟\n\n"
+        "मैं ग्रुप की सभी बातें सुनने और सीखने के लिए तैयार हूँ!\n"
+        "सभी ग्रुप सेटिंग्स मैनेज करने के लिए `/settings` कमांड यूज़ करें।"
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("➕ मुझे ग्रुप में जोड़ें", url=f"https://t.me/{client.me.username}?startgroup=true")],
+            [
+                InlineKeyboardButton("📣 Updates Channel", url=f"https://t.me/{UPDATE_CHANNEL_USERNAME}"),
+                InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
+            ],
+            [
+                InlineKeyboardButton("⚙️ ग्रुप सेटिंग्स 🛠️", callback_data="open_group_settings"), # New button
+                InlineKeyboardButton("💰 Earning Leaderboard", callback_data="show_earning_leaderboard")
+            ]
+        ]
+    )
+    await send_and_auto_delete_reply(
+        message,
+        text=welcome_message,
+        photo=BOT_PHOTO_URL,
+        reply_markup=keyboard,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await store_message(message)
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.")
+        await update_group_info(message.chat.id, message.chat.title, message.chat.username)
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    logger.info(f"Group start command processed in chat {message.chat.id}. (Code by @asbhaibsr)")
+
+
+@app.on_message(filters.command("settings") & filters.group)
+async def open_settings_command(client: Client, message: Message):
+    if is_on_command_cooldown(message.from_user.id):
+        return
+    update_command_cooldown(message.from_user.id)
+
+    # 1. Check for Admin/Owner status
+    if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
+        await send_and_auto_delete_reply(message, text="माफ़ करना, ये कमांड सिर्फ़ मेरे बॉस (एडमिन/ओनर) ही यूज़ कर सकते हैं! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    # 2. Fetch current settings and default punishment
+    current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
+    
+    # Default values if not found
+    bot_enabled = current_status_doc.get("bot_enabled", True) if current_status_doc else True
+    linkdel_enabled = current_status_doc.get("linkdel_enabled", False) if current_status_doc else False
+    biolinkdel_enabled = current_status_doc.get("biolinkdel_enabled", False) if current_status_doc else False
+    usernamedel_enabled = current_status_doc.get("usernamedel_enabled", False) if current_status_doc else False
+    
+    punishment = current_status_doc.get("default_punishment", "delete") if current_status_doc else "delete"
+    
+    # Status texts
+    bot_status = "✅ चालू (ON)" if bot_enabled else "❌ बंद (OFF)"
+    link_status = "✅ चालू (ON)" if linkdel_enabled else "❌ बंद (OFF)"
+    biolink_status = "✅ चालू (ON)" if biolinkdel_enabled else "❌ बंद (OFF)"
+    username_status = "✅ चालू (ON)" if usernamedel_enabled else "❌ बंद (OFF)"
+    
+    # Punishment text
+    punishment_map = {
+        "delete": "🗑️ डिलीट मैसेज",
+        "mute": "🔇 म्यूट करें",
+        "warn": "⚠️ वार्न करें",
+        "ban": "⛔️ बैन करें"
+    }
+    punishment_text = punishment_map.get(punishment, "🗑️ डिलीट मैसेज")
+
+    # 3. Create the Main Settings Keyboard
+    keyboard = InlineKeyboardMarkup(
+        [
+            # Module Toggles
+            [
+                InlineKeyboardButton(f"🤖 बॉट चैटिंग: {bot_status}", callback_data="toggle_setting_bot_enabled"),
+            ],
+            [
+                InlineKeyboardButton(f"🔗 लिंक डिलीट: {link_status}", callback_data="toggle_setting_linkdel_enabled"),
+            ],
+            [
+                InlineKeyboardButton(f"👤 बायो लिंक डिलीट: {biolink_status}", callback_data="toggle_setting_biolinkdel_enabled"),
+            ],
+            [
+                InlineKeyboardButton(f"🗣️ @यूज़रनेम डिलीट: {username_status}", callback_data="toggle_setting_usernamedel_enabled"),
+            ],
+            # Punishment and Biolink Exception
+            [
+                InlineKeyboardButton(f"🔨 डिफ़ॉल्ट सज़ा: {punishment_text}", callback_data="open_punishment_settings"),
+            ],
+            [
+                 InlineKeyboardButton("👤 बायो लिंक छूट (Exceptions) 📝", callback_data="open_biolink_exceptions")
+            ],
+            # Close Button
+            [
+                InlineKeyboardButton("❌ सेटिंग्स बंद करें", callback_data="close_settings")
+            ]
+        ]
+    )
+
+    # 4. Send the Settings Message
+    settings_message = (
+        f"⚙️ **ग्रुप सेटिंग्स: {message.chat.title}** 🛠️\n\n"
+        "नमस्ते, बॉस! आप नीचे दिए गए बटनों से ग्रुप के नियम और बॉट के फ़ंक्शंस कंट्रोल कर सकते हैं।\n"
+        "आपके सभी फ़िल्टर सेटिंग्स को तोड़ने पर यूज़र्स को **डिफ़ॉल्ट सज़ा** मिलेगी।\n\n"
+        f"**डिफ़ॉल्ट सज़ा:** {punishment_text}\n"
+        "__नियमों को तोड़ने वाले को कौनसी सज़ा देनी है, वो 'डिफ़ॉल्ट सज़ा' से चुनें।__"
+    )
+
+    await send_and_auto_delete_reply(
+        message,
+        text=settings_message,
+        reply_markup=keyboard,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await store_message(message)
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        await update_group_info(message.chat.id, message.chat.title, message.chat.username)
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    logger.info(f"Group settings command processed in chat {message.chat.id} by admin {message.from_user.id}. (Code by @asbhaibsr)")
+
+
+# -----------------------------------------------------
+# DELETED/REMOVED COMMANDS (as requested by user)
+# -----------------------------------------------------
+
+# @app.on_message(filters.command("chat") & filters.group)
+# @app.on_message(filters.command("linkdel") & filters.group)
+# @app.on_message(filters.command("biolinkdel") & filters.group)
+# @app.on_message(filters.command("biolink") & filters.group)
+# @app.on_message(filters.command("usernamedel") & filters.group)
+#
+# **उपरोक्त सभी कमांड्स को हटा दिया गया है और अब वे /settings मेनू से मैनेज होंगी।**
+# **`/biolink` का कार्य अब `open_biolink_exceptions` कॉलबैक में चला जाएगा।**
