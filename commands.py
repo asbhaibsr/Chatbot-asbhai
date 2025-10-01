@@ -2,11 +2,11 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.enums import ChatType, ChatMemberStatus, ParseMode
 from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError
-import asyncio
-import os
-import sys
+# import asyncio # <--- REMOVED
+# import os # <--- REMOVED
+# import sys # <--- REMOVED
 from datetime import datetime
-import re # <-- यह 're' मॉड्यूल यहां जोड़ा गया
+import re 
 
 # Import utilities and configurations
 from config import (
@@ -22,9 +22,10 @@ from utils import (
 )
 
 import callbacks # <--- यह बहुत ज़रूरी लाइन है, जो callbacks.py को इम्पोर्ट करेगी
+import broadcast_handler # <--- 🌟 नई ब्रॉडकास्ट फ़ाइल इम्पोर्ट की गई 🌟
 
 # -----------------------------------------------------
-# PRIVATE CHAT COMMANDS (Unchanged)
+# PRIVATE CHAT COMMANDS (Unchanged, /broadcast removed)
 # -----------------------------------------------------
 
 @app.on_message(filters.command("start") & filters.private)
@@ -66,7 +67,6 @@ async def start_private_command(client: Client, message: Message):
 
 @app.on_message(filters.command("topusers") & (filters.private | filters.group))
 async def top_users_command(client: Client, message: Message):
-    # ... [Rest of /topusers command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -139,94 +139,13 @@ async def top_users_command(client: Client, message: Message):
     logger.info(f"Top users command processed for user {message.from_user.id} in chat {message.chat.id}. (Code by @asbhaibsr)")
 
 
-@app.on_message(filters.command("broadcast") & filters.private)
-async def broadcast_command(client: Client, message: Message):
-    # ... [Rest of /broadcast command logic is unchanged] ...
-    if is_on_command_cooldown(message.from_user.id):
-        return
-    update_command_cooldown(message.from_user.id)
-
-    if message.from_user.id != OWNER_ID:
-        await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    broadcast_text = None
-    broadcast_photo = None
-    broadcast_sticker = None
-    broadcast_video = None
-    broadcast_document = None
-
-    if message.reply_to_message:
-        replied_msg = message.reply_to_message
-        if replied_msg.text: broadcast_text = replied_msg.text
-        elif replied_msg.photo: broadcast_photo = replied_msg.photo.file_id; broadcast_text = replied_msg.caption
-        elif replied_msg.sticker: broadcast_sticker = replied_msg.sticker.file_id
-        elif replied_msg.video: broadcast_video = replied_msg.video.file_id; broadcast_text = replied_msg.caption
-        elif replied_msg.document: broadcast_document = replied_msg.document.file_id; broadcast_text = replied_msg.caption
-    elif len(message.command) > 1:
-        broadcast_text = message.text.split(None, 1)[1] 
-
-    if not any([broadcast_text, broadcast_photo, broadcast_sticker, broadcast_video, broadcast_document]):
-        await send_and_auto_delete_reply(message, text="Broadcast karne ke liye koi content nahi mila. Please text, sticker, photo, video, ya document bhejo ya reply karo. 🤔", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    group_chat_ids = [g["_id"] for g in group_tracking_collection.find({})]
-    private_chat_ids = [u["_id"] for u in user_tracking_collection.find({})]
-    all_target_ids = list(set(group_chat_ids + private_chat_ids))
-    if OWNER_ID in all_target_ids: all_target_ids.remove(OWNER_ID)
-
-    total_targets = len(all_target_ids)
-    sent_count = 0
-    failed_count = 0
-    
-    status_message = await message.reply_text(f"🚀 **Broadcast Shuru!** 🚀\n" f"Cool, main **{total_targets}** chats par message bhej rahi hoon.\n" f"Sent: **0** / Failed: **0** (Total: {total_targets})", parse_mode=ParseMode.MARKDOWN)
-
-    logger.info(f"Starting broadcast to {total_targets} chats (groups and users). (Broadcast by @asbhaibsr)")
-
-    for i, chat_id in enumerate(all_target_ids):
-        try:
-            if broadcast_photo: await client.send_photo(chat_id, broadcast_photo, caption=broadcast_text, parse_mode=ParseMode.MARKDOWN)
-            elif broadcast_sticker: await client.send_sticker(chat_id, broadcast_sticker)
-            elif broadcast_video: await client.send_video(chat_id, broadcast_video, caption=broadcast_text, parse_mode=ParseMode.MARKDOWN)
-            elif broadcast_document: await client.send_document(chat_id, broadcast_document, caption=broadcast_text, parse_mode=ParseMode.MARKDOWN)
-            elif broadcast_text: await client.send_message(chat_id, broadcast_text, parse_mode=ParseMode.MARKDOWN)
-            
-            sent_count += 1
-            if (i + 1) % 10 == 0 or (i + 1) == total_targets:
-                try:
-                    await status_message.edit_text(f"🚀 **Broadcast Progress...** 🚀\n" f"Cool, main **{total_targets}** chats par message bhej rahi hoon.\n" f"Sent: **{sent_count}** / Failed: **{failed_count}** (Total: {total_targets})", parse_mode=ParseMode.MARKDOWN)
-                except Exception as edit_e:
-                    logger.warning(f"Failed to edit broadcast status message: {edit_e}")
-            await asyncio.sleep(0.1)
-        except (UserIsBlocked, ChatWriteForbidden, PeerIdInvalid) as client_error:
-            failed_count += 1
-            logger.warning(f"Skipping broadcast to {chat_id} due to client error (blocked/forbidden/invalid): {client_error}")
-        except FloodWait as fw:
-            failed_count += 1
-            logger.warning(f"FloodWait of {fw.value} seconds encountered. Sleeping... (Broadcast by @asbhaibsr)")
-            await asyncio.sleep(fw.value)
-        except RPCError as rpc_e:
-            failed_count += 1
-            logger.error(f"RPC Error sending broadcast to chat {chat_id}: {rpc_e}. (Broadcast by @asbhaibsr)")
-        except Exception as e:
-            failed_count += 1
-            logger.error(f"Failed to send broadcast to chat {chat_id}: {e}. (Broadcast by @asbhaibsr)")
-        
-    final_message = (f"🎉 **Broadcast Complete!** 🎉\n" f"Total chats targeted: **{total_targets}**\n" f"Successfully sent: **{sent_count}** messages ✨\n" f"Failed to send: **{failed_count}** messages 💔\n\n" f"Koi nahi, next time! 😉 (System by @asbhaibsr)")
-    
-    try:
-        await status_message.edit_text(final_message, parse_mode=ParseMode.MARKDOWN)
-    except Exception as final_edit_e:
-        logger.error(f"Failed to send final broadcast summary: {final_edit_e}. Sending as new message instead.")
-        await send_and_auto_delete_reply(message, text=final_message, parse_mode=ParseMode.MARKDOWN)
-
-    await store_message(message)
-    logger.info(f"Broadcast command processed by owner {message.from_user.id}. (Code by @asbhaibsr)")
+# --------------------------------------------------------------------------------------
+# NOTE: /broadcast command has been completely removed and is now in broadcast_handler.py
+# --------------------------------------------------------------------------------------
 
 
 @app.on_message(filters.command("stats") & filters.private)
 async def stats_private_command(client: Client, message: Message):
-    # ... [Rest of /stats private command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -258,7 +177,6 @@ async def stats_private_command(client: Client, message: Message):
 
 @app.on_message(filters.command("stats") & filters.group)
 async def stats_group_command(client: Client, message: Message):
-    # ... [Rest of /stats group command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -292,7 +210,6 @@ async def stats_group_command(client: Client, message: Message):
 
 @app.on_message(filters.command("groups") & filters.private)
 async def list_groups_command(client: Client, message: Message):
-    # ... [Rest of /groups command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -343,7 +260,6 @@ async def list_groups_command(client: Client, message: Message):
 
 @app.on_message(filters.command("leavegroup") & filters.private)
 async def leave_group_command(client: Client, message: Message):
-    # ... [Rest of /leavegroup command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -387,7 +303,6 @@ async def leave_group_command(client: Client, message: Message):
 
 @app.on_message(filters.command("cleardata") & filters.private)
 async def clear_data_command(client: Client, message: Message):
-    # ... [Rest of /cleardata command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -456,7 +371,6 @@ async def clear_data_command(client: Client, message: Message):
 
 @app.on_message(filters.command("deletemessage") & filters.private)
 async def delete_specific_message_command(client: Client, message: Message):
-    # ... [Rest of /deletemessage command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -506,7 +420,6 @@ async def delete_specific_message_command(client: Client, message: Message):
 
 @app.on_message(filters.command("delsticker") & filters.private)
 async def delete_specific_sticker_command(client: Client, message: Message):
-    # ... [Rest of /delsticker command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -564,7 +477,6 @@ async def delete_specific_sticker_command(client: Client, message: Message):
 
 @app.on_message(filters.command("clearearning") & filters.private)
 async def clear_earning_command(client: Client, message: Message):
-    # ... [Rest of /clearearning command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -583,7 +495,6 @@ async def clear_earning_command(client: Client, message: Message):
 
 @app.on_message(filters.command("restart") & filters.private)
 async def restart_command(client: Client, message: Message):
-    # ... [Rest of /restart command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -594,12 +505,15 @@ async def restart_command(client: Client, message: Message):
 
     await send_and_auto_delete_reply(message, text="Okay, darling! Main abhi ek chhota sa nap le rahi hoon aur phir wapas aa jaungi, bilkul fresh aur energetic! Thoda wait karna, theek hai? ✨ (System by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
     logger.info("Bot is restarting... (System by @asbhaibsr)")
+    # IMPORTANT: The following lines are re-added here as they are required for a restart.
+    import asyncio # Re-added temporarily for a clean restart (though not strictly necessary if only using os.execl)
+    import os
+    import sys
     await asyncio.sleep(0.5)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
 @app.on_message(filters.command("clearall") & filters.private)
 async def clear_all_dbs_command(client: Client, message: Message):
-    # ... [Rest of /clearall command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -630,7 +544,6 @@ async def clear_all_dbs_command(client: Client, message: Message):
 
 @app.on_message(filters.command("clearmydata"))
 async def clear_my_data_command(client: Client, message: Message):
-    # ... [Rest of /clearmydata command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -693,12 +606,11 @@ async def clear_my_data_command(client: Client, message: Message):
 
 
 # -----------------------------------------------------
-# GROUP COMMANDS (Modified/New)
+# GROUP COMMANDS
 # -----------------------------------------------------
 
 @app.on_message(filters.command("start") & filters.group)
 async def start_group_command(client: Client, message: Message):
-    # ... [Rest of /start group command logic is unchanged] ...
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
@@ -829,7 +741,7 @@ async def open_settings_command(client: Client, message: Message):
 
 
 # -----------------------------------------------------
-# DELETED/REMOVED COMMANDS (as requested by user)
+# DELETED/REMOVED COMMANDS 
 # -----------------------------------------------------
 
 # @app.on_message(filters.command("chat") & filters.group)
