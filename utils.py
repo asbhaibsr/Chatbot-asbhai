@@ -16,21 +16,17 @@ from pyrogram.raw.types import SendMessageTypingAction
 from textblob import TextBlob
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
-# NEW FREE AI/NLP LIBRARY IMPORTS
+# FREE AI/NLP LIBRARY IMPORTS (FuzzyWuzzy is simple and essential for matching)
 from fuzzywuzzy import fuzz 
 
-# Recruitment (Naye AI/NLP tools ke imports)
+# Recruitment (Google Gemini/LLM tool ka import)
 try:
     import google.genai as genai
     from google.genai.errors import APIError
 except ImportError:
     genai = None
 
-try:
-    from sentence_transformers import SentenceTransformer, util
-    import spacy
-except ImportError:
-    SentenceTransformer, util, spacy = None, None, None
+# Note: spacy and sentence_transformers have been removed as requested.
 
 # Configuration imports (Assume these are correctly defined in config.py)
 from config import (
@@ -47,29 +43,19 @@ earning_cooldowns = {}
 # New: Global dictionary to store chat context (last 5 messages)
 chat_contexts = {}
 MAX_CONTEXT_SIZE = 5
-BOT_USER_ID_PLACEHOLDER = app.me.id
+
+# --- FIX for AttributeError: 'NoneType' object has no attribute 'id' ---
+# BOT_USER_ID_PLACEHOLDER ko abhi 'None' par set kiya gaya hai.
+# Jab bhi iski zaroorat padegi, hum 'app.me.id' (ya 'app.me.id' ko check karke) use karenge.
+BOT_USER_ID_PLACEHOLDER = None 
 
 # Initialize sentiment analyzer
 analyser = SentimentIntensityAnalyzer()
 
 # --- RECRUITMENT: Initialize Advanced AI/NLP Tools ---
+# spacy aur sentence_transformers ko hata diya gaya hai.
 nlp = None
-if spacy:
-    try:
-        # Note: 'en_core_web_sm' must be downloaded via terminal: python -m spacy download en_core_web_sm
-        nlp = spacy.load("en_core_web_sm")
-        logger.info("SpaCy NLP Model loaded for advanced entity extraction.")
-    except Exception as e:
-        logger.warning(f"Error loading SpaCy: {e}. Advanced NLP disabled.")
-
 semantic_model = None
-if SentenceTransformer:
-    try:
-        # Note: This model downloads the first time it runs
-        semantic_model = SentenceTransformer('all-MiniLM-L6-v2') 
-        logger.info("Sentence Transformer Model loaded for semantic matching.")
-    except Exception as e:
-        logger.warning(f"Error loading Sentence Transformer: {e}. Semantic matching disabled.")
 
 GEMINI_CLIENT = None
 if genai:
@@ -153,17 +139,11 @@ def extract_keywords(text):
     stop_words = {"ko", "ke", "ka", "ki", "mein", "main", "hai", "tha", "the", "aur", "ya", "ek", "tum"}
     filtered_words = [w for w in words if w not in stop_words and len(w) > 2]
     
-    # NEW: Use SpaCy for better entity/keyword extraction if available
-    if nlp:
-        doc = nlp(text)
-        # Add Noun Phrases and Named Entities
-        filtered_words.extend([chunk.text.lower() for chunk in doc.noun_chunks])
-        filtered_words.extend([ent.text.lower() for ent in doc.ents])
+    # SpaCy/NLP ka code hata diya gaya hai.
         
     return list(set(filtered_words))
 
 async def prune_old_messages():
-    # ... (Pruning logic as before) ...
     total_messages = messages_collection.count_documents({})
     logger.info(f"Current total messages in DB: {total_messages}.")
 
@@ -200,13 +180,16 @@ async def store_message(client: Client, message: Message):
             "type": current_message_type
         }
         
+        # FIX: BOT_ID ko abhi app.me se lete hain, ya default value 'None' use karte hain.
+        bot_id = client.me.id if client.me else None
+
         # --- User-to-User Conversation Pattern Storage (Learning) ---
         if len(chat_contexts[chat_id]) >= 1:
             last_message = chat_contexts[chat_id][-1]
             last_user_id = last_message.get("user_id")
             
             if (last_user_id is not None and last_user_id != current_user_id and 
-                last_user_id != BOT_USER_ID_PLACEHOLDER and current_user_id != BOT_USER_ID_PLACEHOLDER and
+                last_user_id != bot_id and current_user_id != bot_id and
                 last_message.get("type") == "text" and current_message_type == "text"):
                 
                 trigger_content = last_message["content"]
@@ -263,14 +246,17 @@ async def store_message(client: Client, message: Message):
 
 
 # --- TIER 0.5 AI Function (Mocking External LLM like Gemini/ChatGPT) ---
-def generate_external_llm_mock_tier0_5(text: str, context: list):
+def generate_external_llm_mock_tier0_5(client: Client, text: str, context: list):
     """Mocks a complex, detailed, and high-quality response, or uses real Gemini if available."""
     
+    bot_id = client.me.id if client.me else None
+    
     # 1. NEW: Real Gemini Call (If client is initialized)
-    if GEMINI_CLIENT:
+    if GEMINI_CLIENT and bot_id:
         try:
             # Build history for context
-            history = "\n".join([f"{'User' if m['user_id'] != BOT_USER_ID_PLACEHOLDER else 'Bot'}: {m['content']}" for m in context])
+            # Use bot_id for the placeholder check
+            history = "\n".join([f"{'User' if m['user_id'] != bot_id else 'Bot'}: {m['content']}" for m in context])
             prompt = f"You are a friendly, casual, young female bot. Continue this conversation in Hindi/Hinglish. Previous chat:\n{history}\n\nUser: {text}\n\nYour Reply:"
             
             response = GEMINI_CLIENT.models.generate_content(
@@ -382,28 +368,15 @@ async def generate_reply(message: Message):
         trigger = response_doc.get("trigger_content", "")
         if not trigger or query_type != 'text': return 0
         
-        # Enhanced Score: Semantic (if available) + Fuzzy
-        fuzzy_score = fuzz.token_set_ratio(query.lower(), trigger.lower())
-        
-        if semantic_model:
-            try:
-                # Calculate semantic similarity (more meaningful match)
-                embeddings1 = semantic_model.encode(query, convert_to_tensor=True)
-                embeddings2 = semantic_model.encode(trigger, convert_to_tensor=True)
-                semantic_similarity = util.cos_sim(embeddings1, embeddings2).item() * 100
-                # Use a blend, prioritizing the higher score
-                score = max(fuzzy_score, semantic_similarity)
-            except Exception as e:
-                logger.warning(f"Semantic scoring failed: {e}. Using Fuzzy score.")
-                score = fuzzy_score
-        else:
-            score = fuzzy_score
+        # Semantic scoring removed, only FuzzyWuzzy used now.
+        score = fuzz.token_set_ratio(query.lower(), trigger.lower())
         
         return 101 if score >= 99 else int(score) # Max 101 for perfect match
 
 
     # --- TIER 0.5: External LLM Mock (Highest Priority AI - Contextual) ---
-    ai_reply_text_tier0_5 = generate_external_llm_mock_tier0_5(query_content, current_context)
+    # client object is now passed to access app.me.id inside the function
+    ai_reply_text_tier0_5 = generate_external_llm_mock_tier0_5(app, query_content, current_context)
     if ai_reply_text_tier0_5 and random.random() < 0.6: 
         logger.info(f"TIER 0.5: Falling back to External LLM/Gemini AI: {ai_reply_text_tier0_5}")
         return {"type": "text", "content": ai_reply_text_tier0_5}
@@ -460,8 +433,8 @@ async def generate_reply(message: Message):
     logger.info("TIER 5: Final Text Fallback.")
     return {"type": "text", "content": "Mujhe is baare mein abhi aur seekhne ki zaroorat hai. Tum kya soch rahe ho?"}
 
-# --- REST OF THE UTILITY FUNCTIONS ---
-# (is_admin_or_owner, contains_link, contains_mention, update_group_info, update_user_info, etc. are assumed to be here, unmodified from the original structure)
+# --- REST OF THE UTILITY FUNCTIONS (Unmodified) ---
+# ... (is_admin_or_owner, contains_link, contains_mention, update_group_info, update_user_info, etc.)
 async def is_admin_or_owner(client: Client, chat_id: int, user_id: int):
     if user_id == OWNER_ID:
         return True
