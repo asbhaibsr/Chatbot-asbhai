@@ -51,13 +51,13 @@ async def handle_new_user_message(client: Client, message: Message):
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
         
         notification_text = (
-            f"🆕 𝗳𝗡𝗲𝘄 𝗨𝘀𝗲𝗿 𝗔𝗹𝗲𝗿𝘁!\n"
-            f"𝗳𝗔 𝗻𝗲𝘄 𝘂𝘀𝗲𝗿 𝗵𝗮𝘀 𝗷𝗼𝗶𝗻𝗲𝗱 𝘁𝗵𝗲 𝗯𝗼𝘁!\n\n"
-            f"• 𝗳𝗨𝘀𝗲𝗿 𝗜𝗗: `{message.from_user.id}`\n"
-            f"• 𝗳𝗨𝘀𝗲𝗿𝗻𝗮𝗺𝗲: @{message.from_user.username if message.from_user.username else 'N/A'}\n"
-            f"• 𝗳𝗡𝗮𝗺𝗲: {message.from_user.first_name or ''} {message.from_user.last_name or ''}\n"
-            f"• 𝗳𝗙𝗶𝗿𝘀𝘁 𝗠𝗲𝘀𝘀𝗮𝗴𝗲: {message.text or 'N/A (media message)'}\n"
-            f"• 𝗳𝗧𝗶𝗺𝗲: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"🆕 𝗡𝗲𝘄 𝗨𝘀𝗲𝗿 𝗔𝗹𝗲𝗿𝘁!\n"
+            f"𝗔 𝗻𝗲𝘄 𝘂𝘀𝗲𝗿 𝗵𝗮𝘀 𝗷𝗼𝗶𝗻𝗲𝗱 𝘁𝗵𝗲 𝗯𝗼𝘁!\n\n"
+            f"• 𝗨𝘀𝗲𝗿 𝗜𝗗: `{message.from_user.id}`\n"
+            f"• 𝗨𝘀𝗲𝗿𝗻𝗮𝗺𝗲: @{message.from_user.username if message.from_user.username else 'N/A'}\n"
+            f"• 𝗡𝗮𝗺𝗲: {message.from_user.first_name or ''} {message.from_user.last_name or ''}\n"
+            f"• 𝗙𝗶𝗿𝘀𝘁 𝗠𝗲𝘀𝘀𝗮𝗴𝗲: {message.text or 'N/A (media message)'}\n"
+            f"• 𝗧𝗶𝗺𝗲: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             f"Code By: @asbhaibsr\nUpdates: @asbhai_bsr"
         )
         
@@ -92,7 +92,7 @@ async def callback_handler(client, callback_query):
     if callback_query.data == "buy_git_repo":
         await send_and_auto_delete_reply(
             callback_query.message,
-            text=f"𝗳🤩 𝗜𝗳 𝘆𝗼𝘂 𝘄𝗮𝗻𝘁 𝘆𝗼𝘂𝗿 𝗼𝘄𝗻 𝗯𝗼𝘁 𝗹𝗶𝗸𝗲 𝗺𝗲, 𝘆𝗼𝘂 𝗵𝗮𝘃𝗲 𝘁𝗼 𝗽𝗮𝘆 ₹𝟱𝟬𝟬. 𝗙𝗼𝗿 𝘁𝗵𝗶𝘀, 𝗰𝗼𝗻𝘁𝗮𝗰𝘁 **@{ASBHAI_USERNAME}** 𝗮𝗻𝗱 𝘁𝗲𝗹𝗹 𝗵𝗶𝗺 𝘁𝗵𝗮𝘁 𝘆𝗼𝘂 𝘄𝗮𝗻𝘁 𝘁𝗼 𝗯𝘂𝗶𝗹𝗱 𝘁𝗵𝗶𝘀 𝗯𝗼𝘁'𝘀 𝗰𝗼𝗱𝗲. 𝗛𝘂𝗿𝗿𝘆 𝘂𝗽, 𝗱𝗲𝗮𝗹𝘀 𝗮𝗿𝗲 𝗵𝗼𝘁! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @asbhai_bsr",
+            text=f"🤩 𝗜𝗳 𝘆𝗼𝘂 𝘄𝗮𝗻𝘁 𝘆𝗼𝘂𝗿 𝗼𝘄𝗻 𝗯𝗼𝘁 𝗹𝗶𝗸𝗲 𝗺𝗲, 𝘆𝗼𝘂 𝗵𝗮𝘃𝗲 𝘁𝗼 𝗽𝗮𝘆 ₹𝟱𝟬𝟬. 𝗙𝗼𝗿 𝘁𝗵𝗶𝘀, 𝗰𝗼𝗻𝘁𝗮𝗰𝘁 **@{ASBHAI_USERNAME}** 𝗮𝗻𝗱 𝘁𝗲𝗹𝗹 𝗵𝗶𝗺 𝘁𝗵𝗮𝘁 𝘆𝗼𝘂 𝘄𝗮𝗻𝘁 𝘁𝗼 𝗯𝘂𝗶𝗹𝗱 𝘁𝗵𝗶𝘀 𝗯𝗼𝘁'𝘀 𝗰𝗼𝗱𝗲. 𝗛𝘂𝗿𝗿𝘆 𝘂𝗽, 𝗱𝗲𝗮𝗹𝘀 𝗮𝗿𝗲 𝗵𝗼𝘁! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @asbhai_bsr",
             parse_mode=ParseMode.MARKDOWN
         )
     # The actual logic for show_earning_leaderboard, show_help_menu, show_earning_rules 
@@ -108,11 +108,11 @@ async def handle_clearall_dbs_callback(client: Client, callback_query):
     await query.answer()
 
     if query.from_user.id != OWNER_ID:
-        await query.edit_message_text("𝗳𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱 𝘁𝗼 𝗽𝗲𝗿𝗳𝗼𝗿𝗺 𝘁𝗵𝗶𝘀 𝗮𝗰𝘁𝗶𝗼𝗻.")
+        await query.edit_message_text("𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱 𝘁𝗼 𝗽𝗲𝗿𝗳𝗼𝗿𝗺 𝘁𝗵𝗶𝘀 𝗮𝗰𝘁𝗶𝗼𝗻.")
         return
 
     if query.data == 'confirm_clearall_dbs':
-        await query.edit_message_text("𝗳𝗗𝗲𝗹𝗲𝘁𝗶𝗻𝗴 𝗱𝗮𝘁𝗮... 𝗣𝗹𝗲𝗮𝘀𝗲 𝘄𝗮𝗶𝘁.⏳")
+        await query.edit_message_text("𝗗𝗲𝗹𝗲𝘁𝗶𝗻𝗴 𝗱𝗮𝘁𝗮... 𝗣𝗹𝗲𝗮𝘀𝗲 𝘄𝗮𝗶𝘁.⏳")
         try:
             messages_collection.drop()
             logger.info("messages_collection dropped.")
@@ -134,13 +134,13 @@ async def handle_clearall_dbs_callback(client: Client, callback_query):
             conversational_learning_collection.drop()
             logger.info("conversational_learning_collection dropped.")
 
-            await query.edit_message_text("✅ **𝗳𝗦𝘂𝗰𝗰𝗲𝘀𝘀:** 𝗔𝗹𝗹 𝗱𝗮𝘁𝗮 𝗳𝗿𝗼𝗺 𝘆𝗼𝘂𝗿 𝗠𝗼𝗻𝗴𝗼𝗗𝗕 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲𝘀 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗱𝗲𝗹𝗲𝘁𝗲𝗱. 𝗧𝗵𝗲 𝗯𝗼𝘁 𝗶𝘀 𝗻𝗼𝘄 𝗰𝗼𝗺𝗽𝗹𝗲𝘁𝗲𝗹𝘆 𝗳𝗿𝗲𝘀𝗵! ✨", parse_mode=ParseMode.MARKDOWN)
+            await query.edit_message_text("✅ **𝗦𝘂𝗰𝗰𝗲𝘀𝘀:** 𝗔𝗹𝗹 𝗱𝗮𝘁𝗮 𝗳𝗿𝗼𝗺 𝘆𝗼𝘂𝗿 𝗠𝗼𝗻𝗴𝗼𝗗𝗕 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲𝘀 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗱𝗲𝗹𝗲𝘁𝗲𝗱. 𝗧𝗵𝗲 𝗯𝗼𝘁 𝗶𝘀 𝗻𝗼𝘄 𝗰𝗼𝗺𝗽𝗹𝗲𝘁𝗲𝗹𝘆 𝗳𝗿𝗲𝘀𝗵! ✨", parse_mode=ParseMode.MARKDOWN)
             logger.info(f"Owner {query.from_user.id} confirmed and successfully cleared all MongoDB data.")
         except Exception as e:
-            await query.edit_message_text(f"❌ **𝗳𝗘𝗿𝗿𝗼𝗿:** 𝗔 𝗽𝗿𝗼𝗯𝗹𝗲𝗺 𝗼𝗰𝗰𝘂𝗿𝗿𝗲𝗱 𝘄𝗵𝗶𝗹𝗲 𝗱𝗲𝗹𝗲𝘁𝗶𝗻𝗴 𝗱𝗮𝘁𝗮: {e}\n\n𝗳𝗣𝗹𝗲𝗮𝘀𝗲 𝗰𝗵𝗲𝗰𝗸 𝘁𝗵𝗲 𝗹𝗼𝗴𝘀.", parse_mode=ParseMode.MARKDOWN)
+            await query.edit_message_text(f"❌ **𝗘𝗿𝗿𝗼𝗿:** 𝗔 𝗽𝗿𝗼𝗯𝗹𝗲𝗺 𝗼𝗰𝗰𝘂𝗿𝗿𝗲𝗱 𝘄𝗵𝗶𝗹𝗲 𝗱𝗲𝗹𝗲𝘁𝗶𝗻𝗴 𝗱𝗮𝘁𝗮: {e}\n\n𝗳𝗣𝗹𝗲𝗮𝘀𝗲 𝗰𝗵𝗲𝗰𝗸 𝘁𝗵𝗲 𝗹𝗼𝗴𝘀.", parse_mode=ParseMode.MARKDOWN)
             logger.error(f"Error during /clearall confirmation and deletion: {e}")
     elif query.data == 'cancel_clearall_dbs':
-        await query.edit_message_text("𝗳𝗔𝗰𝘁𝗶𝗼𝗻 𝗰𝗮𝗻𝗰𝗲𝗹𝗹𝗲𝗱. 𝗬𝗼𝘂𝗿 𝗱𝗮𝘁𝗮 𝗶𝘀 𝘀𝗮𝗳𝗲. ✅", parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text("𝗔𝗰𝘁𝗶𝗼𝗻 𝗰𝗮𝗻𝗰𝗲𝗹𝗹𝗲𝗱. 𝗬𝗼𝘂𝗿 𝗱𝗮𝘁𝗮 𝗶𝘀 𝘀𝗮𝗳𝗲. ✅", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Owner {query.from_user.id} cancelled /clearall operation.")
 
 # -----------------
@@ -165,12 +165,12 @@ async def new_member_handler(client: Client, message: Message):
                 group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
                 added_by_user = message.from_user.first_name if message.from_user else "Unknown User"
                 notification_message = (
-                    f"🥳 **𝗳𝗡𝗲𝘄 𝗚𝗿𝗼𝘂𝗽 𝗔𝗹𝗲𝗿𝘁!**\n"
-                    f"𝗳𝗧𝗵𝗲 𝗯𝗼𝘁 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝗮𝗱𝗱𝗲𝗱 𝘁𝗼 𝗮 𝗻𝗲𝘄 𝗴𝗿𝗼𝘂𝗽!\n\n"
-                    f"**𝗳𝗚𝗿𝗼𝘂𝗽 𝗡𝗮𝗺𝗲:** {group_title}\n"
-                    f"**𝗳𝗚𝗿𝗼𝘂𝗽 𝗜𝗗:** `{message.chat.id}`\n"
-                    f"**𝗳𝗔𝗱𝗱𝗲𝗱 𝗕𝘆:** {added_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
-                    f"**𝗳𝗔𝗱𝗱𝗲𝗱 𝗢𝗻:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                    f"🥳 **𝗡𝗲𝘄 𝗚𝗿𝗼𝘂𝗽 𝗔𝗹𝗲𝗿𝘁!**\n"
+                    f"𝗧𝗵𝗲 𝗯𝗼𝘁 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝗮𝗱𝗱𝗲𝗱 𝘁𝗼 𝗮 𝗻𝗲𝘄 𝗴𝗿𝗼𝘂𝗽!\n\n"
+                    f"**𝗚𝗿𝗼𝘂𝗽 𝗡𝗮𝗺𝗲:** {group_title}\n"
+                    f"**𝗚𝗿𝗼𝘂𝗽 𝗜𝗗:** `{message.chat.id}`\n"
+                    f"**𝗔𝗱𝗱𝗲𝗱 𝗕𝘆:** {added_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
+                    f"**𝗔𝗱𝗱𝗲𝗱 𝗢𝗻:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                     f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
                 )
                 try:
@@ -207,12 +207,12 @@ async def left_member_handler(client: Client, message: Message):
             group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
             left_by_user = message.from_user.first_name if message.from_user else "Unknown User"
             notification_message = (
-                f"💔 𝗳𝗚𝗿𝗼𝘂𝗽 𝗟𝗲𝗳𝘁 𝗔𝗹𝗲𝗿𝘁!\n"
-                f"𝗳𝗧𝗵𝗲 𝗯𝗼𝘁 𝘄𝗮𝘀 𝗿𝗲𝗺𝗼𝘃𝗲𝗱 𝗳𝗿𝗼𝗺 𝗮 𝗴𝗿𝗼𝘂𝗽!\n\n"
-                f"**𝗳𝗚𝗿𝗼𝘂𝗽 𝗡𝗮𝗺𝗲:** {group_title}\n"
-                f"**𝗳𝗚𝗿𝗼𝘂𝗽 𝗜𝗗:** `{message.chat.id}`\n"
-                f"**𝗳𝗔𝗰𝘁𝗶𝗼𝗻 𝗕𝘆:** {left_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
-                f"**𝗳𝗟𝗲𝗳𝘁 𝗢𝗻:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                f"💔 𝗚𝗿𝗼𝘂𝗽 𝗟𝗲𝗳𝘁 𝗔𝗹𝗲𝗿𝘁!\n"
+                f"𝗧𝗵𝗲 𝗯𝗼𝘁 𝘄𝗮𝘀 𝗿𝗲𝗺𝗼𝘃𝗲𝗱 𝗳𝗿𝗼𝗺 𝗮 𝗴𝗿𝗼𝘂𝗽!\n\n"
+                f"**𝗚𝗿𝗼𝘂𝗽 𝗡𝗮𝗺𝗲:** {group_title}\n"
+                f"**𝗚𝗿𝗼𝘂𝗽 𝗜𝗗:** `{message.chat.id}`\n"
+                f"**𝗔𝗰𝘁𝗶𝗼𝗻 𝗕𝘆:** {left_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
+                f"**𝗟𝗲𝗳𝘁 𝗢𝗻:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                 f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
             )
             try:
@@ -298,8 +298,8 @@ async def handle_message_and_reply(client: Client, message: Message):
                         try:
                             await message.delete()
                             sent_delete_alert = await message.reply_text(
-                                f"𝗳𝗢𝗵 𝗻𝗼! 😲 𝗬𝗼𝘂 𝗵𝗮𝘃𝗲 𝗮 **𝗹𝗶𝗻𝗸 𝗶𝗻 𝘆𝗼𝘂𝗿 𝗯𝗶𝗼!** 𝗧𝗵𝗮𝘁'𝘀 𝘄𝗵𝘆 𝘆𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗱𝗶𝘀𝗮𝗽𝗽𝗲𝗮𝗿𝗲𝗱!👻\n"
-                                "𝗳𝗣𝗹𝗲𝗮𝘀𝗲 𝗿𝗲𝗺𝗼𝘃𝗲 𝘁𝗵𝗲 𝗹𝗶𝗻𝗸 𝗳𝗿𝗼𝗺 𝘆𝗼𝘂𝗿 𝗯𝗶𝗼. 𝗜𝗳 𝘆𝗼𝘂 𝗿𝗲𝗾𝘂𝗶𝗿𝗲 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻, 𝗽𝗹𝗲𝗮𝘀𝗲 𝗰𝗼𝗻𝘁𝗮𝗰𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻 𝗮𝗻𝗱 𝗮𝘀𝗸 𝘁𝗵𝗲𝗺 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗲 `/biolink your_userid` 𝗰𝗼𝗺𝗺𝗮𝗻𝗱.",
+                                f"𝗢𝗵 𝗻𝗼! 😲 𝗬𝗼𝘂 𝗵𝗮𝘃𝗲 𝗮 **𝗹𝗶𝗻𝗸 𝗶𝗻 𝘆𝗼𝘂𝗿 𝗯𝗶𝗼!** 𝗧𝗵𝗮𝘁'𝘀 𝘄𝗵𝘆 𝘆𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗱𝗶𝘀𝗮𝗽𝗽𝗲𝗮𝗿𝗲𝗱!👻\n"
+                                "𝗣𝗹𝗲𝗮𝘀𝗲 𝗿𝗲𝗺𝗼𝘃𝗲 𝘁𝗵𝗲 𝗹𝗶𝗻𝗸 𝗳𝗿𝗼𝗺 𝘆𝗼𝘂𝗿 𝗯𝗶𝗼. 𝗜𝗳 𝘆𝗼𝘂 𝗿𝗲𝗾𝘂𝗶𝗿𝗲 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻, 𝗽𝗹𝗲𝗮𝘀𝗲 𝗰𝗼𝗻𝘁𝗮𝗰𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻 𝗮𝗻𝗱 𝗮𝘀𝗸 𝘁𝗵𝗲𝗺 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗲 `/biolink your_userid` 𝗰𝗼𝗺𝗺𝗮𝗻𝗱.",
                                 quote=True, parse_mode=ParseMode.MARKDOWN
                             )
                             asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
@@ -377,7 +377,7 @@ async def handle_message_and_reply(client: Client, message: Message):
                         logger.error(f"Permission error: Bot cannot send messages in chat {message.chat.id}. Leaving group.")
                         try:
                             await client.leave_chat(message.chat.id)
-                            await client.send_message(OWNER_ID, f"**𝗳𝗔𝗟𝗘𝗥𝗧:** 𝗕𝗼𝘁 𝘄𝗮𝘀 𝗿𝗲𝗺𝗼𝘃𝗲𝗱 𝗳𝗿𝗼𝗺 𝗴𝗿𝗼𝘂𝗽 `{message.chat.id}` 𝗯𝗲𝗰𝗮𝘂𝘀𝗲 𝗶𝘁 𝗹𝗼𝘀𝘁 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻 𝘁𝗼 𝘀𝗲𝗻𝗱 𝗺𝗲𝘀𝘀𝗮𝗴𝗲𝘀.")
+                            await client.send_message(OWNER_ID, f"**𝗔𝗟𝗘𝗥𝗧:** 𝗕𝗼𝘁 𝘄𝗮𝘀 𝗿𝗲𝗺𝗼𝘃𝗲𝗱 𝗳𝗿𝗼𝗺 𝗴𝗿𝗼𝘂𝗽 `{message.chat.id}` 𝗯𝗲𝗰𝗮𝘂𝘀𝗲 𝗶𝘁 𝗹𝗼𝘀𝘁 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻 𝘁𝗼 𝘀𝗲𝗻𝗱 𝗺𝗲𝘀𝘀𝗮𝗴𝗲𝘀.")
                         except Exception as leave_e:
                             logger.error(f"Failed to leave chat {message.chat.id} after permission error: {leave_e}")
                     else:
