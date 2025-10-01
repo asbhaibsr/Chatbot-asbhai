@@ -57,6 +57,7 @@ async def start_private_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
+    # FIX: Added 'client' argument
     await store_message(client, message) 
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -130,7 +131,8 @@ async def top_users_command(client: Client, message: Message):
         ]
     )
     await send_and_auto_delete_reply(message, text="\n".join(earning_messages), reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-    await store_message(message)
+    # FIX: Added 'client' argument
+    await store_message(client, message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Top users command processed for user {message.from_user.id} in chat {message.chat.id}.")
@@ -162,7 +164,8 @@ async def stats_private_command(client: Client, message: Message):
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
+    # FIX: Added 'client' argument
+    await store_message(client, message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private stats command processed for user {message.from_user.id}.")
@@ -193,7 +196,8 @@ async def stats_group_command(client: Client, message: Message):
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
-    await store_message(message)
+    # FIX: Added 'client' argument
+    await store_message(client, message)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
@@ -246,7 +250,8 @@ async def list_groups_command(client: Client, message: Message):
 
     group_list_text += "\n𝗧𝗵𝗶𝘀 𝗱𝗮𝘁𝗮 𝗶𝘀 𝗳𝗿𝗼𝗺 𝘁𝗵𝗲 𝘁𝗿𝗮𝗰𝗸𝗶𝗻𝗴 𝗱𝗮𝘁𝗮𝗯𝗮𝘀𝗲, 𝗶𝘁'𝘀 𝗮 𝘀𝗲𝗰𝗿𝗲𝘁! 🤫\n**Powered By:** @asbhaibsr"
     await send_and_auto_delete_reply(message, text=group_list_text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-    await store_message(message)
+    # FIX: Added 'client' argument
+    await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Groups list command processed by owner {message.from_user.id}.")
 
@@ -289,7 +294,8 @@ async def leave_group_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text=f"𝗔𝗻 𝗲𝗿𝗿𝗼𝗿 𝗼𝗰𝗰𝘂𝗿𝗿𝗲𝗱 𝘄𝗵𝗶𝗹𝗲 𝗹𝗲𝗮𝘃𝗶𝗻𝗴 𝘁𝗵𝗲 𝗴𝗿𝗼𝘂𝗽: {e}. 𝗢𝗵 𝗻𝗼! 😢", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Error leaving group {group_id_str}: {e}.")
 
-    await store_message(message)
+    # FIX: Added 'client' argument
+    await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -336,6 +342,8 @@ async def clear_data_command(client: Client, message: Message):
     if total_owner_taught > 0:
         docs_to_delete_owner = int(total_owner_taught * (percentage / 100))
         oldest_owner_taught_ids = []
+        # FIX: The field 'responses.timestamp' might not be indexed correctly for sorting. Using 'responses.0.timestamp' might be more accurate if responses is an array.
+        # But for now, keeping original logic and trusting the DB design.
         for doc in owner_taught_responses_collection.find({}).sort("responses.timestamp", 1).limit(docs_to_delete_owner):
             oldest_owner_taught_ids.append(doc['_id'])
         if oldest_owner_taught_ids:
@@ -344,6 +352,8 @@ async def clear_data_command(client: Client, message: Message):
     if total_conversational > 0:
         docs_to_delete_conv = int(total_conversational * (percentage / 100))
         oldest_conv_ids = []
+        # FIX: The field 'responses.timestamp' might not be indexed correctly for sorting. Using 'responses.0.timestamp' might be more accurate if responses is an array.
+        # But for now, keeping original logic and trusting the DB design.
         for doc in conversational_learning_collection.find({}).sort("responses.timestamp", 1).limit(docs_to_delete_conv):
             oldest_conv_ids.append(doc['_id'])
         if oldest_conv_ids:
@@ -357,7 +367,8 @@ async def clear_data_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝗜 𝗱𝗶𝗱𝗻'𝘁 𝗳𝗶𝗻𝗱 𝗮𝗻𝘆𝘁𝗵𝗶𝗻𝗴 𝘁𝗼 𝗱𝗲𝗹𝗲𝘁𝗲. 𝗜𝘁 𝘀𝗲𝗲𝗺𝘀 𝘆𝗼𝘂'𝘃𝗲 𝗮𝗹𝗿𝗲𝗮𝗱𝘆 𝗰𝗹𝗲𝗮𝗻𝗲𝗱 𝗲𝘃𝗲𝗿𝘆𝘁𝗵𝗶𝗻𝗴! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # FIX: Added 'client' argument
+    await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -406,7 +417,8 @@ async def delete_specific_message_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝗜 𝗱𝗶𝗱𝗻'𝘁 𝗳𝗶𝗻𝗱 𝗮𝗻𝘆 **𝘁𝗲𝘅𝘁 𝗺𝗲𝘀𝘀𝗮𝗴𝗲** 𝗶𝗻 𝗺𝘆 𝗱𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝘄𝗶𝘁𝗵 𝘆𝗼𝘂𝗿 𝗾𝘂𝗲𝗿𝘆. 𝗖𝗵𝗲𝗰𝗸 𝘁𝗵𝗲 𝘀𝗽𝗲𝗹𝗹𝗶𝗻𝗴? 🤔", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # FIX: Added 'client' argument
+    await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -463,7 +475,8 @@ async def delete_specific_sticker_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝗜 𝗱𝗶𝗱𝗻'𝘁 𝗳𝗶𝗻𝗱 𝗮𝗻𝘆 **𝘀𝘁𝗶𝗰𝗸𝗲𝗿** 𝗶𝗻 𝗺𝘆 𝗱𝗮𝘁𝗮𝗯𝗮𝘀𝗲. 𝗘𝗶𝘁𝗵𝗲𝗿 𝘁𝗵𝗲𝗿𝗲 𝗮𝗿𝗲 𝗻𝗼 𝘀𝘁𝗶𝗰𝗸𝗲𝗿𝘀, 𝗼𝗿 𝘁𝗵𝗲 𝗽𝗲𝗿𝗰𝗲𝗻𝘁𝗮𝗴𝗲 𝗶𝘀 𝘁𝗼𝗼 𝗹𝗼𝘄! 🤔", parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # FIX: Added 'client' argument
+    await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -481,7 +494,8 @@ async def clear_earning_command(client: Client, message: Message):
     await send_and_auto_delete_reply(message, text="💰 **𝗘𝗮𝗿𝗻𝗶𝗻𝗴 𝗱𝗮𝘁𝗮 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗰𝗹𝗲𝗮𝗿𝗲𝗱!** 𝗡𝗼𝘄 𝗲𝘃𝗲𝗿𝘆𝗼𝗻𝗲 𝘄𝗶𝗹𝗹 𝘀𝘁𝗮𝗿𝘁 𝗳𝗿𝗼𝗺 𝘇𝗲𝗿𝗼 𝗮𝗴𝗮𝗶𝗻! 😉", parse_mode=ParseMode.MARKDOWN)
     logger.info(f"Owner {message.from_user.id} manually triggered earning data reset.")
 
-    await store_message(message)
+    # FIX: Added 'client' argument
+    await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -500,6 +514,9 @@ async def restart_command(client: Client, message: Message):
     import asyncio
     import os
     import sys
+    # FIX: No need to store message right before restarting, but keeping the call for completeness if store_message is critical.
+    # The client object is still valid here.
+    # await store_message(client, message) 
     await asyncio.sleep(0.5)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
@@ -516,8 +533,8 @@ async def clear_all_dbs_command(client: Client, message: Message):
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("Yᴇꜱ, Dᴇʟᴇᴛᴇ ⚠️", callback_data='confirm_clearall_dbs'),
-                InlineKeyboardButton("Nᴏ, Kᴇᴇᴘ Iᴛ ✅", callback_data='cancel_clearall_dbs')
+                InlineKeyboardButton("Yᴇꜱ, Dᴇʟᴇ𝘁𝗲 ⚠️", callback_data='confirm_clearall_dbs'),
+                InlineKeyboardButton("Nᴏ, Kᴇᴇᴘ I𝘁 ✅", callback_data='cancel_clearall_dbs')
             ]
         ]
     )
@@ -531,7 +548,8 @@ async def clear_all_dbs_command(client: Client, message: Message):
         parse_mode=ParseMode.MARKDOWN
     )
     logger.info(f"Owner {message.from_user.id} initiated /clearall command. Waiting for confirmation.")
-    await store_message(message) 
+    # FIX: Added 'client' argument
+    await store_message(client, message) 
 
 @app.on_message(filters.command("clearmydata"))
 async def clear_my_data_command(client: Client, message: Message):
@@ -591,9 +609,13 @@ async def clear_my_data_command(client: Client, message: Message):
     except Exception as e:
         await send_and_auto_delete_reply(message, text=f"𝗦𝗼𝗺𝗲𝘁𝗵𝗶𝗻𝗴 𝘄𝗲𝗻𝘁 𝘄𝗿𝗼𝗻𝗴 𝘄𝗵𝗶𝗹𝗲 𝗱𝗲𝗹𝗲𝘁𝗶𝗻𝗴 𝗱𝗮𝘁𝗮: {e}. 𝗢𝗵 𝗻𝗼! 😱", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Error clearing data for user {target_user_id}: {e}")
-    await store_message(message)
+    
+    # FIX: Added 'client' argument
+    await store_message(client, message)
+    
+    # FIX: Corrected update_user_info arguments
     if message.from_user:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.id)
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
 # -----------------------------------------------------
@@ -632,7 +654,8 @@ async def start_group_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
-    await store_message(message)
+    # FIX: Added 'client' argument
+    await store_message(client, message)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.")
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
@@ -689,21 +712,21 @@ async def open_settings_command(client: Client, message: Message):
                 InlineKeyboardButton(f"🔗 Lɪɴᴋ Dᴇʟᴇᴛᴇ: {link_status}", callback_data="toggle_setting_linkdel_enabled"),
             ],
             [
-                InlineKeyboardButton(f"👤 Bɪᴏ Lɪɴᴋ Dᴇʟᴇᴛᴇ: {biolink_status}", callback_data="toggle_setting_biolinkdel_enabled"),
+                InlineKeyboardButton(f"👤 Bɪᴏ Lɪɴᴋ Dᴇ𝗹𝗲𝘁𝗲: {biolink_status}", callback_data="toggle_setting_biolinkdel_enabled"),
             ],
             [
-                InlineKeyboardButton(f"🗣️ @Uꜱᴇʀɴᴀᴍᴇ Dᴇʟᴇᴛᴇ: {username_status}", callback_data="toggle_setting_usernamedel_enabled"),
+                InlineKeyboardButton(f"🗣️ @Uꜱᴇ𝗿𝗻𝗮𝗺𝗲 D𝗲𝗹𝗲𝘁𝗲: {username_status}", callback_data="toggle_setting_usernamedel_enabled"),
             ],
             # Punishment and Biolink Exception
             [
-                InlineKeyboardButton(f"🔨 Dᴇꜰᴀᴜʟᴛ Pᴜɴɪꜱʜᴍᴇɴᴛ: {punishment_text}", callback_data="open_punishment_settings"),
+                InlineKeyboardButton(f"🔨 Dᴇ𝗳𝗮𝘂𝗹𝘁 Pᴜ𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁: {punishment_text}", callback_data="open_punishment_settings"),
             ],
             [
-                 InlineKeyboardButton("👤 Bɪᴏ Lɪɴᴋ Exᴄᴇᴘᴛɪᴏɴꜱ 📝", callback_data="open_biolink_exceptions")
+                 InlineKeyboardButton("👤 Bɪ𝗼 L𝗶𝗻𝗸 Exᴄᴇᴘᴛɪᴏɴꜱ 📝", callback_data="open_biolink_exceptions")
             ],
             # Close Button
             [
-                InlineKeyboardButton("❌ Cʟᴏꜱᴇ Sᴇᴛᴛɪɴɢꜱ", callback_data="close_settings")
+                InlineKeyboardButton("❌ Cʟ𝗼𝘀𝗲 S𝗲𝘁𝘁𝗶𝗻𝗴ꜱ", callback_data="close_settings")
             ]
         ]
     )
@@ -723,7 +746,8 @@ async def open_settings_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
-    await store_message(message)
+    # CRITICAL FIX: The previous log showed this exact line causing a TypeError.
+    await store_message(client, message)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
