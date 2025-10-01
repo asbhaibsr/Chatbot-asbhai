@@ -43,7 +43,7 @@ UPDATE_CHANNEL_USERNAME = "asbhai_bsr"
 ASBHAI_USERNAME = "asbhaibsr" # Owner's username for contact
 ASFILTER_BOT_USERNAME = "asfilter_bot" # The bot for premium rewards
 BOT_PHOTO_URL = "https://envs.sh/FU3.jpg" # Consider updating this URL if it's generic
-REPO_LINK = "https://github.com/asbhaibsr/Chatbot-asbhai.git"
+REPO_LINK = "https://envs.sh/KI3.jpg"
 
 # Regex for common URL patterns including t.me and typical link formats
 URL_PATTERN = re.compile(r"(?:https?://|www\.|t\.me/)[^\s/$.?#].[^\s]*", re.IGNORECASE)
