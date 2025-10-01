@@ -34,9 +34,11 @@ except Exception as e:
 # Import necessary components from other files
 from config import app, logger, flask_app
 from web import run_flask_app
+
 # It's important to import commands and events so Pyrogram can register the handlers
 import commands
 import events
+import broadcast_handler # 🌟 नई ब्रॉडकास्ट फ़ाइल इम्पोर्ट की गई 🌟
 
 if __name__ == "__main__":
     logger.info("Starting Flask health check server in a separate thread...")
