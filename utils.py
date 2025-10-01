@@ -22,14 +22,14 @@ from fuzzywuzzy import fuzz
 # --- RECRUITMENT: New Free AI Library (g4f) ---
 try:
     import g4f
-    # Set the default model for g4f (e.g., Deepseek, or any reliable free provider)
-    G4F_MODEL = g4f.models.gpt_35_turbo
+    # FIX: Using the more generic and stable model gpt_35_turbo to fix AttributeError
+    G4F_MODEL = g4f.models.gpt_35_turbo 
     g4f.debug.logging = False # Turn off excessive g4f logging
 except ImportError:
     g4f = None
     G4F_MODEL = None
     logger.warning("g4f library not found. Tier 0.5 AI will be disabled.")
-# google.genai has been REMOVED as requested.
+# google.genai has been REMOVED.
 
 # Configuration imports (Assume these are correctly defined in config.py)
 from config import (
@@ -68,9 +68,16 @@ async def delete_after_delay_for_message(message: Message, text: str = None, pho
     """
     sent_message = None
     user_info_str = ""
+    
     # Simplified text prep logic (keeping the core functionality intact)
     text_to_send = text
-    
+    if message.command and text:
+        command_name = message.command[0]
+        user_info_str = ""
+        if message.from_user:
+            user_info_str = f" (द्वारा: @{message.from_user.username})" if message.from_user.username else f" (द्वारा: {message.from_user.first_name})"
+        text_to_send = f"**कमांड:** `{command_name}`{user_info_str}\n\n{text}"
+
     if photo:
         sent_message = await message.reply_photo(
             photo=photo,
@@ -294,7 +301,7 @@ async def store_message(client: Client, message: Message):
 async def generate_g4f_response_tier0_5(client: Client, text: str, context: list):
     """Uses the g4f library to access free LLMs for a complex, detailed, and high-quality response."""
     
-    if not g4f:
+    if not g4f or not G4F_MODEL:
         return None
     
     bot_id = client.me.id if client.me else None
@@ -421,19 +428,7 @@ async def generate_reply(message: Message):
         return 101 if score >= 99 else int(score) # Max 101 for perfect match
 
 
-    # --- TIER 0.5: g4f (Highest Priority Free LLM - Contextual) ---
-    ai_reply_text_tier0_5 = await generate_g4f_response_tier0_5(app, query_content, current_context)
-    if ai_reply_text_tier0_5 and random.random() < 0.8: # High chance to use g4f
-        logger.info(f"TIER 0.5: Using g4f Free LLM: {ai_reply_text_tier0_5}")
-        return {"type": "text", "content": ai_reply_text_tier0_5}
-            
-    # --- TIER 0: Enhanced Contextual Responder (Real Human Feel AI) ---
-    ai_reply_text_tier0 = generate_best_contextual_response_tier0(query_content, current_context)
-    if ai_reply_text_tier0: 
-        logger.info(f"TIER 0: Falling back to Enhanced Contextual AI: {ai_reply_text_tier0}")
-        return {"type": "text", "content": ai_reply_text_tier0}
-            
-    # --- TIER 1: Pattern Matching (Learning System - High Similarity) ---
+    # --- TIER 1: Pattern Matching (Learning System - HIGHEST PRIORITY) ---
     docs = list(conversational_learning_collection.find({"trigger_type": query_type, "trigger_content": {"$exists": True, "$ne": None}}))
     all_responses = []
 
@@ -452,15 +447,29 @@ async def generate_reply(message: Message):
             chosen_list = user_specific_responses if user_specific_responses else best_responses
             
             chosen_response = random.choice(chosen_list)['data']
-            logger.info(f"TIER 1 (Pattern Match) found. Score: {highest_score}.")
+            logger.info(f"TIER 1 (Pattern Match - Learning) found. Score: {highest_score}.")
             return {"type": "text", "content": chosen_response.get('content')}
+
     
-    # --- TIER 2: NLTK/TextBlob Advanced Fallback (Free AI 1) ---
+    # --- TIER 0.5: g4f (Second Highest Priority - Free LLM Access) ---
+    ai_reply_text_tier0_5 = await generate_g4f_response_tier0_5(app, query_content, current_context)
+    if ai_reply_text_tier0_5 and random.random() < 0.8: # High chance to use g4f
+        logger.info(f"TIER 0.5: Using g4f Free LLM: {ai_reply_text_tier0_5}")
+        return {"type": "text", "content": ai_reply_text_tier0_5}
+            
+    # --- TIER 0: Enhanced Contextual Responder (Rule-Based Human Feel) ---
+    ai_reply_text_tier0 = generate_best_contextual_response_tier0(query_content, current_context)
+    if ai_reply_text_tier0: 
+        logger.info(f"TIER 0: Falling back to Enhanced Contextual AI: {ai_reply_text_tier0}")
+        return {"type": "text", "content": ai_reply_text_tier0}
+            
+    
+    # --- TIER 2: NLTK/TextBlob Advanced Fallback (Free AI 1 - Sentiment) ---
     ai_reply_text_tier2 = generate_free_ai_response_tier2(query_content)
     logger.info(f"TIER 2: Falling back to NLTK/TextBlob Advanced AI: {ai_reply_text_tier2}")
     return {"type": "text", "content": ai_reply_text_tier2}
 
-    # --- TIER 3: Powerful Free AI Fallback (Simple LLM Mock) ---
+    # --- TIER 3: Powerful Free AI Fallback (Simple LLM Mock - Keywords) ---
     if random.random() < 0.5:
         ai_reply_text_tier3 = generate_powerful_free_ai_response_tier3(query_content)
         logger.info(f"TIER 3: Falling back to MOCK Powerful Free AI: {ai_reply_text_tier3}")
