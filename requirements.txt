@@ -10,4 +10,4 @@ textblob
 nltk
 fuzzywuzzy
 Levenshtein
-gff==0.2.1.2
+g4f==0.2.1.2
