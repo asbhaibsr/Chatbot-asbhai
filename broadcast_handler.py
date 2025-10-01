@@ -69,15 +69,31 @@ async def pm_broadcast(client: Client, message: Message):
         
     try:
         # Owner se broadcast message pucho
-        b_msg = await client.ask(
-            chat_id=message.from_user.id, 
-            text="**🚀 Private Broadcast:** Ab mujhe woh message bhejo jise tum users ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬", 
-            parse_mode=ParseMode.MARKDOWN, 
-            timeout=600 # Increased timeout to 10 minutes
+        # Step 1: Prompt the user
+        await client.send_message(
+            chat_id=message.from_user.id,
+            text="**🚀 Private Broadcast:** Ab mujhe woh message bhejo jise tum users ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬",
+            parse_mode=ParseMode.MARKDOWN
         )
-    except Exception as e:
+
+        # Step 2: Listen for the next message with a timeout
+        b_msg = await client.listen(
+            chat_id=message.from_user.id,
+            timeout=600 # 10 minutes timeout
+        )
+        
+        # Check if the message is valid
+        if not b_msg:
+             # This should ideally be covered by the timeout exception below, but is a safe check.
+             raise asyncio.TimeoutError
+             
+    except asyncio.TimeoutError:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
-        logger.warning(f"Broadcast cancelled by timeout or error: {e}")
+        logger.warning("Broadcast cancelled by timeout: User failed to reply in time.")
+        return
+    except Exception as e:
+        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        logger.warning(f"Broadcast cancelled by error during listen: {e}")
         return
     
     # Target IDs nikalna (Groups aur Owner ID ko hata kar)
@@ -172,15 +188,30 @@ async def broadcast_group(client: Client, message: Message):
         
     try:
         # Owner se broadcast message pucho
-        b_msg = await client.ask(
-            chat_id=message.from_user.id, 
-            text="**🚀 Group Broadcast:** Ab mujhe woh message bhejo jise tum Groups ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬", 
-            parse_mode=ParseMode.MARKDOWN, 
-            timeout=600 # Increased timeout to 10 minutes
+        # Step 1: Prompt the user
+        await client.send_message(
+            chat_id=message.from_user.id,
+            text="**🚀 Group Broadcast:** Ab mujhe woh message bhejo jise tum Groups ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬",
+            parse_mode=ParseMode.MARKDOWN
         )
-    except Exception as e:
+
+        # Step 2: Listen for the next message with a timeout
+        b_msg = await client.listen(
+            chat_id=message.from_user.id,
+            timeout=600 # 10 minutes timeout
+        )
+        
+        # Check if the message is valid
+        if not b_msg:
+             raise asyncio.TimeoutError
+             
+    except asyncio.TimeoutError:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
-        logger.warning(f"Broadcast cancelled by timeout or error: {e}")
+        logger.warning("Broadcast cancelled by timeout: User failed to reply in time.")
+        return
+    except Exception as e:
+        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        logger.warning(f"Broadcast cancelled by error during listen: {e}")
         return
     
     # Target IDs nikalna (Sirf Groups)
