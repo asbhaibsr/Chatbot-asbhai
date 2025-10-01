@@ -14,7 +14,8 @@ from config import (
     logger, OWNER_ID
 )
 from utils import (
-    is_on_command_cooldown, update_command_cooldown, send_and_auto_delete_reply,
+    # is_on_command_cooldown, update_command_cooldown, # REMOVED: Cooldowns are removed for client.ask
+    send_and_auto_delete_reply,
     store_message
 )
 
@@ -23,29 +24,29 @@ async def send_broadcast_message(client: Client, chat_id: int, message: Message)
     """
     Given a chat ID and a message object (the message to broadcast), 
     sends the message and handles different content types.
+    
     Returns: (True/False, reason_string)
     """
     try:
-        # Check if the message has content that can be forwarded or copied
-        if message.text or message.caption:
-            await message.copy(chat_id, parse_mode=ParseMode.MARKDOWN)
-        elif message.photo or message.video or message.sticker or message.document:
-            await message.copy(chat_id)
-        else:
-            return (False, "No Content")
+        # We use message.copy() which is the best way to handle all media types (photo, video, text, etc.)
+        # and preserves caption/formatting.
+        await message.copy(chat_id, parse_mode=ParseMode.MARKDOWN)
         
         return (True, "Success")
     
     except UserIsBlocked:
         return (False, "Blocked")
     except ChatWriteForbidden:
-        return (False, "Blocked") # User can block, or bot was removed from group
+        # This occurs if the bot is not an admin, or was removed, or cannot post messages.
+        return (False, "Blocked") 
     except PeerIdInvalid:
+        # This occurs if the user/group was deleted or the ID is invalid.
         return (False, "Deleted/Invalid")
     except FloodWait as fw:
-        logger.warning(f"FloodWait of {fw.value}s encountered. (Broadcast by @asbhaibsr)")
+        logger.warning(f"FloodWait of {fw.value}s encountered. Sleeping... (Broadcast by @asbhaibsr)")
         await asyncio.sleep(fw.value)
-        return await send_broadcast_message(client, chat_id, message) # Retry after flood wait
+        # Retry the message after the sleep
+        return await send_broadcast_message(client, chat_id, message) 
     except RPCError as rpc_e:
         logger.error(f"RPC Error sending broadcast to chat {chat_id}: {rpc_e}")
         return (False, "Error")
@@ -60,9 +61,7 @@ async def send_broadcast_message(client: Client, chat_id: int, message: Message)
 
 @app.on_message(filters.command("broadcast") & filters.private)
 async def pm_broadcast(client: Client, message: Message):
-    if is_on_command_cooldown(message.from_user.id):
-        return
-    update_command_cooldown(message.from_user.id)
+    # Cooldown checks are intentionally REMOVED here to prevent client.ask from being blocked.
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -70,7 +69,12 @@ async def pm_broadcast(client: Client, message: Message):
         
     try:
         # Owner se broadcast message pucho
-        b_msg = await client.ask(chat_id=message.from_user.id, text="**🚀 Private Broadcast:** Ab mujhe woh message bhejo jise tum users ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬", parse_mode=ParseMode.MARKDOWN, timeout=300)
+        b_msg = await client.ask(
+            chat_id=message.from_user.id, 
+            text="**🚀 Private Broadcast:** Ab mujhe woh message bhejo jise tum users ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬", 
+            parse_mode=ParseMode.MARKDOWN, 
+            timeout=600 # Increased timeout to 10 minutes
+        )
     except Exception as e:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.warning(f"Broadcast cancelled by timeout or error: {e}")
@@ -88,6 +92,7 @@ async def pm_broadcast(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Mujhe koi user mila hi nahi jise message bheja ja sake (Owner ko chhodkar). 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
         return
 
+    # Initial status message
     sts = await message.reply_text(f"🚀 **Private Broadcast Shuru!** 🚀\n" 
                                    f"Cool, main **{total_targets}** private chats par message bhej rahi hoon.\n" 
                                    f"Sent: **0** / Blocked: **0** / Deleted: **0** (Total: {total_targets})", 
@@ -102,6 +107,7 @@ async def pm_broadcast(client: Client, message: Message):
     
     logger.info(f"Starting PM broadcast to {total_targets} users. (Broadcast by @asbhaibsr)")
 
+    # Sending logic
     for i, chat_id in enumerate(all_target_ids):
         pti, sh = await send_broadcast_message(client, chat_id, b_msg)
         
@@ -116,6 +122,8 @@ async def pm_broadcast(client: Client, message: Message):
                 failed += 1
 
         done += 1
+        
+        # Update status every 20 messages or when finished
         if done % 20 == 0 or done == total_targets:
             try:
                 await sts.edit_text(f"🚀 **Private Broadcast Progress...** 🚀\n\n" 
@@ -127,7 +135,8 @@ async def pm_broadcast(client: Client, message: Message):
                                     parse_mode=ParseMode.MARKDOWN)
             except Exception as edit_e:
                 logger.warning(f"Failed to edit broadcast status message: {edit_e}")
-
+                await asyncio.sleep(1) # Wait before next action
+                
     time_taken = datetime.timedelta(seconds=int(time.time()-start_time))
     final_message = (f"🎉 **Private Broadcast Complete!** 🎉\n" 
                      f"Completed in **{time_taken}** seconds.\n\n" 
@@ -138,6 +147,7 @@ async def pm_broadcast(client: Client, message: Message):
                      f"Other Failures: **{failed}** 😥\n\n"
                      f"Koi nahi, next time! 😉 (System by @asbhaibsr)")
     
+    # Final summary
     try:
         await sts.edit_text(final_message, parse_mode=ParseMode.MARKDOWN)
     except Exception as final_edit_e:
@@ -153,9 +163,7 @@ async def pm_broadcast(client: Client, message: Message):
 
 @app.on_message(filters.command("grp_broadcast") & filters.private)
 async def broadcast_group(client: Client, message: Message):
-    if is_on_command_cooldown(message.from_user.id):
-        return
-    update_command_cooldown(message.from_user.id)
+    # Cooldown checks are intentionally REMOVED here to prevent client.ask from being blocked.
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
@@ -163,7 +171,12 @@ async def broadcast_group(client: Client, message: Message):
         
     try:
         # Owner se broadcast message pucho
-        b_msg = await client.ask(chat_id=message.from_user.id, text="**🚀 Group Broadcast:** Ab mujhe woh message bhejo jise tum Groups ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬", parse_mode=ParseMode.MARKDOWN, timeout=300)
+        b_msg = await client.ask(
+            chat_id=message.from_user.id, 
+            text="**🚀 Group Broadcast:** Ab mujhe woh message bhejo jise tum Groups ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬", 
+            parse_mode=ParseMode.MARKDOWN, 
+            timeout=600 # Increased timeout to 10 minutes
+        )
     except Exception as e:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.warning(f"Broadcast cancelled by timeout or error: {e}")
@@ -179,6 +192,7 @@ async def broadcast_group(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Mujhe koi Group mila hi nahi jise message bheja ja sake. Pehle mujhe Groups mein add karo! 🥺", parse_mode=ParseMode.MARKDOWN)
         return
 
+    # Initial status message
     sts = await message.reply_text(f"🚀 **Group Broadcast Shuru!** 🚀\n" 
                                    f"Cool, main **{total_targets}** Groups par message bhej rahi hoon.\n" 
                                    f"Sent: **0** / Failed: **0** (Total: {total_targets})", 
@@ -191,15 +205,19 @@ async def broadcast_group(client: Client, message: Message):
     
     logger.info(f"Starting Group broadcast to {total_targets} groups. (Broadcast by @asbhaibsr)")
 
+    # Sending logic
     for i, chat_id in enumerate(all_target_ids):
         pti, sh = await send_broadcast_message(client, chat_id, b_msg)
         
         if pti:
             success += 1
         else:
+            # For groups, we generally just count failed, as blocked/deleted status is less clear than for private users
             failed += 1
 
         done += 1
+        
+        # Update status every 20 messages or when finished
         if done % 20 == 0 or done == total_targets:
             try:
                 await sts.edit_text(f"🚀 **Group Broadcast Progress...** 🚀\n\n" 
@@ -210,6 +228,7 @@ async def broadcast_group(client: Client, message: Message):
                                     parse_mode=ParseMode.MARKDOWN)
             except Exception as edit_e:
                 logger.warning(f"Failed to edit broadcast status message: {edit_e}")
+                await asyncio.sleep(1) # Wait before next action
                 
     time_taken = datetime.timedelta(seconds=int(time.time()-start_time))
     final_message = (f"🎉 **Group Broadcast Complete!** 🎉\n" 
@@ -219,6 +238,7 @@ async def broadcast_group(client: Client, message: Message):
                      f"Failed/Forbidden: **{failed}** messages 💔\n\n"
                      f"Koi nahi, next time! 😉 (System by @asbhaibsr)")
     
+    # Final summary
     try:
         await sts.edit_text(final_message, parse_mode=ParseMode.MARKDOWN)
     except Exception as final_edit_e:
