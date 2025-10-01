@@ -10,6 +10,4 @@ textblob
 nltk
 fuzzywuzzy
 Levenshtein
-sentence-transformers==2.7.0
-spacy==3.7.4
 google-genai==0.1.0
