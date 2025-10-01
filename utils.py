@@ -16,17 +16,20 @@ from pyrogram.raw.types import SendMessageTypingAction
 from textblob import TextBlob
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
-# FREE AI/NLP LIBRARY IMPORTS (FuzzyWuzzy is simple and essential for matching)
+# FREE AI/NLP LIBRARY IMPORTS
 from fuzzywuzzy import fuzz 
 
-# Recruitment (Google Gemini/LLM tool ka import)
+# --- RECRUITMENT: New Free AI Library (g4f) ---
 try:
-    import google.genai as genai
-    from google.genai.errors import APIError
+    import g4f
+    # Set the default model for g4f (e.g., Deepseek, or any reliable free provider)
+    G4F_MODEL = g4f.models.DeepseekChat
+    g4f.debug.logging = False # Turn off excessive g4f logging
 except ImportError:
-    genai = None
-
-# Note: spacy and sentence_transformers have been removed as requested.
+    g4f = None
+    G4F_MODEL = None
+    logger.warning("g4f library not found. Tier 0.5 AI will be disabled.")
+# google.genai has been REMOVED as requested.
 
 # Configuration imports (Assume these are correctly defined in config.py)
 from config import (
@@ -44,29 +47,74 @@ earning_cooldowns = {}
 chat_contexts = {}
 MAX_CONTEXT_SIZE = 5
 
-# --- FIX for AttributeError: 'NoneType' object has no attribute 'id' ---
-# BOT_USER_ID_PLACEHOLDER ko abhi 'None' par set kiya gaya hai.
-# Jab bhi iski zaroorat padegi, hum 'app.me.id' (ya 'app.me.id' ko check karke) use karenge.
+# Bot ID is set to None globally and fetched in functions, fixing the 'AttributeError'
 BOT_USER_ID_PLACEHOLDER = None 
 
 # Initialize sentiment analyzer
 analyser = SentimentIntensityAnalyzer()
 
-# --- RECRUITMENT: Initialize Advanced AI/NLP Tools ---
-# spacy aur sentence_transformers ko hata diya gaya hai.
+# Advanced AI/NLP Tools (Set to None for stability)
 nlp = None
 semantic_model = None
-
 GEMINI_CLIENT = None
-if genai:
-    try:
-        # Assuming GEMINI_API_KEY is available in your environment or config
-        GEMINI_CLIENT = genai.Client()
-        logger.info("Gemini Client initialized and ready.")
-    except Exception as e:
-        logger.error(f"Gemini Client failed to initialize: {e}. Falling back to mock Tiers.")
 
 # --- CORE UTILITY FUNCTIONS ---
+
+# Renaming the main send/delete function back to the expected name for 'events.py'
+async def delete_after_delay_for_message(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
+    """
+    Sends a reply and sets a task to auto-delete both the command and the reply after a delay.
+    This function name is kept for compatibility with events.py
+    """
+    sent_message = None
+    user_info_str = ""
+    # Simplified text prep logic (keeping the core functionality intact)
+    text_to_send = text
+    
+    if photo:
+        sent_message = await message.reply_photo(
+            photo=photo,
+            caption=text_to_send,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+    elif text:
+        sent_message = await message.reply_text(
+            text_to_send,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            disable_web_page_preview=disable_web_page_preview
+        )
+    elif sticker:
+        sent_message = await message.reply_sticker(
+            sticker=sticker
+        )
+    else:
+        logger.warning(f"delete_after_delay_for_message called with no content for message {message.id}.")
+        return None
+
+    # Do not auto-delete 'start' command reply
+    if message.command and message.command[0] == "start":
+        return sent_message
+
+    async def delete_task():
+        await asyncio.sleep(180) # Wait for 3 minutes
+        try:
+            # Delete bot's reply
+            if sent_message:
+                await sent_message.delete()
+            # Delete user's original command message (if not private chat)
+            if message.chat.type != ChatType.PRIVATE:
+                 await message.delete()
+        except Exception as e:
+            logger.warning(f"Failed to delete message in chat {message.chat.id}: {e}")
+
+    asyncio.create_task(delete_task())
+    return sent_message
+
+# Renaming the new function for use in the rest of the code for clarity
+send_and_auto_delete_reply = delete_after_delay_for_message
+
 
 def get_sentiment(text):
     if not text:
@@ -138,9 +186,6 @@ def extract_keywords(text):
     words = re.findall(r'\b\w+\b', text.lower())
     stop_words = {"ko", "ke", "ka", "ki", "mein", "main", "hai", "tha", "the", "aur", "ya", "ek", "tum"}
     filtered_words = [w for w in words if w not in stop_words and len(w) > 2]
-    
-    # SpaCy/NLP ka code hata diya gaya hai.
-        
     return list(set(filtered_words))
 
 async def prune_old_messages():
@@ -180,7 +225,7 @@ async def store_message(client: Client, message: Message):
             "type": current_message_type
         }
         
-        # FIX: BOT_ID ko abhi app.me se lete hain, ya default value 'None' use karte hain.
+        # Get bot ID safely
         bot_id = client.me.id if client.me else None
 
         # --- User-to-User Conversation Pattern Storage (Learning) ---
@@ -245,40 +290,42 @@ async def store_message(client: Client, message: Message):
         logger.error(f"Error storing message {message.id}: {e}.")
 
 
-# --- TIER 0.5 AI Function (Mocking External LLM like Gemini/ChatGPT) ---
-def generate_external_llm_mock_tier0_5(client: Client, text: str, context: list):
-    """Mocks a complex, detailed, and high-quality response, or uses real Gemini if available."""
+# --- TIER 0.5 AI Function (g4f - High-Quality Free LLM Access) ---
+async def generate_g4f_response_tier0_5(client: Client, text: str, context: list):
+    """Uses the g4f library to access free LLMs for a complex, detailed, and high-quality response."""
+    
+    if not g4f:
+        return None
     
     bot_id = client.me.id if client.me else None
-    
-    # 1. NEW: Real Gemini Call (If client is initialized)
-    if GEMINI_CLIENT and bot_id:
-        try:
-            # Build history for context
-            # Use bot_id for the placeholder check
-            history = "\n".join([f"{'User' if m['user_id'] != bot_id else 'Bot'}: {m['content']}" for m in context])
-            prompt = f"You are a friendly, casual, young female bot. Continue this conversation in Hindi/Hinglish. Previous chat:\n{history}\n\nUser: {text}\n\nYour Reply:"
-            
-            response = GEMINI_CLIENT.models.generate_content(
-                model='gemini-2.5-flash', # Use a fast model
-                contents=prompt
-            )
-            return response.text
-        except APIError as e:
-            logger.error(f"Gemini API Error: {e}")
-        except Exception as e:
-            logger.error(f"Gemini generation failed: {e}")
+    if not bot_id: return None
 
-    # 2. Mock Logic Fallback (If Gemini is not available)
-    last_message = text.lower()
-    
-    if "kyun" in last_message or "kaise" in last_message or "matlab" in last_message or len(text.split()) > 7:
-        return "Accha, tum iska **reason** puchh rahe ho. Dekho, iske peeche ka main logic yeh hai ki... [**High-quality explanation logic here**]. Kya tum is baat se sehmat ho? 🧐"
-    
-    if len(context) >= 2:
-        previous_msg = context[-2].get('content', '').lower()
-        if "achha" in previous_msg and "aur" in last_message:
-             return "Hmm... aur? Aur kya ho raha hai? Thoda aur detail mein batao, sunke achha lag raha hai. 😊"
+    try:
+        # Build history for context (g4f needs conversation history)
+        history = [
+            {"role": "system", "content": "You are a friendly, casual, young female bot. Reply in short, casual Hindi/Hinglish."}
+        ]
+        
+        # Add context messages
+        for m in context:
+            role = "assistant" if m.get('user_id') == bot_id else "user"
+            history.append({"role": role, "content": m['content']})
+        
+        # Add current message
+        history.append({"role": "user", "content": text})
+
+        # --- G4F Call ---
+        response_text = await g4f.ChatCompletion.create_async(
+            model=G4F_MODEL, 
+            messages=history,
+            temperature=0.7 # Thoda creative response
+        )
+        
+        if response_text and response_text.strip():
+            return response_text
+        
+    except Exception as e:
+        logger.error(f"G4F Free AI generation failed: {e}. Falling back to mock Tiers.")
 
     return None
 
@@ -368,17 +415,16 @@ async def generate_reply(message: Message):
         trigger = response_doc.get("trigger_content", "")
         if not trigger or query_type != 'text': return 0
         
-        # Semantic scoring removed, only FuzzyWuzzy used now.
+        # Only FuzzyWuzzy used
         score = fuzz.token_set_ratio(query.lower(), trigger.lower())
         
         return 101 if score >= 99 else int(score) # Max 101 for perfect match
 
 
-    # --- TIER 0.5: External LLM Mock (Highest Priority AI - Contextual) ---
-    # client object is now passed to access app.me.id inside the function
-    ai_reply_text_tier0_5 = generate_external_llm_mock_tier0_5(app, query_content, current_context)
-    if ai_reply_text_tier0_5 and random.random() < 0.6: 
-        logger.info(f"TIER 0.5: Falling back to External LLM/Gemini AI: {ai_reply_text_tier0_5}")
+    # --- TIER 0.5: g4f (Highest Priority Free LLM - Contextual) ---
+    ai_reply_text_tier0_5 = await generate_g4f_response_tier0_5(app, query_content, current_context)
+    if ai_reply_text_tier0_5 and random.random() < 0.8: # High chance to use g4f
+        logger.info(f"TIER 0.5: Using g4f Free LLM: {ai_reply_text_tier0_5}")
         return {"type": "text", "content": ai_reply_text_tier0_5}
             
     # --- TIER 0: Enhanced Contextual Responder (Real Human Feel AI) ---
@@ -421,7 +467,7 @@ async def generate_reply(message: Message):
         return {"type": "text", "content": ai_reply_text_tier3}
 
     # --- TIER 4: Dynamic reply using Markov chain (Lowest Priority - Minimal Chance) ---
-    if current_context and random.random() < 0.05: # Chance 0.1 se 0.05 kiya
+    if current_context and random.random() < 0.05:
         chain = build_markov_chain(current_context)
         if chain:
             dynamic_reply_text = generate_sentence(chain)
@@ -434,7 +480,6 @@ async def generate_reply(message: Message):
     return {"type": "text", "content": "Mujhe is baare mein abhi aur seekhne ki zaroorat hai. Tum kya soch rahe ho?"}
 
 # --- REST OF THE UTILITY FUNCTIONS (Unmodified) ---
-# ... (is_admin_or_owner, contains_link, contains_mention, update_group_info, update_user_info, etc.)
 async def is_admin_or_owner(client: Client, chat_id: int, user_id: int):
     if user_id == OWNER_ID:
         return True
@@ -540,57 +585,4 @@ async def can_reply_to_chat(chat_id):
 def update_message_reply_cooldown(chat_id):
     chat_message_cooldowns[chat_id] = time.time()
 
-async def send_and_auto_delete_reply(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
-    sent_message = None
-    user_info_str = ""
-    if message.from_user:
-        if message.from_user.username:
-            user_info_str = f" (द्वारा: @{message.from_user.username})"
-        else:
-            user_info_str = f" (द्वारा: {message.from_user.first_name})"
-
-    text_to_send = text
-    if message.command and text:
-        command_name = message.command[0]
-        text_to_send = f"**कमांड:** `{command_name}`{user_info_str}\n\n{text}"
-    elif text and message.chat.type == ChatType.PRIVATE and message.from_user and message.from_user.id == OWNER_ID:
-        pass
-    elif text and message.from_user:
-        pass
-
-    if photo:
-        sent_message = await message.reply_photo(
-            photo=photo,
-            caption=text_to_send,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
-        )
-    elif text:
-        sent_message = await message.reply_text(
-            text_to_send,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
-            disable_web_page_preview=disable_web_page_preview
-        )
-    elif sticker:
-        sent_message = await message.reply_sticker(
-            sticker=sticker
-        )
-    else:
-        logger.warning(f"send_and_auto_delete_reply called with no text or photo for message {message.id}.")
-        return None
-
-    if message.command and message.command[0] == "start":
-        return sent_message
-
-    async def delete_after_delay_task():
-        await asyncio.sleep(180)
-        try:
-            if sent_message:
-                await sent_message.delete()
-        except Exception as e:
-            logger.warning(f"Failed to delete message {sent_message.id if sent_message else 'N/A'} in chat {message.chat.id}: {e}")
-
-    asyncio.create_task(delete_after_delay_task())
-    return sent_message
 # --- END OF UTILITY.PY ---
