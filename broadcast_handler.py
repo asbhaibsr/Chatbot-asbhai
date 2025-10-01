@@ -16,7 +16,7 @@ from config import (
 from utils import (
     # is_on_command_cooldown, update_command_cooldown, # REMOVED: Cooldowns are removed for client.ask
     send_and_auto_delete_reply,
-    store_message
+    store_message # ✅ store_message needs 'client' and 'message' as arguments
 )
 
 # Broadcast Sending Logic (Helper Function)
@@ -154,7 +154,8 @@ async def pm_broadcast(client: Client, message: Message):
         logger.error(f"Failed to send final broadcast summary: {final_edit_e}. Sending as new message instead.")
         await message.reply_text(final_message, parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # ✅ FIX: client argument added
+    await store_message(client, message)
 
 
 # -----------------------------------------------------
@@ -245,4 +246,5 @@ async def broadcast_group(client: Client, message: Message):
         logger.error(f"Failed to send final broadcast summary: {final_edit_e}. Sending as new message instead.")
         await message.reply_text(final_message, parse_mode=ParseMode.MARKDOWN)
 
-    await store_message(message)
+    # ✅ FIX: client argument added
+    await store_message(client, message)
