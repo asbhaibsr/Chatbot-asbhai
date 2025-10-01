@@ -23,7 +23,7 @@ from fuzzywuzzy import fuzz
 try:
     import g4f
     # Set the default model for g4f (e.g., Deepseek, or any reliable free provider)
-    G4F_MODEL = g4f.models.DeepseekChat
+    G4F_MODEL = g4f.models.gpt_35_turbo
     g4f.debug.logging = False # Turn off excessive g4f logging
 except ImportError:
     g4f = None
