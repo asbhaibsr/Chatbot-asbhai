@@ -8,5 +8,5 @@ Flask
 pytz
 textblob
 nltk
-python-fuzzywuzzy
-python-Levenshtein
+fuzzywuzzy
+Levenshtein
