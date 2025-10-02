@@ -16,7 +16,7 @@ from config import (
 )
 from utils import (
     update_group_info, update_user_info, store_message, generate_reply,
-    is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message
+    is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message # Renamed in utils.py
 )
 
 # -----------------
@@ -32,14 +32,19 @@ cooldown_locks = {}
 # Helper Function for Reply & Auto-Delete (kept for clarity)
 # -----------------
 
+# Renaming the function name to match the one defined in utils.py 
 async def send_and_auto_delete_reply(message, text, parse_mode=None, reply_markup=None, disable_web_page_preview=False, delay=180):
-    sent_message = await message.reply_text(
-        text=text,
-        parse_mode=parse_mode,
-        reply_markup=reply_markup,
+    sent_message = await delete_after_delay_for_message(
+        message, 
+        text=text, 
+        parse_mode=parse_mode, 
+        reply_markup=reply_markup, 
         disable_web_page_preview=disable_web_page_preview
+        # Note: delay is handled internally by delete_after_delay_for_message/send_and_auto_delete_reply in utils.py
     )
-    asyncio.create_task(delete_after_delay_for_message(sent_message, delay))
+    # The auto-delete task is now handled inside utils.delete_after_delay_for_message
+    return sent_message
+
 
 # -----------------
 # New User Notification Handler
@@ -92,7 +97,8 @@ async def callback_handler(client, callback_query):
     })
 
     if callback_query.data == "buy_git_repo":
-        await send_and_auto_delete_reply(
+        # Using the utility function from the import
+        await delete_after_delay_for_message( # Renamed in utils.py
             callback_query.message,
             text=f"🤩 𝗜𝗳 𝘆𝗼𝘂 𝘄𝗮𝗻𝘁 𝘆𝗼𝘂𝗿 𝗼𝘄𝗻 𝗯𝗼𝘁 𝗹𝗶𝗸𝗲 𝗺𝗲, 𝘆𝗼𝘂 𝗵𝗮𝘃𝗲 𝘁𝗼 𝗽𝗮𝘆 ₹𝟱𝟬𝟬. 𝗙𝗼𝗿 𝘁𝗵𝗶𝘀, 𝗰𝗼𝗻𝘁𝗮𝗰𝘁 **@{ASBHAI_USERNAME}** 𝗮𝗻𝗱 𝘁𝗲𝗹𝗹 𝗵𝗶𝗺 𝘁𝗵𝗮𝘁 𝘆𝗼𝘂 𝘄𝗮𝗻𝘁 𝘁𝗼 𝗯𝘂𝗶𝗹𝗱 𝘁𝗵𝗶𝘀 𝗯𝗼𝘁'𝘀 𝗰𝗼𝗱𝗲. 𝗛𝘂𝗿𝗿𝘆 𝘂𝗽, 𝗱𝗲𝗮𝗹𝘀 𝗮𝗿𝗲 𝗵𝗼𝘁! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @asbhai_bsr",
             parse_mode=ParseMode.MARKDOWN
@@ -238,6 +244,11 @@ async def handle_message_and_reply(client: Client, message: Message):
         logger.debug(f"Skipping message from bot user: {message.from_user.id}.")
         return
 
+    is_command = message.text and message.text.startswith('/')
+    if is_command:
+        # Command handling is done in commands.py, so we exit here for events.py to avoid duplication/errors.
+        return
+
     is_group_chat = message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]
     
     if is_group_chat:
@@ -278,8 +289,7 @@ async def handle_message_and_reply(client: Client, message: Message):
             if contains_link(message.text) and not is_sender_admin:
                 try:
                     await message.delete()
-                    sent_delete_alert = await message.reply_text(f"𝗳𝗢𝗵 𝗱𝗲𝗮𝗿! 🧐 𝗦𝗼𝗿𝗿𝘆-𝘀𝗼𝗿𝗿𝘆, **𝗹𝗶𝗻𝗸𝘀 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗹𝗹𝗼𝘄𝗲𝗱 𝗵𝗲𝗿𝗲!** 🚫 𝗬𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗶𝘀 𝗴𝗼𝗻𝗲!💨 𝗣𝗹𝗲𝗮𝘀𝗲 𝗯𝗲 𝗰𝗮𝗿𝗲𝗳𝘂𝗹 𝗻𝗲𝘅𝘁 𝘁𝗶𝗺𝗲.", quote=True, parse_mode=ParseMode.MARKDOWN)
-                    asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
+                    sent_delete_alert = await delete_after_delay_for_message(message, text=f"𝗳𝗢𝗵 𝗱𝗲𝗮𝗿! 🧐 𝗦𝗼𝗿𝗿𝘆-𝘀𝗼𝗿𝗿𝘆, **𝗹𝗶𝗻𝗸𝘀 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗹𝗹𝗼𝘄𝗲𝗱 𝗵𝗲𝗿𝗲!** 🚫 𝗬𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗶𝘀 𝗴𝗼𝗻𝗲!💨 𝗣𝗹𝗲𝗮𝘀𝗲 𝗯𝗲 𝗰𝗮𝗿𝗲𝗳𝘂𝗹 𝗻𝗲𝘅𝘁 𝘁𝗶𝗺𝗲.", parse_mode=ParseMode.MARKDOWN)
                     logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
                     return
                 except Exception as e:
@@ -299,12 +309,12 @@ async def handle_message_and_reply(client: Client, message: Message):
                     if URL_PATTERN.search(user_bio):
                         try:
                             await message.delete()
-                            sent_delete_alert = await message.reply_text(
-                                f"𝗢𝗵 𝗻𝗼! 😲 𝗬𝗼𝘂 𝗵𝗮𝘃𝗲 𝗮 **𝗹𝗶𝗻𝗸 𝗶𝗻 𝘆𝗼𝘂𝗿 𝗯𝗶𝗼!** 𝗧𝗵𝗮𝘁'𝘀 𝘄𝗵𝘆 𝘆𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗱𝗶𝘀𝗮𝗽𝗽𝗲𝗮𝗿𝗲𝗱!👻\n"
+                            sent_delete_alert = await delete_after_delay_for_message(
+                                message,
+                                text=f"𝗢𝗵 𝗻𝗼! 😲 𝗬𝗼𝘂 𝗵𝗮𝘃𝗲 𝗮 **𝗹𝗶𝗻𝗸 𝗶𝗻 𝘆𝗼𝘂𝗿 𝗯𝗶𝗼!** 𝗧𝗵𝗮𝘁's 𝘄𝗵𝘆 𝘆𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗱𝗶𝘀𝗮𝗽𝗽𝗲𝗮𝗿𝗲𝗱!👻\n"
                                 "𝗣𝗹𝗲𝗮𝘀𝗲 𝗿𝗲𝗺𝗼𝘃𝗲 𝘁𝗵𝗲 𝗹𝗶𝗻𝗸 𝗳𝗿𝗼𝗺 𝘆𝗼𝘂𝗿 𝗯𝗶𝗼. 𝗜𝗳 𝘆𝗼𝘂 𝗿𝗲𝗾𝘂𝗶𝗿𝗲 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻, 𝗽𝗹𝗲𝗮𝘀𝗲 𝗰𝗼𝗻𝘁𝗮𝗰𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻 𝗮𝗻𝗱 𝗮𝘀𝗸 𝘁𝗵𝗲𝗺 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗲 `/biolink your_userid` 𝗰𝗼𝗺𝗺𝗮𝗻𝗱.",
-                                quote=True, parse_mode=ParseMode.MARKDOWN
+                                parse_mode=ParseMode.MARKDOWN
                             )
-                            asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
                             logger.info(f"Deleted message {message.id} from user {user_id} due to link in bio in chat {message.chat.id}.")
                             return
                         except Exception as e:
@@ -321,8 +331,7 @@ async def handle_message_and_reply(client: Client, message: Message):
             if contains_mention(message.text) and not is_sender_admin:
                 try:
                     await message.delete()
-                    sent_delete_alert = await message.reply_text(f"𝗳𝗧𝘂𝘁-𝘁𝘂𝘁! 😬 𝗬𝗼𝘂 𝘂𝘀𝗲𝗱 `@`! 𝗦𝗼𝗿𝗿𝘆, 𝘁𝗵𝗮𝘁 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗶𝘀 𝗴𝗼𝗻𝗲 𝘁𝗼 𝘁𝗵𝗲 𝘀𝗸𝘆! 🚀 𝗕𝗲 𝗰𝗮𝗿𝗲𝗳𝘂𝗹 𝗻𝗲𝘅𝘁 𝘁𝗶𝗺𝗲, 𝗼𝗸𝗮𝘆? 😉", quote=True, parse_mode=ParseMode.MARKDOWN)
-                    asyncio.create_task(delete_after_delay_for_message(sent_delete_alert, 180))
+                    sent_delete_alert = await delete_after_delay_for_message(message, text=f"𝗳𝗧𝘂𝘁-𝘁𝘂𝘁! 😬 𝗬𝗼𝘂 𝘂𝘀𝗲𝗱 `@`! 𝗦𝗼𝗿𝗿𝘆, 𝘁𝗵𝗮𝘁 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗶𝘀 𝗴𝗼𝗻𝗲 𝘁𝗼 𝘁𝗵𝗲 𝘀𝗸𝘆! 🚀 𝗕𝗲 𝗰𝗮𝗿𝗲𝗳𝘂𝗹 𝗻𝗲𝘅𝘁 𝘁𝗶𝗺𝗲, 𝗼𝗸𝗮𝘆? 😉", parse_mode=ParseMode.MARKDOWN)
                     logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
                     return
                 except Exception as e:
@@ -330,59 +339,57 @@ async def handle_message_and_reply(client: Client, message: Message):
             elif contains_mention(message.text) and is_sender_admin:
                 logger.info(f"Admin's username mention message {message.id} was not deleted in chat {message.chat.id}.")
 
-    is_command = message.text and message.text.startswith('/')
-
-    if not is_command:
-        chat_id = message.chat.id
+    # Message is not a command, proceed with AI/Learning logic
+    chat_id = message.chat.id
+    
+    if chat_id not in cooldown_locks:
+        cooldown_locks[chat_id] = asyncio.Lock()
         
-        if chat_id not in cooldown_locks:
-            cooldown_locks[chat_id] = asyncio.Lock()
-            
-        async with cooldown_locks[chat_id]:
-            current_time = datetime.now()
-            
-            # Cooldown check: check if the chat is currently on cooldown
-            if chat_id in last_reply_time:
-                time_since_last_reply = (current_time - last_reply_time[chat_id]).total_seconds()
-                if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
-                    logger.info(f"Chat {chat_id} is in cooldown. Skipping reply for message {message.id}.")
-                    # Store the message, but don't send a reply
-                    await store_message(client, message)
-                    return # Exit the function due to cooldown
-            
-            # Store the message
-            await store_message(client, message)
+    async with cooldown_locks[chat_id]:
+        current_time = datetime.now()
+        
+        # Cooldown check: check if the chat is currently on cooldown
+        if chat_id in last_reply_time:
+            time_since_last_reply = (current_time - last_reply_time[chat_id]).total_seconds()
+            if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
+                logger.info(f"Chat {chat_id} is in cooldown. Skipping reply for message {message.id}.")
+                # Store the message, but don't send a reply
+                await store_message(client, message)
+                return # Exit the function due to cooldown
+        
+        # Store the message
+        await store_message(client, message)
 
-            logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
+        logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
 
-            # Generate reply from the centralized learning system in util.py
-            logger.info(f"Attempting to generate reply for chat {message.chat.id}.")
-            
-            reply_doc = await generate_reply(message)
+        # Generate reply from the centralized learning system in util.py
+        logger.info(f"Attempting to generate reply for chat {message.chat.id}.")
+        
+        reply_doc = await generate_reply(message)
 
-            # Update cooldown time, regardless of whether a reply was generated
-            last_reply_time[chat_id] = datetime.now()
-            logger.info(f"Cooldown updated for chat {chat_id}. Next reply possible after {REPLY_COOLDOWN_SECONDS} seconds.")
+        # Update cooldown time, regardless of whether a reply was generated
+        last_reply_time[chat_id] = datetime.now()
+        logger.info(f"Cooldown updated for chat {chat_id}. Next reply possible after {REPLY_COOLDOWN_SECONDS} seconds.")
 
-            if reply_doc and reply_doc.get("type"):
-                try:
-                    if reply_doc.get("type") == "text":
-                        await message.reply_text(reply_doc["content"], parse_mode=ParseMode.MARKDOWN)
-                        logger.info(f"Replied with text: {reply_doc['content']}.")
-                    elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
-                        await message.reply_sticker(reply_doc["sticker_id"])
-                        logger.info(f"Replied with sticker: {reply_doc['sticker_id']}.")
-                    else:
-                        logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}.")
-                except Exception as e:
-                    if "CHAT_WRITE_FORBIDDEN" in str(e):
-                        logger.error(f"Permission error: Bot cannot send messages in chat {message.chat.id}. Leaving group.")
-                        try:
-                            await client.leave_chat(message.chat.id)
-                            await client.send_message(OWNER_ID, f"**𝗔𝗟𝗘𝗥𝗧:** 𝗕𝗼𝘁 𝘄𝗮𝘀 𝗿𝗲𝗺𝗼𝘃𝗲𝗱 𝗳𝗿𝗼𝗺 𝗴𝗿𝗼𝘂𝗽 `{message.chat.id}` 𝗯𝗲𝗰𝗮𝘂𝘀𝗲 𝗶𝘁 𝗹𝗼𝘀𝘁 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻 𝘁𝗼 𝘀𝗲𝗻𝗱 𝗺𝗲𝘀𝘀𝗮𝗴𝗲𝘀.")
-                        except Exception as leave_e:
-                            logger.error(f"Failed to leave chat {message.chat.id} after permission error: {leave_e}")
-                    else:
-                        logger.error(f"Error sending reply for message {message.id}: {e}.")
-            else:
-                logger.info("No suitable reply found.")
+        if reply_doc and reply_doc.get("type"):
+            try:
+                if reply_doc.get("type") == "text":
+                    await message.reply_text(reply_doc["content"], parse_mode=ParseMode.MARKDOWN)
+                    logger.info(f"Replied with text: {reply_doc['content']}.")
+                elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
+                    await message.reply_sticker(reply_doc["sticker_id"])
+                    logger.info(f"Replied with sticker: {reply_doc['sticker_id']}.")
+                else:
+                    logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}.")
+            except Exception as e:
+                if "CHAT_WRITE_FORBIDDEN" in str(e):
+                    logger.error(f"Permission error: Bot cannot send messages in chat {message.chat.id}. Leaving group.")
+                    try:
+                        await client.leave_chat(message.chat.id)
+                        await client.send_message(OWNER_ID, f"𝗔𝗟𝗘𝗥𝗧: 𝗕𝗼𝘁 𝘄𝗮𝘀 𝗿𝗲𝗺𝗼𝘃𝗲𝗱 𝗳𝗿𝗼𝗺 𝗴𝗿𝗼𝘂𝗽 `{message.chat.id}` 𝗯𝗲𝗰𝗮𝘂𝘀𝗲 𝗶𝘁 𝗹𝗼𝘀𝘁 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻 𝘁𝗼 𝘀𝗲𝗻𝗱 𝗺𝗲𝘀𝘀𝗮𝗴𝗲𝘀.")
+                    except Exception as leave_e:
+                        logger.error(f"Failed to leave chat {message.chat.id} after permission error: {leave_e}")
+                else:
+                    logger.error(f"Error sending reply for message {message.id}: {e}.")
+        else:
+            logger.info("No suitable reply found.")
