@@ -67,33 +67,26 @@ async def pm_broadcast(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
         
+    b_msg = None # b_msg ko pehle initialize karein
     try:
         # Owner se broadcast message pucho
-        # Step 1: Prompt the user
-        await client.send_message(
+        # FIX: client.listen ko client.ask se badla gaya
+        b_msg = await client.ask(
             chat_id=message.from_user.id,
             text="**🚀 Private Broadcast:** Ab mujhe woh message bhejo jise tum users ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬",
-            parse_mode=ParseMode.MARKDOWN
-        )
-
-        # Step 2: Listen for the next message with a timeout
-        b_msg = await client.listen(
-            chat_id=message.from_user.id,
             timeout=600 # 10 minutes timeout
         )
         
-        # Check if the message is valid
-        if not b_msg:
-             # This should ideally be covered by the timeout exception below, but is a safe check.
-             raise asyncio.TimeoutError
-             
-    except asyncio.TimeoutError:
+    except Exception as e:
+        # Ye listen error ke liye hai (agar client object mein dikkat hai, jo pehle tha)
+        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi internal error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        logger.warning(f"Broadcast cancelled by error during ask: {e}")
+        return
+    
+    # client.ask timeout hone par 'None' return karta hai
+    if b_msg is None:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.warning("Broadcast cancelled by timeout: User failed to reply in time.")
-        return
-    except Exception as e:
-        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
-        logger.warning(f"Broadcast cancelled by error during listen: {e}")
         return
     
     # Target IDs nikalna (Groups aur Owner ID ko hata kar)
@@ -186,32 +179,26 @@ async def broadcast_group(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
         
+    b_msg = None # b_msg ko pehle initialize karein
     try:
         # Owner se broadcast message pucho
-        # Step 1: Prompt the user
-        await client.send_message(
+        # FIX: client.listen ko client.ask se badla gaya
+        b_msg = await client.ask(
             chat_id=message.from_user.id,
             text="**🚀 Group Broadcast:** Ab mujhe woh message bhejo jise tum Groups ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬",
-            parse_mode=ParseMode.MARKDOWN
-        )
-
-        # Step 2: Listen for the next message with a timeout
-        b_msg = await client.listen(
-            chat_id=message.from_user.id,
             timeout=600 # 10 minutes timeout
         )
         
-        # Check if the message is valid
-        if not b_msg:
-             raise asyncio.TimeoutError
-             
-    except asyncio.TimeoutError:
+    except Exception as e:
+        # Ye listen error ke liye hai (agar client object mein dikkat hai)
+        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi internal error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        logger.warning(f"Broadcast cancelled by error during ask: {e}")
+        return
+    
+    # client.ask timeout hone par 'None' return karta hai
+    if b_msg is None:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.warning("Broadcast cancelled by timeout: User failed to reply in time.")
-        return
-    except Exception as e:
-        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
-        logger.warning(f"Broadcast cancelled by error during listen: {e}")
         return
     
     # Target IDs nikalna (Sirf Groups)
