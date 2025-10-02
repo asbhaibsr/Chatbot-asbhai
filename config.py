@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timedelta
 
 import pytz
-from pyrogram import Client, filters
+from pyrogram import Client, filters # Idle ko hata diya, zaroorat nahi
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
@@ -105,7 +105,8 @@ except Exception as e:
     exit(1)
 
 # --- Pyrogram Client ---
-app = Client(
+# FIX: 'Client' object has no attribute 'ask' error ke liye with_listeners ka upyog
+app = Client.with_listeners(
     "self_learning_bot",
     api_id=API_ID,
     api_hash=API_HASH,
