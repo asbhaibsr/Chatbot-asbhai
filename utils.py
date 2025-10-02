@@ -1,4 +1,4 @@
-# utils.py (No Changes)
+# utils.py
 
 import re
 import asyncio
@@ -187,13 +187,17 @@ def generate_sentence(chain, length=10):
     if not final_sentence.endswith(('.', '?', '!')):
         final_sentence += random.choice(['.', '!', '?'])
         
-    return final_sentence.replace(" i ", " I ")
+    # Tone adjustment: Remove excessive commas/punctuation for a more natural, real-person feel.
+    final_sentence = re.sub(r',|\.', '', final_sentence)
+    final_sentence = final_sentence.replace(" I ", " i ") # keep capitalization minimal for realism
+        
+    return final_sentence.strip()
 
 def extract_keywords(text):
     if not text:
         return []
     words = re.findall(r'\b\w+\b', text.lower())
-    stop_words = {"ko", "ke", "ka", "ki", "mein", "main", "hai", "tha", "the", "aur", "ya", "ek", "tum"}
+    stop_words = {"ko", "ke", "ka", "ki", "mein", "main", "hai", "tha", "the", "aur", "ya", "ek", "tum", "jo"}
     filtered_words = [w for w in words if w not in stop_words and len(w) > 2]
     return list(set(filtered_words))
 
@@ -237,18 +241,26 @@ async def store_message(client: Client, message: Message):
         # Get bot ID safely
         bot_id = client.me.id if client.me else None
 
-        # --- User-to-User Conversation Pattern Storage (Learning) ---
+        # --- Tier 1: User-to-User Conversation Pattern Storage (Learning) ---
         if len(chat_contexts[chat_id]) >= 1:
             last_message = chat_contexts[chat_id][-1]
             last_user_id = last_message.get("user_id")
             
-            if (last_user_id is not None and last_user_id != current_user_id and 
-                last_user_id != bot_id and current_user_id != bot_id and
-                last_message.get("type") == "text" and current_message_type == "text"):
+            # Condition for conversational learning: User-to-User or Bot-to-User (if bot is the current message sender)
+            is_u2u_conv = (last_user_id is not None and last_user_id != current_user_id and 
+                            last_user_id != bot_id and current_user_id != bot_id)
+            # You requested bot's response pattern also to be saved, but typically that's saved by the AI response flow.
+            # Keeping the U2U logic as it's the core of organic learning.
+
+            if is_u2u_conv and last_message.get("type") == "text" and current_message_type == "text":
                 
-                trigger_content = last_message["content"]
-                reply_content = current_message_content
+                trigger_content = last_message["content"].lower().strip() # Store trigger in lowercase for flexible matching
+                reply_content = current_message_content.strip()
                 
+                # Check with AI (MongoDB not necessary, local check is sufficient for now)
+                # You requested AI check on save, but for learning patterns, direct save is standard.
+                # The AI check will happen during the response generation (TIER 0.5/0).
+
                 conversational_learning_collection.update_one(
                     {"trigger_content": trigger_content, "trigger_type": "text"},
                     {"$push": {
@@ -287,9 +299,19 @@ async def store_message(client: Client, message: Message):
             user_id_to_track = message.from_user.id
             if time.time() - earning_cooldowns.get(user_id_to_track, 0) >= 8:
                 earning_cooldowns[user_id_to_track] = time.time()
+                # Use a smaller update to track group info
+                group_doc = group_tracking_collection.find_one({"_id": message.chat.id})
+                group_title = group_doc.get("title", "Unknown Group") if group_doc else "Unknown Group"
+                group_username = group_doc.get("username") if group_doc else None
+
                 earning_tracking_collection.update_one(
                     {"_id": user_id_to_track},
-                    {"$inc": {"group_message_count": 1}, "$set": {"last_active_group_message": datetime.now()}},
+                    {"$inc": {"group_message_count": 1}, 
+                     "$set": {"last_active_group_message": datetime.now(),
+                              "last_active_group_id": message.chat.id,
+                              "last_active_group_title": group_title,
+                              "last_active_group_username": group_username
+                              }},
                     upsert=True
                 )
 
@@ -298,9 +320,30 @@ async def store_message(client: Client, message: Message):
     except Exception as e:
         logger.error(f"Error storing message {message.id}: {e}.")
 
+# --- NEW: AI Personality Prompt Generator ---
+def get_ai_role_prompt(ai_mode: str):
+    base_prompt = "Tum ek friendly, casual, young female bot ho. Hinglish (Hindi + English) me chote aur natural sentences me reply karo. Real logo ki tarah hi likhna, zaroori nahi ki har jagah sahi commas ya punctuation ho. Jaise log aam taur pe chat karte hain, waise hi karo. Sirf chat ke liye reply karna."
+    
+    if ai_mode == "realgirl":
+        return f"{base_prompt} Tum hamesha bohot chill, easy-going aur thodi natkhat (mischievous) ho. Reply me emoji zaroor use karna. Boht zyada formal ya lamba reply mat dena."
+    
+    elif ai_mode == "romanticgirl":
+        return f"{base_prompt} Tum bohot hi pyaari, thodi flirty aur romantic girl ho. Jab bhi mauka mile, toh thoda pyaar ya care dikhana. Dil wale emojis aur cute words ka use karna."
+
+    elif ai_mode == "motivationgirl":
+        return f"{base_prompt} Tum ek cheerleader ho, hamesha positive aur motivated baatein karti ho. Har reply me kisi na kisi tarah ki positivity ya encouragement dena. Thoda high-energy tone rakhna."
+
+    elif ai_mode == "studygirl":
+        return f"{base_prompt} Tum ek smart student type ki ladki ho. Tumhara focus learning aur knowledge pe hai. Reply me thodi intelligent ya thoughtful baat add karna, lekin casual tone me. Padhai ya common knowledge ki baat karo."
+
+    elif ai_mode == "gemini":
+        return f"{base_prompt} Tum Google ki taraf se ek advanced AI ho jiska naam Gemini hai. Lekin tum casual 'real girl' mode me ho. Tumhari baatein detailed aur smart hoti hain, lekin 'sweet girl' ke tarah. Agar koi difficult question puche to achhe se answer dena."
+
+    else: # Default/Off
+        return "Tum ek basic chatbot ho. Casual aur simple Hindi/Hinglish me chote reply karo."
 
 # --- TIER 0.5 AI Function (g4f - High-Quality Free LLM Access) ---
-async def generate_g4f_response_tier0_5(client: Client, text: str, context: list):
+async def generate_g4f_response_tier0_5(client: Client, text: str, chat_id: int, context: list):
     """Uses the g4f library to access free LLMs for a complex, detailed, and high-quality response."""
     
     if not g4f or not G4F_MODEL:
@@ -310,13 +353,21 @@ async def generate_g4f_response_tier0_5(client: Client, text: str, context: list
     if not bot_id: return None
 
     try:
+        # Get AI Mode from DB
+        group_doc = group_tracking_collection.find_one({"_id": chat_id})
+        ai_mode = group_doc.get("ai_mode", "off") if group_doc else "off"
+        
+        # Build System Prompt (AI Role)
+        system_prompt = get_ai_role_prompt(ai_mode)
+
         # Build history for context (g4f needs conversation history)
         history = [
-            {"role": "system", "content": "You are a friendly, casual, young female bot. Reply in short, casual Hindi/Hinglish."}
+            {"role": "system", "content": system_prompt}
         ]
         
         # Add context messages
         for m in context:
+            # Check if the message is from the bot itself
             role = "assistant" if m.get('user_id') == bot_id else "user"
             history.append({"role": role, "content": m['content']})
         
@@ -327,11 +378,13 @@ async def generate_g4f_response_tier0_5(client: Client, text: str, context: list
         response_text = await g4f.ChatCompletion.create_async(
             model=G4F_MODEL, 
             messages=history,
-            temperature=0.7 # Thoda creative response
+            temperature=0.9 # Thoda zyada creative and casual response ke liye
         )
         
         if response_text and response_text.strip():
-            return response_text
+            # Tone adjustment: Remove excessive commas/punctuation for a more natural, real-person feel.
+            clean_response = re.sub(r',|\.', '', response_text)
+            return clean_response.strip()
         
     except Exception as e:
         logger.error(f"G4F Free AI generation failed: {e}. Falling back to mock Tiers.")
@@ -340,141 +393,156 @@ async def generate_g4f_response_tier0_5(client: Client, text: str, context: list
 
 # --- TIER 0 AI Function (Enhanced Contextual Responder - Real Human Feel) ---
 def generate_best_contextual_response_tier0(text: str, chat_context: list):
-    """Generates a highly contextual response based on rules and sentiment."""
+    """Generates a highly contextual response based on rules and sentiment with a casual Hinglish tone."""
     keywords = extract_keywords(text)
     sentiment = get_sentiment(text)
     last_message = text.lower()
     
-    previous_msg_content = chat_context[-2]['content'].lower() if len(chat_context) >= 2 and chat_context[-2].get('type') == 'text' else ""
+    # Simple reply patterns for real feel
+    if "kiya kr rha ho" in last_message or "kya chal rha hai" in last_message or "kya ho rha hai":
+        return random.choice(["Bas tumhari baaton ka wait kar rahi thi tum batao kya khaas hai aaj? 😃", "Kuch naya nahi normal chatting tum kya kar rahe ho? ☕", "Mujhe pata nahi tha ki tum bore ho rahe the isliye main aayi!"])
     
-    if "kiya kr rha ho" in last_message or "kya chal rha hai" in last_message:
-        return random.choice(["Bas tumhari baaton ka intezaar kar rahi thi. Tum batao, kya khaas hai aaj? 😃", "Kuch naya nahi, normal chatting. Tum kya kar rahe ho? ☕"])
-    
-    if "hello" in last_message or "hi" in last_message:
-        return random.choice(["Hey! Bolo, kya baat hai? 😊", "Hi! Kya haal hai?"])
+    if "hello" in last_message or "hi" in last_message or "hey":
+        # Using conversational learning to get a reply if context is available
+        return random.choice(["Hey bolo kya baat hai? 😊", "Hi kya haal hai?", "Han yaar bolo"])
 
     if sentiment == "positive":
-        if "achha" in last_message or "badhiya" in last_message:
-            return f"Wah! {random.choice(keywords).capitalize() if keywords else 'yeh'} sunke dil khush ho gaya. Kya hua, zara detail mein batao! ✨"
-        return "Awesome! Main bohot khush hoon tumhare liye. 👍"
+        if "achha" in last_message or "badhiya" in last_message or "mazza":
+            return f"Wah {random.choice(keywords).capitalize() if keywords else 'yeh'} sunke dil khush ho gaya kya hua detail mein batao! ✨"
+        return "Awesome main bohot khush hoon tumhare liye 👍"
          
     if sentiment == "negative":
-        if previous_msg_content and 'parshan' in previous_msg_content: 
-            return "Mujhe pata hai tum upset ho. Par smile karo na. Main hamesha tumhare saath hoon. ❤️"
-        return "Oh no! Kya hua? Mujhse share karo, thoda halka mehsoos hoga. 🥺"
+        return "Oh no kya hua mujhse share karo thoda halka mehsoos hoga 🥺"
         
-    if keywords and previous_msg_content and not any(k in previous_msg_content for k in keywords):
-        return f"{random.choice(keywords).capitalize()} ke baare mein? Tumne abhi {previous_msg_content[:15]}... bola tha. Kya woh isi se juda hai? 🤔"
+    if keywords and random.random() < 0.3: # Randomly pick a keyword for a simple human-like response
+        return f"Acha {random.choice(keywords)} ke baare mein? Sahi bola yaar"
         
-    return random.choice(["Thoda aur clear batao. Main samjhne ki koshish kar rahi hoon. 🙏", "Interesting point hai, ispe aur kya discuss kar sakte hain?"])
+    return random.choice(["Thoda aur clear batao main samjhne ki koshish kar rahi hoon 🙏", "Interesting point hai ispe aur kya discuss kar sakte hain?", "Main bhi yahi soch rahi thi!"])
 
 # --- TIER 2 AI Fallback Function (Advanced NLTK/TextBlob) ---
 def generate_free_ai_response_tier2(text: str):
     sentiment = get_sentiment(text)
     keywords = extract_keywords(text)
     
+    # Casual Hinglish Tone
     if sentiment == "positive":
         if random.random() < 0.6 and keywords:
-             return f"वाह! यह सुनकर मुझे बहुत खुशी हुई। {random.choice(keywords).capitalize()} के बारे में और बताओ ना? ✨"
+             return f"Waah ye sunkar mujhe bohot khushi hui {random.choice(keywords).capitalize()} ke baare mein aur batao na? ✨"
         else:
-             return random.choice(["हाँ, यह तो शानदार है! मैं भी बहुत खुश हूँ! 😍", "अरे वाह! बहुत बढ़िया!"])
+             return random.choice(["Haan yeh toh shandaar hai main bhi bohot khush hoon! 😍", "Arey wah bohot badhiya!"])
              
     elif sentiment == "negative":
-        return random.choice(["कोई बात नहीं, कभी-कभी ऐसा होता है। चिल! 😊", "परेशान मत हो, मैं तुम्हारे साथ हूँ। ❤️"])
+        return random.choice(["Koi baat nahi kabhi kabhi aisa hota hai Chill! 😊", "Pareshan mat ho main tumhare saath hoon ❤️"])
         
     elif sentiment == "neutral" and keywords:
-        return f"{random.choice(keywords).capitalize()}? हाँ, मैंने भी इसके बारे में सुना है। तुम क्या सोच रहे हो इसके बारे में?"
+        return f"{random.choice(keywords).capitalize()}? Haan maine bhi iske baare mein suna hai tum kya soch rahe ho iske baare mein?"
         
     else:
-        return random.choice(["अच्छा! फिर क्या हुआ?", "और बताओ, क्या चल रहा है?", "hmm... 🙄"])
+        return random.choice(["Acha fir kya hua?", "Aur batao kya chal raha hai?", "hmm 🙄"])
 
 # --- TIER 3 AI Fallback Function (Simple LLM Mock) ---
 def generate_powerful_free_ai_response_tier3(text: str):
     keywords = extract_keywords(text)
-    sentiment = get_sentiment(text)
     
     if keywords:
         response_templates = [
-            f"तुम्हारी बात {random.choice(keywords)} के बारे में है, है ना? 🤔",
-            f"यह {random.choice(keywords)} वाला टॉपिक सच में सोचने वाला है। "
+            f"Tumhari baat {random.choice(keywords)} ke baare mein hai na? 🤔",
+            f"Yeh {random.choice(keywords)} wala topic sach me sochne wala hai "
         ]
-        if sentiment == "positive":
-            return random.choice(response_templates) + " मुझे उम्मीद है सब अच्छा होगा! 👍"
         return random.choice(response_templates)
     
-    return "यह सवाल थोड़ा मुश्किल है। तुम किस संदर्भ में पूछ रहे हो?"
+    return "Yeh sawal thoda mushkil hai Tum kis context me puch rahe ho?"
 
 
 async def generate_reply(message: Message):
-    if message.reply_to_message and message.reply_to_message.from_user and not message.reply_to_message.from_user.is_self:
+    # Only reply if bot is mentioned or if it's a non-reply message in a group (general conversation)
+    # The requirement is to answer general messages in a group
+    if not message.text or message.from_user.is_self or message.text.startswith('/'):
         return {"type": None}
     
     await app.invoke(SetTyping(peer=await app.resolve_peer(message.chat.id), action=SendMessageTypingAction()))
     await asyncio.sleep(0.5)
 
-    if not message.text:
-        return {"type": None}
-
-    query_content = message.text
+    query_content = message.text.strip().lower() # Use lower case for matching
     query_type = "text"
     user_id = message.from_user.id if message.from_user else None
-    current_context = chat_contexts.get(message.chat.id, []) 
+    chat_id = message.chat.id
+    current_context = chat_contexts.get(chat_id, []) 
     
-    def score_response(response_doc, query):
-        trigger = response_doc.get("trigger_content", "")
-        if not trigger or query_type != 'text': return 0
+    # Check if bot is enabled in the group
+    group_doc = group_tracking_collection.find_one({"_id": chat_id})
+    bot_enabled = group_doc.get("bot_enabled", True) if group_doc else True
+    if not bot_enabled:
+        return {"type": None}
+    
+    # Check if a reply is on cooldown
+    if not await can_reply_to_chat(chat_id):
+        logger.info(f"Reply suppressed for chat {chat_id} due to cooldown.")
+        return {"type": None}
         
-        # Only FuzzyWuzzy used
-        score = fuzz.token_set_ratio(query.lower(), trigger.lower())
-        
-        return 101 if score >= 99 else int(score) # Max 101 for perfect match
+    # --- TIER 1: Pattern Matching (Learned Conversations - HIGHEST PRIORITY) ---
+    docs = list(conversational_learning_collection.find({"trigger_type": query_type, "trigger_content": query_content})) # Exact match first
+    
+    # If no exact match, try fuzzy match on keywords for a more random reply (as requested)
+    if not docs:
+        query_keywords = extract_keywords(query_content)
+        if query_keywords:
+            # Find documents that have *any* of the keywords in their trigger
+            fuzzy_docs = conversational_learning_collection.find({
+                "trigger_type": query_type, 
+                "trigger_content": {"$in": query_keywords} 
+            })
+            # This is a random selection fallback for pattern matching
+            if fuzzy_docs:
+                 docs = list(fuzzy_docs)
 
-
-    # --- TIER 1: Pattern Matching (Learning System - HIGHEST PRIORITY) ---
-    docs = list(conversational_learning_collection.find({"trigger_type": query_type, "trigger_content": {"$exists": True, "$ne": None}}))
     all_responses = []
-
-    if query_type == "text":
+    
+    if docs:
         for doc in docs:
-            score = score_response(doc, query_content)
-            if score >= 90: # High similarity needed for pattern match
+            # We want an *exact* match or a highly relevant one
+            score = fuzz.token_set_ratio(query_content, doc.get("trigger_content", "").lower())
+            
+            # Use only exact or near-exact matches to maintain context/accuracy
+            if score >= 90:
                 for response in doc.get('responses', []):
                     if response['type'] == 'text':
                         all_responses.append({"data": response, "score": score, "source_doc": doc})
 
         if all_responses:
-            highest_score = max(r['score'] for r in all_responses)
-            best_responses = [r for r in all_responses if r['score'] >= highest_score]
-            user_specific_responses = [r for r in best_responses if r['data'].get("user_pattern_source_id") == user_id]
-            chosen_list = user_specific_responses if user_specific_responses else best_responses
-            
-            chosen_response = random.choice(chosen_list)['data']
-            logger.info(f"TIER 1 (Pattern Match - Learning) found. Score: {highest_score}.")
+            # Select a random pattern from all highly matched ones (Random pattern reply)
+            chosen_response = random.choice(all_responses)['data']
+            logger.info(f"TIER 1 (Pattern Match - Learning) found. Score: {random.choice(all_responses)['score']}.")
+            update_message_reply_cooldown(chat_id)
             return {"type": "text", "content": chosen_response.get('content')}
 
     
-    # --- TIER 0.5: g4f (Second Highest Priority - Free LLM Access) ---
-    ai_reply_text_tier0_5 = await generate_g4f_response_tier0_5(app, query_content, current_context)
-    if ai_reply_text_tier0_5 and random.random() < 0.8: # High chance to use g4f
+    # --- TIER 0.5: g4f (Second Highest Priority - Free LLM Access with AI Role) ---
+    ai_reply_text_tier0_5 = await generate_g4f_response_tier0_5(app, message.text.strip(), chat_id, current_context)
+    if ai_reply_text_tier0_5 and random.random() < 0.9: # High chance to use g4f
         logger.info(f"TIER 0.5: Using g4f Free LLM: {ai_reply_text_tier0_5}")
+        update_message_reply_cooldown(chat_id)
         return {"type": "text", "content": ai_reply_text_tier0_5}
             
     # --- TIER 0: Enhanced Contextual Responder (Rule-Based Human Feel) ---
-    ai_reply_text_tier0 = generate_best_contextual_response_tier0(query_content, current_context)
+    ai_reply_text_tier0 = generate_best_contextual_response_tier0(message.text.strip(), current_context)
     if ai_reply_text_tier0: 
         logger.info(f"TIER 0: Falling back to Enhanced Contextual AI: {ai_reply_text_tier0}")
+        update_message_reply_cooldown(chat_id)
         return {"type": "text", "content": ai_reply_text_tier0}
             
     
     # --- TIER 2: NLTK/TextBlob Advanced Fallback (Free AI 1 - Sentiment) ---
-    ai_reply_text_tier2 = generate_free_ai_response_tier2(query_content)
+    ai_reply_text_tier2 = generate_free_ai_response_tier2(message.text.strip())
     logger.info(f"TIER 2: Falling back to NLTK/TextBlob Advanced AI: {ai_reply_text_tier2}")
+    update_message_reply_cooldown(chat_id)
     return {"type": "text", "content": ai_reply_text_tier2}
 
     # --- TIER 3: Powerful Free AI Fallback (Simple LLM Mock - Keywords) ---
     if random.random() < 0.5:
-        ai_reply_text_tier3 = generate_powerful_free_ai_response_tier3(query_content)
+        ai_reply_text_tier3 = generate_powerful_free_ai_response_tier3(message.text.strip())
         logger.info(f"TIER 3: Falling back to MOCK Powerful Free AI: {ai_reply_text_tier3}")
+        update_message_reply_cooldown(chat_id)
         return {"type": "text", "content": ai_reply_text_tier3}
 
     # --- TIER 4: Dynamic reply using Markov chain (Lowest Priority - Minimal Chance) ---
@@ -482,13 +550,15 @@ async def generate_reply(message: Message):
         chain = build_markov_chain(current_context)
         if chain:
             dynamic_reply_text = generate_sentence(chain)
-            if dynamic_reply_text and dynamic_reply_text not in query_content: 
+            if dynamic_reply_text and dynamic_reply_text.lower() not in query_content: 
                 logger.info("TIER 4: Generating dynamic reply from chat history (Markov).")
+                update_message_reply_cooldown(chat_id)
                 return {"type": "text", "content": dynamic_reply_text}
     
     # --- TIER 5: Final Fallback (Simple Text) ---
     logger.info("TIER 5: Final Text Fallback.")
-    return {"type": "text", "content": "Mujhe is baare mein abhi aur seekhne ki zaroorat hai. Tum kya soch rahe ho?"}
+    update_message_reply_cooldown(chat_id)
+    return {"type": "text", "content": "Mujhe is baare mein abhi aur seekhne ki zaroorat hai tum kya soch rahe ho?"}
 
 # --- REST OF THE UTILITY FUNCTIONS (Unmodified) ---
 async def is_admin_or_owner(client: Client, chat_id: int, user_id: int):
@@ -521,7 +591,7 @@ async def update_group_info(chat_id: int, chat_title: str, chat_username: str = 
         group_tracking_collection.update_one(
             {"_id": chat_id},
             {"$set": {"title": chat_title, "username": chat_username, "last_updated": datetime.now()},
-             "$setOnInsert": {"added_on": datetime.now(), "member_count": 0, "bot_enabled": True, "credit": "by @asbhaibsr"}},
+             "$setOnInsert": {"added_on": datetime.now(), "member_count": 0, "bot_enabled": True, "ai_mode": "off", "credit": "by @asbhaibsr"}}, # Added ai_mode
             upsert=True
         )
         logger.info(f"Group info updated/inserted successfully for {chat_title} ({chat_id}). (Tracking by @asbhaibsr)")
