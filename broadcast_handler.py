@@ -67,42 +67,26 @@ async def pm_broadcast(client: Client, message: Message):
         
     b_msg = None
     try:
-        # Step 1: Prompt the user (Prompt message ko save kar rahe hain)
-        prompt_msg = await client.send_message(
+        # Step 1: Prompt and Listen (client.ask is the correct method for Pyrogram Bots)
+        # We will use client.ask again, as it is the ONLY valid method for Bot API clients.
+        # If it throws 'AttributeError: 'Client' object has no attribute 'ask'', 
+        # it means the Pyrogram setup is incorrect or the version is incompatible.
+        b_msg = await client.ask(
             chat_id=message.from_user.id,
             text="**🚀 Private Broadcast:** Ab mujhe woh message bhejo jise tum users ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬",
-            parse_mode=ParseMode.MARKDOWN
+            timeout=600 # 10 minutes timeout
         )
-
-        # FIX: client.ask/listen ki jagah manual check logic
-        timeout = 600 # 10 minutes timeout
-        start_time = time.time()
         
-        # 10 minute tak intezaar karo
-        while time.time() - start_time < timeout:
-            await asyncio.sleep(1) 
-            
-            # Chat history mein next message check karo
-            async for next_message in client.get_chat_history(message.from_user.id, limit=5):
-                # Check: Agar message, prompt_msg ke baad aaya ho AUR Owner ne bheja ho
-                if next_message.date > prompt_msg.date and next_message.from_user and next_message.from_user.id == OWNER_ID:
-                    b_msg = next_message
-                    break
-            
-            if b_msg:
-                break
-        
-        # Check if the message is valid (i.e., not None after timeout)
-        if b_msg is None:
-             raise asyncio.TimeoutError
-             
-    except asyncio.TimeoutError:
+    except Exception as e:
+        # This catches the AttributeError if client.ask is still missing.
+        await send_and_auto_delete_reply(message, text="Internal Error: 'ask' method missing. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        logger.error(f"Critical Broadcast Error: client.ask failed with: {e}")
+        return
+    
+    # client.ask timeout hone par 'None' return karta hai
+    if b_msg is None:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.warning("Broadcast cancelled by timeout: User failed to reply in time.")
-        return
-    except Exception as e:
-        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
-        logger.warning(f"Broadcast cancelled by error during listening process: {e}")
         return
     
     # Target IDs nikalna (Groups aur Owner ID ko hata kar)
@@ -195,42 +179,23 @@ async def broadcast_group(client: Client, message: Message):
         
     b_msg = None
     try:
-        # Step 1: Prompt the user
-        prompt_msg = await client.send_message(
+        # Step 1: Prompt and Listen (client.ask is the correct method for Pyrogram Bots)
+        b_msg = await client.ask(
             chat_id=message.from_user.id,
             text="**🚀 Group Broadcast:** Ab mujhe woh message bhejo jise tum Groups ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬",
-            parse_mode=ParseMode.MARKDOWN
+            timeout=600 # 10 minutes timeout
         )
-
-        # FIX: client.ask/listen ki jagah manual check logic
-        timeout = 600 # 10 minutes timeout
-        start_time = time.time()
         
-        # 10 minute tak intezaar karo
-        while time.time() - start_time < timeout:
-            await asyncio.sleep(1) 
-            
-            # Chat history mein next message check karo
-            async for next_message in client.get_chat_history(message.from_user.id, limit=5):
-                # Check: Agar message, prompt_msg ke baad aaya ho AUR Owner ne bheja ho
-                if next_message.date > prompt_msg.date and next_message.from_user and next_message.from_user.id == OWNER_ID:
-                    b_msg = next_message
-                    break
-            
-            if b_msg:
-                break
-        
-        # Check if the message is valid
-        if b_msg is None:
-             raise asyncio.TimeoutError
-             
-    except asyncio.TimeoutError:
+    except Exception as e:
+        # This catches the AttributeError if client.ask is still missing.
+        await send_and_auto_delete_reply(message, text="Internal Error: 'ask' method missing. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        logger.error(f"Critical Broadcast Error: client.ask failed with: {e}")
+        return
+    
+    # client.ask timeout hone par 'None' return karta hai
+    if b_msg is None:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.warning("Broadcast cancelled by timeout: User failed to reply in time.")
-        return
-    except Exception as e:
-        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
-        logger.warning(f"Broadcast cancelled by error during listening process: {e}")
         return
     
     # Target IDs nikalna (Sirf Groups)
