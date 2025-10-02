@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timedelta
 
 import pytz
-from pyrogram import Client, filters
+from pyrogram import Client, filters # Idle ko hata diya, zaroorat nahi
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
@@ -42,7 +42,7 @@ PRUNE_PERCENTAGE = 0.30
 UPDATE_CHANNEL_USERNAME = "asbhai_bsr"
 ASBHAI_USERNAME = "asbhaibsr" # Owner's username for contact
 ASFILTER_BOT_USERNAME = "asfilter_bot" # The bot for premium rewards
-BOT_PHOTO_URL = "https://jumpshare.com/s/yECHB1KD096ARRSIYT5C" 
+BOT_PHOTO_URL = "https://jumpshare.com/s/yECHB1KD096ARRSIYT5C" # Consider updating this URL if it's generic
 REPO_LINK = "https://envs.sh/KI3.jpg"
 
 # Regex for common URL patterns including t.me and typical link formats
@@ -76,7 +76,6 @@ try:
     messages_collection.create_index([("timestamp", 1)])
     messages_collection.create_index([("user_id", 1)])
     earning_tracking_collection.create_index([("group_message_count", -1)])
-    
     # Ensure bot_enabled field exists for all groups, default to True
     group_tracking_collection.update_many(
         {"bot_enabled": {"$exists": False}},
@@ -95,12 +94,6 @@ try:
         {"usernamedel_enabled": {"$exists": False}},
         {"$set": {"usernamedel_enabled": False}}
     )
-    
-    # NEW: Ensure AI mode flags exist for all groups, default to 'default'
-    group_tracking_collection.update_many(
-        {"ai_mode": {"$exists": False}},
-        {"$set": {"ai_mode": "default"}} # New field for AI mode
-    )
 
     # NEW: Create indexes for learning collections
     owner_taught_responses_collection.create_index([("trigger", 1)])
@@ -112,6 +105,7 @@ except Exception as e:
     exit(1)
 
 # --- Pyrogram Client ---
+# FIX: 'Client.with_listeners' ko hata kar, simple Client call wapas
 app = Client(
     "self_learning_bot",
     api_id=API_ID,
@@ -121,7 +115,7 @@ app = Client(
 
 # --- Cooldown dictionary (for commands) ---
 user_cooldowns = {}
-COMMAND_COOLDOWN_TIME = 0 # seconds (for commands like /start, /topusers)
+COMMAND_COOLDOWN_TIME = 3 # seconds (for commands like /start, /topusers)
 
 # --- Message Reply Cooldown (for general messages) ---
 chat_message_cooldowns = {}
