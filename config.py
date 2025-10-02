@@ -121,7 +121,7 @@ app = Client(
 
 # --- Cooldown dictionary (for commands) ---
 user_cooldowns = {}
-COMMAND_COOLDOWN_TIME = 3 # seconds (for commands like /start, /topusers)
+COMMAND_COOLDOWN_TIME = 0 # seconds (for commands like /start, /topusers)
 
 # --- Message Reply Cooldown (for general messages) ---
 chat_message_cooldowns = {}
