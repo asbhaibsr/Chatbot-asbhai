@@ -67,6 +67,7 @@ async def delete_after_delay_for_message(message: Message, text: str = None, pho
     """
     Sends a reply and sets a task to auto-delete both the command and the reply after a delay.
     This function name is kept for compatibility with events.py
+    NOTE: In events.py, the wrapper 'send_and_auto_delete_reply' is now using this utility function.
     """
     sent_message = None
     user_info_str = ""
@@ -102,7 +103,7 @@ async def delete_after_delay_for_message(message: Message, text: str = None, pho
         logger.warning(f"delete_after_delay_for_message called with no content for message {message.id}.")
         return None
 
-    # Do not auto-delete 'start' command reply
+    # Do not auto-delete 'start' command reply - CRITICAL for private chat commands
     if message.command and message.command[0] == "start":
         return sent_message
 
@@ -122,7 +123,7 @@ async def delete_after_delay_for_message(message: Message, text: str = None, pho
     return sent_message
 
 # Renaming the new function for use in the rest of the code for clarity
-send_and_auto_delete_reply = delete_after_delay_for_message
+# Removed the duplicate function definition here to avoid issues, relying on the single definition above.
 
 
 def get_sentiment(text):
@@ -218,7 +219,11 @@ async def prune_old_messages():
 
 async def store_message(client: Client, message: Message):
     try:
-        if message.from_user and (message.from_user.is_bot or message.text.startswith('/')):
+        # CRITICAL FIX: The check below STOPS ALL COMMANDS from being tracked/saved, which is correct.
+        # However, calling this function in commands.py caused issues.
+        # We rely on the commands.py to remove the call to this, or if needed,
+        # manually call update_user_info/update_group_info in commands.py
+        if message.from_user and (message.from_user.is_bot or message.text and message.text.startswith('/')):
             return
         
         current_message_content = message.text
@@ -239,7 +244,8 @@ async def store_message(client: Client, message: Message):
         }
         
         # Get bot ID safely
-        bot_id = client.me.id if client.me else None
+        me = await client.get_me()
+        bot_id = me.id if me else None
 
         # --- Tier 1: User-to-User Conversation Pattern Storage (Learning) ---
         if len(chat_contexts[chat_id]) >= 1:
@@ -286,9 +292,9 @@ async def store_message(client: Client, message: Message):
             "user_id": current_user_id,
             "chat_id": message.chat.id,
             "timestamp": datetime.now(),
-            "type": "text",
+            "type": message.media.value if message.media else "text", # Use media type if available
             "content": current_message_content,
-            "keywords": extract_keywords(current_message_content),
+            "keywords": extract_keywords(current_message_content) if current_message_content else [],
             "credits": "Code by @asbhaibsr"
         }
         
@@ -322,7 +328,7 @@ async def store_message(client: Client, message: Message):
 
 # --- NEW: AI Personality Prompt Generator ---
 def get_ai_role_prompt(ai_mode: str):
-    base_prompt = "Tum ek friendly, casual, young female bot ho. Hinglish (Hindi + English) me chote aur natural sentences me reply karo. Real logo ki tarah hi likhna, zaroori nahi ki har jagah sahi commas ya punctuation ho. Jaise log aam taur pe chat karte hain, waise hi karo. Sirf chat ke liye reply karna."
+    base_prompt = "Tum ek friendly, casual, young female bot ho. Hinglish (Hindi + English) me chote aur natural sentences me reply karo. Real logo ki tarah hi likhna, zaroori nahi ki har jagah sahi commas ya punctuation ho. Jaise log aam taur par chat karte hain, waise hi karo. Sirf chat ke liye reply karna."
     
     if ai_mode == "realgirl":
         return f"{base_prompt} Tum hamesha bohot chill, easy-going aur thodi natkhat (mischievous) ho. Reply me emoji zaroor use karna. Boht zyada formal ya lamba reply mat dena."
@@ -349,7 +355,8 @@ async def generate_g4f_response_tier0_5(client: Client, text: str, chat_id: int,
     if not g4f or not G4F_MODEL:
         return None
     
-    bot_id = client.me.id if client.me else None
+    me = await client.get_me()
+    bot_id = me.id if me else None
     if not bot_id: return None
 
     try:
@@ -399,15 +406,15 @@ def generate_best_contextual_response_tier0(text: str, chat_context: list):
     last_message = text.lower()
     
     # Simple reply patterns for real feel
-    if "kiya kr rha ho" in last_message or "kya chal rha hai" in last_message or "kya ho rha hai":
+    if "kiya kr rha ho" in last_message or "kya chal rha hai" in last_message or "kya ho rha hai" in last_message:
         return random.choice(["Bas tumhari baaton ka wait kar rahi thi tum batao kya khaas hai aaj? 😃", "Kuch naya nahi normal chatting tum kya kar rahe ho? ☕", "Mujhe pata nahi tha ki tum bore ho rahe the isliye main aayi!"])
     
-    if "hello" in last_message or "hi" in last_message or "hey":
+    if "hello" in last_message or "hi" in last_message or "hey" in last_message:
         # Using conversational learning to get a reply if context is available
         return random.choice(["Hey bolo kya baat hai? 😊", "Hi kya haal hai?", "Han yaar bolo"])
 
     if sentiment == "positive":
-        if "achha" in last_message or "badhiya" in last_message or "mazza":
+        if "achha" in last_message or "badhiya" in last_message or "mazza" in last_message:
             return f"Wah {random.choice(keywords).capitalize() if keywords else 'yeh'} sunke dil khush ho gaya kya hua detail mein batao! ✨"
         return "Awesome main bohot khush hoon tumhare liye 👍"
          
@@ -619,10 +626,13 @@ async def get_top_earning_users():
     logger.info(f"Fetched top earning users: {len(top_users_data)} results. (Earning system by @asbhaibsr)")
     top_users_details = []
     for user_data in top_users_data:
+        # Fetch detailed user info from user_tracking_collection
+        user_detail = user_tracking_collection.find_one({"_id": user_data["_id"]})
+        
         top_users_details.append({
             "user_id": user_data["_id"],
-            "first_name": user_data.get("first_name", "Unknown User"),
-            "username": user_data.get("username"),
+            "first_name": user_detail.get("first_name", "Unknown User") if user_detail else "Unknown User",
+            "username": user_detail.get("username") if user_detail else None,
             "message_count": user_data["group_message_count"],
             "last_active_group_id": user_data.get("last_active_group_id"),
             "last_active_group_title": user_data.get("last_active_group_title"),
