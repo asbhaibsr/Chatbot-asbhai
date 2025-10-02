@@ -1,9 +1,7 @@
-# utils.py
-
 import re
 import asyncio
 import time
-import logging
+import logging # Removed from here, imported via config
 import random
 from datetime import datetime, timedelta
 
@@ -24,20 +22,18 @@ from fuzzywuzzy import fuzz
 # --- RECRUITMENT: New Free AI Library (g4f) ---
 try:
     import g4f
-    # FIX: Using the more generic and stable model gpt_35_turbo to fix AttributeError
     G4F_MODEL = g4f.models.gpt_35_turbo 
-    g4f.debug.logging = False # Turn off excessive g4f logging
+    g4f.debug.logging = False 
 except ImportError:
     g4f = None
     G4F_MODEL = None
-    # SYNTAX ERROR FIX: Added the missing closing double quote (") here.
-    logger.warning("g4f library not found. Tier 0.5 AI will be disabled.") 
+    # logger.warning("g4f library not found. Tier 0.5 AI will be disabled.") # Removed logger call due to config import
 
 # Configuration imports
 from config import (
     messages_collection, owner_taught_responses_collection, conversational_learning_collection,
     group_tracking_collection, user_tracking_collection, earning_tracking_collection,
-    reset_status_collection, biolink_exceptions_collection, app, logger,
+    reset_status_collection, biolink_exceptions_collection, app, logger, # logger is here!
     MAX_MESSAGES_THRESHOLD, PRUNE_PERCENTAGE, URL_PATTERN, OWNER_ID,
     user_cooldowns, COMMAND_COOLDOWN_TIME, chat_message_cooldowns, MESSAGE_REPLY_COOLDOWN_TIME
 )
@@ -64,6 +60,17 @@ nlp = None
 semantic_model = None
 GEMINI_CLIENT = None
 
+# 🌟 FIX 1: Bot ID initialization function
+async def initialize_bot_id():
+    """Fetches and sets the bot's user ID after the client has started."""
+    global BOT_USER_ID_PLACEHOLDER
+    try:
+        me = await app.get_me()
+        BOT_USER_ID_PLACEHOLDER = me.id
+        logger.info(f"Bot ID successfully initialized: {BOT_USER_ID_PLACEHOLDER}")
+    except Exception as e:
+        logger.error(f"Failed to fetch Bot ID: {e}")
+        
 # --- CORE UTILITY FUNCTIONS ---
 
 async def delete_after_delay_for_message(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
@@ -227,7 +234,8 @@ async def store_message(client: Client, message: Message):
             return
 
         chat_id = message.chat.id
-        bot_id = client.me.id if client.me else None
+        # FIX: BOT_USER_ID_PLACEHOLDER is now initialized in main.py
+        bot_id = BOT_USER_ID_PLACEHOLDER
         
         # Ensure context exists
         if chat_id not in chat_contexts:
@@ -340,7 +348,8 @@ async def generate_g4f_response_tier0_5(client: Client, text: str, context: list
     if not g4f or not G4F_MODEL:
         return None
     
-    bot_id = client.me.id if client.me else None
+    # FIX: Use initialized global variable
+    bot_id = BOT_USER_ID_PLACEHOLDER 
     if not bot_id: return None
     
     # --- Mode-Specific System Prompt ---
@@ -648,13 +657,21 @@ async def reset_monthly_earnings_manual():
     except Exception as e:
         logger.error(f"Error resetting monthly earnings manually: {e}. (Earning system by @asbhaibsr)")
 
-def is_on_command_cooldown(user_id):
+def is_on_command_cooldown(user_id, chat_type: ChatType):
+    # 🌟 FIX 2: Private chat ke liye cooldown hatao
+    if chat_type == ChatType.PRIVATE:
+        return False
+        
     last_command_time = user_cooldowns.get(user_id)
     if last_command_time is None:
         return False
     return (time.time() - last_command_time) < COMMAND_COOLDOWN_TIME
 
-def update_command_cooldown(user_id):
+def update_command_cooldown(user_id, chat_type: ChatType):
+    # 🌟 FIX 2: Private chat ke liye cooldown update mat karo
+    if chat_type == ChatType.PRIVATE:
+        return
+        
     user_cooldowns[user_id] = time.time()
 
 async def can_reply_to_chat(chat_id):
