@@ -18,9 +18,56 @@ from utils import (
     store_message 
 )
 
-# --- Global dictionary to store the status of ongoing broadcasts ---
-# Iska upyog yeh track karne ke liye hoga ki owner ne kis prompt message ka reply kiya hai.
-BROADCAST_PROMPTS = {}
+# --- Global Dictionaries for Manual Listener (For "Ask" replacement) ---
+# Ismein hum broadcast shuru hone ka status store karenge
+BROADCAST_STATUS = {}
+# Ismein hum har user ke liye uske agle message ko store karenge
+NEXT_MESSAGE_WAITERS = {}
+
+
+# -----------------------------------------------------
+# 0. MANUAL MESSAGE LISTENER (Replacing client.ask)
+# -----------------------------------------------------
+@app.on_message(filters.private & filters.user(OWNER_ID) & ~filters.command(["broadcast", "grp_broadcast"]))
+async def custom_ask_listener(client: Client, message: Message):
+    user_id = message.from_user.id
+    
+    # Check if the user is currently in a broadcast waiting state
+    if user_id in NEXT_MESSAGE_WAITERS:
+        waiter = NEXT_MESSAGE_WAITERS.pop(user_id, None)
+        if waiter:
+            # Set the result of the waiter to the received message
+            waiter.set_result(message)
+            # The next message is consumed by the broadcast handler, so we stop further processing here.
+            return
+    
+    # Agar user koi broadcast shuru nahi kar raha hai, toh yeh message aage process hoga (e.g., normal chat).
+    # NOTE: Yahan koi aur logic add karein agar aap normal private messages ko handle karte hain.
+    pass 
+
+
+# --- Helper function for asking without client.ask ---
+async def custom_ask(client: Client, chat_id: int, prompt: str, timeout: int = 600) -> Message | None:
+    """Sends a prompt and waits for the user's next message."""
+    
+    # 1. Send the prompt message to the user
+    await client.send_message(chat_id, prompt, parse_mode=ParseMode.MARKDOWN)
+    
+    # 2. Create a Future object to wait for the next message
+    waiter = asyncio.get_event_loop().create_future()
+    NEXT_MESSAGE_WAITERS[chat_id] = waiter
+    
+    try:
+        # 3. Wait for the message (Future is set by custom_ask_listener)
+        msg = await asyncio.wait_for(waiter, timeout=timeout)
+        return msg
+    except asyncio.TimeoutError:
+        return None
+    finally:
+        # 4. Clean up the waiter dictionary if it's still there
+        if chat_id in NEXT_MESSAGE_WAITERS:
+            del NEXT_MESSAGE_WAITERS[chat_id]
+
 
 # Broadcast Sending Logic (Helper Function)
 async def send_broadcast_message(client: Client, chat_id: int, message: Message):
@@ -31,6 +78,7 @@ async def send_broadcast_message(client: Client, chat_id: int, message: Message)
     Returns: (True/False, reason_string)
     """
     try:
+        # We use message.copy() which is the best way to handle all media types (photo, video, text, etc.)
         await message.copy(chat_id, parse_mode=ParseMode.MARKDOWN)
         return (True, "Success")
     
@@ -40,33 +88,25 @@ async def send_broadcast_message(client: Client, chat_id: int, message: Message)
         return (False, "Blocked") 
     except PeerIdInvalid:
         return (False, "Deleted/Invalid")
+    # --- RPC Error Handling Improvement ---
+    except RPCError as rpc_e:
+        error_msg = str(rpc_e)
+        
+        # FIX for RPC Error (INPUT_USER_DEACTIVATED)
+        if "INPUT_USER_DEACTIVATED" in error_msg or "USER_DEACTIVATED" in error_msg:
+             return (False, "Deleted/Deactivated") # Treat deactivated users as deleted
+             
+        logger.error(f"RPC Error sending broadcast to chat {chat_id}: {rpc_e}")
+        return (False, "Error")
+    
     except FloodWait as fw:
         logger.warning(f"FloodWait of {fw.value}s encountered. Sleeping... (Broadcast by @asbhaibsr)")
         await asyncio.sleep(fw.value)
+        # Retry the message after the sleep
         return await send_broadcast_message(client, chat_id, message) 
-    except RPCError as rpc_e:
-        logger.error(f"RPC Error sending broadcast to chat {chat_id}: {rpc_e}")
-        return (False, "Error")
     except Exception as e:
         logger.error(f"General Error sending broadcast to chat {chat_id}: {e}")
         return (False, "Error")
-
-# -----------------------------------------------------
-# 0. REPLY-BASED MESSAGE LISTENER (New)
-# -----------------------------------------------------
-
-@app.on_message(filters.private & filters.user(OWNER_ID) & filters.reply)
-async def listen_for_broadcast_reply(client: Client, message: Message):
-    # Check if the replied message is a prompt sent by the bot for a broadcast
-    if message.reply_to_message and message.reply_to_message.id in BROADCAST_PROMPTS:
-        prompt_info = BROADCAST_PROMPTS.pop(message.reply_to_message.id)
-        prompt_info['message_container'][0] = message # Store the actual message
-        
-        # Stop the waiting future/event
-        if prompt_info['event']:
-            prompt_info['event'].set()
-        
-        # We don't need to reply here, the main broadcast function will handle the flow.
 
 
 # -----------------------------------------------------
@@ -80,47 +120,26 @@ async def pm_broadcast(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
         
-    b_msg_container = [None]
-    timeout = 600 # 10 minutes timeout
-    wait_event = asyncio.Event()
-
+    b_msg = None
     try:
-        # Step 1: Prompt the user and ask them to REPLY to this message
-        prompt_msg = await client.send_message(
+        # Step 1: Prompt and Listen using the custom ask
+        b_msg = await custom_ask(
+            client=client,
             chat_id=message.from_user.id,
-            text="**🚀 Private Broadcast:** Ab mujhe woh message (Photo, video, ya text) **REPLY** karke bhejo jise tum users ko bhejna chahte ho. 💬",
-            parse_mode=ParseMode.MARKDOWN
+            prompt="**🚀 Private Broadcast:** Ab mujhe woh message bhejo jise tum users ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬",
+            timeout=600 # 10 minutes timeout
         )
         
-        # Step 2: Set up the global tracking for this prompt
-        BROADCAST_PROMPTS[prompt_msg.id] = {
-            'message_container': b_msg_container,
-            'event': wait_event,
-            'type': 'pm_broadcast'
-        }
-        
-        # Step 3: Wait for the reply message or timeout
-        await asyncio.wait_for(wait_event.wait(), timeout=timeout)
-        
-        # Check if the reply message was received
-        b_msg = b_msg_container[0]
-        if b_msg is None:
-             raise asyncio.TimeoutError # Should be handled by wait_for, but check just in case.
-             
-    except asyncio.TimeoutError:
+    except Exception as e:
+        await send_and_auto_delete_reply(message, text="Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        logger.error(f"Critical Broadcast Error in custom_ask: {e}")
+        return
+    
+    # Timeout hone par 'None' return karta hai
+    if b_msg is None:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.warning("Broadcast cancelled by timeout: User failed to reply in time.")
         return
-    except Exception as e:
-        await send_and_auto_delete_reply(message, text="Koi error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
-        logger.error(f"Broadcast cancelled by error during listening process: {e}")
-        return
-    finally:
-        # Clean up the prompt tracking regardless of success/failure
-        if prompt_msg.id in BROADCAST_PROMPTS:
-            del BROADCAST_PROMPTS[prompt_msg.id]
-    
-    # --- Broadcast Execution Logic ---
     
     # Target IDs nikalna (Groups aur Owner ID ko hata kar)
     private_chat_ids = [u["_id"] for u in user_tracking_collection.find({})]
@@ -129,14 +148,12 @@ async def pm_broadcast(client: Client, message: Message):
         all_target_ids.remove(OWNER_ID)
 
     total_targets = len(all_target_ids)
-    # ... (rest of the broadcast logic remains the same, using b_msg)
     
     if total_targets == 0:
         await send_and_auto_delete_reply(message, text="Mujhe koi user mila hi nahi jise message bheja ja sake (Owner ko chhodkar). 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
         return
 
     # Initial status message
-    # ... (status message creation)
     sts = await message.reply_text(f"🚀 **Private Broadcast Shuru!** 🚀\n" 
                                    f"Cool, main **{total_targets}** private chats par message bhej rahi hoon.\n" 
                                    f"Sent: **0** / Blocked: **0** / Deleted: **0** (Total: {total_targets})", 
@@ -160,7 +177,7 @@ async def pm_broadcast(client: Client, message: Message):
         else:
             if sh == "Blocked":
                 blocked += 1
-            elif sh == "Deleted/Invalid":
+            elif sh == "Deleted/Invalid" or sh == "Deleted/Deactivated": # Check for the new deactivated status
                 deleted += 1
             elif sh == "Error":
                 failed += 1
@@ -202,7 +219,7 @@ async def pm_broadcast(client: Client, message: Message):
 
 
 # -----------------------------------------------------
-# 3. GROUP BROADCAST (/grp_broadcast)
+# 2. GROUP BROADCAST (/grp_broadcast)
 # -----------------------------------------------------
 
 @app.on_message(filters.command("grp_broadcast") & filters.private)
@@ -212,47 +229,26 @@ async def broadcast_group(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
         
-    b_msg_container = [None]
-    timeout = 600 # 10 minutes timeout
-    wait_event = asyncio.Event()
-    
+    b_msg = None
     try:
-        # Step 1: Prompt the user and ask them to REPLY to this message
-        prompt_msg = await client.send_message(
+        # Step 1: Prompt and Listen using the custom ask
+        b_msg = await custom_ask(
+            client=client,
             chat_id=message.from_user.id,
-            text="**🚀 Group Broadcast:** Ab mujhe woh message (Photo, video, ya text) **REPLY** karke bhejo jise tum Groups ko bhejna chahte ho. 💬",
-            parse_mode=ParseMode.MARKDOWN
+            prompt="**🚀 Group Broadcast:** Ab mujhe woh message bhejo jise tum Groups ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬",
+            timeout=600 # 10 minutes timeout
         )
-
-        # Step 2: Set up the global tracking for this prompt
-        BROADCAST_PROMPTS[prompt_msg.id] = {
-            'message_container': b_msg_container,
-            'event': wait_event,
-            'type': 'grp_broadcast'
-        }
         
-        # Step 3: Wait for the reply message or timeout
-        await asyncio.wait_for(wait_event.wait(), timeout=timeout)
-        
-        # Check if the reply message was received
-        b_msg = b_msg_container[0]
-        if b_msg is None:
-             raise asyncio.TimeoutError 
-
-    except asyncio.TimeoutError:
+    except Exception as e:
+        await send_and_auto_delete_reply(message, text="Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        logger.error(f"Critical Broadcast Error in custom_ask: {e}")
+        return
+    
+    # Timeout hone par 'None' return karta hai
+    if b_msg is None:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.warning("Broadcast cancelled by timeout: User failed to reply in time.")
         return
-    except Exception as e:
-        await send_and_auto_delete_reply(message, text="Koi error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
-        logger.error(f"Broadcast cancelled by error during listening process: {e}")
-        return
-    finally:
-        # Clean up the prompt tracking regardless of success/failure
-        if prompt_msg.id in BROADCAST_PROMPTS:
-            del BROADCAST_PROMPTS[prompt_msg.id]
-    
-    # --- Broadcast Execution Logic ---
     
     # Target IDs nikalna (Sirf Groups)
     group_chat_ids = [g["_id"] for g in group_tracking_collection.find({})]
@@ -265,7 +261,6 @@ async def broadcast_group(client: Client, message: Message):
         return
 
     # Initial status message
-    # ... (status message creation)
     sts = await message.reply_text(f"🚀 **Group Broadcast Shuru!** 🚀\n" 
                                    f"Cool, main **{total_targets}** Groups par message bhej rahi hoon.\n" 
                                    f"Sent: **0** / Failed: **0** (Total: {total_targets})", 
