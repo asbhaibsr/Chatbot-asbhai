@@ -30,7 +30,8 @@ try:
 except ImportError:
     g4f = None
     G4F_MODEL = None
-    logger.warning("g4f library not found. Tier 0.5 AI will be disabled.)
+    # SYNTAX ERROR FIX: Added the missing closing double quote (") here.
+    logger.warning("g4f library not found. Tier 0.5 AI will be disabled.") 
 
 # Configuration imports
 from config import (
