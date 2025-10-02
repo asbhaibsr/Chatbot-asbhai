@@ -68,9 +68,6 @@ async def pm_broadcast(client: Client, message: Message):
     b_msg = None
     try:
         # Step 1: Prompt and Listen (client.ask is the correct method for Pyrogram Bots)
-        # We will use client.ask again, as it is the ONLY valid method for Bot API clients.
-        # If it throws 'AttributeError: 'Client' object has no attribute 'ask'', 
-        # it means the Pyrogram setup is incorrect or the version is incompatible.
         b_msg = await client.ask(
             chat_id=message.from_user.id,
             text="**🚀 Private Broadcast:** Ab mujhe woh message bhejo jise tum users ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬",
@@ -78,8 +75,8 @@ async def pm_broadcast(client: Client, message: Message):
         )
         
     except Exception as e:
-        # This catches the AttributeError if client.ask is still missing.
-        await send_and_auto_delete_reply(message, text="Internal Error: 'ask' method missing. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        # If client.ask is truly missing, this catches the error.
+        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya. Agar bar-bar 'Internal Error: ask method missing' aaye, to Pyrogram ko update karo. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Critical Broadcast Error: client.ask failed with: {e}")
         return
     
@@ -187,8 +184,8 @@ async def broadcast_group(client: Client, message: Message):
         )
         
     except Exception as e:
-        # This catches the AttributeError if client.ask is still missing.
-        await send_and_auto_delete_reply(message, text="Internal Error: 'ask' method missing. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        # If client.ask is truly missing, this catches the error.
+        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya. Agar bar-bar 'Internal Error: ask method missing' aaye, to Pyrogram ko update karo. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Critical Broadcast Error: client.ask failed with: {e}")
         return
     
