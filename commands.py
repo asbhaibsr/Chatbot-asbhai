@@ -1,4 +1,4 @@
-# commands.py
+#commands.py
 
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -6,7 +6,6 @@ from pyrogram.enums import ChatType, ChatMemberStatus, ParseMode
 from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError
 from datetime import datetime
 import re 
-import logging
 
 # Import utilities and configurations
 from config import (
@@ -21,8 +20,8 @@ from utils import (
     store_message, is_admin_or_owner
 )
 
-import callbacks
-import broadcast_handler
+import callbacks # <--- This line is essential for importing callbacks.py
+import broadcast_handler # <--- 🌟 New broadcast file imported 🌟
 
 # -----------------------------------------------------
 # PRIVATE CHAT COMMANDS
@@ -30,12 +29,9 @@ import broadcast_handler
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_private_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     user_name = message.from_user.first_name if message.from_user else "Friend"
     welcome_message = (
@@ -63,6 +59,7 @@ async def start_private_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
+    # FIX: Added 'client' argument
     await store_message(client, message) 
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -70,11 +67,9 @@ async def start_private_command(client: Client, message: Message):
 
 @app.on_message(filters.command("topusers") & (filters.private | filters.group))
 async def top_users_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     top_users = await get_top_earning_users()
     if not top_users:
@@ -133,11 +128,12 @@ async def top_users_command(client: Client, message: Message):
         [
             [
                 InlineKeyboardButton("💰 Wɪᴛʜᴅʀᴀᴡ", url=f"https://t.me/{ASBHAI_USERNAME}"),
-                InlineKeyboardButton("💰 Eᴀʀɴ𝗶𝗻𝗴 Rᴜ𝗹𝗲ꜱ", callback_data="show_earning_rules")
+                InlineKeyboardButton("💰 Eᴀʀɴɪɴɢ Rᴜʟᴇꜱ", callback_data="show_earning_rules")
             ]
         ]
     )
     await send_and_auto_delete_reply(message, text="\n".join(earning_messages), reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+    # FIX: Added 'client' argument
     await store_message(client, message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -146,11 +142,9 @@ async def top_users_command(client: Client, message: Message):
 
 @app.on_message(filters.command("stats") & filters.private)
 async def stats_private_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     if len(message.command) < 2 or message.command[1].lower() != "check":
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝘁𝗼 𝗰𝗵𝗲𝗰𝗸 𝘀𝘁𝗮𝘁𝘀, 𝗽𝗹𝗲𝗮𝘀𝗲 𝘁𝘆𝗽𝗲 𝗰𝗼𝗿𝗿𝗲𝗰𝘁𝗹𝘆! 𝗟𝗶𝗸𝗲 𝘁𝗵𝗶𝘀: `/stats check`. 😊", parse_mode=ParseMode.MARKDOWN)
@@ -172,6 +166,7 @@ async def stats_private_command(client: Client, message: Message):
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
+    # FIX: Added 'client' argument
     await store_message(client, message)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -179,11 +174,9 @@ async def stats_private_command(client: Client, message: Message):
 
 @app.on_message(filters.command("stats") & filters.group)
 async def stats_group_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     if len(message.command) < 2 or message.command[1].lower() != "check":
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝘁𝗼 𝗰𝗵𝗲𝗰𝗸 𝘀𝘁𝗮𝘁𝘀, 𝗽𝗹𝗲𝗮𝘀𝗲 𝘁𝘆𝗽𝗲 𝗰𝗼𝗿𝗿𝗲𝗰𝘁𝗹𝘆! 𝗟𝗶𝗸𝗲 𝘁𝗵𝗶𝘀: `/stats check`. 😊", parse_mode=ParseMode.MARKDOWN)
@@ -205,6 +198,7 @@ async def stats_group_command(client: Client, message: Message):
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
+    # FIX: Added 'client' argument
     await store_message(client, message)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
@@ -214,11 +208,9 @@ async def stats_group_command(client: Client, message: Message):
 
 @app.on_message(filters.command("groups") & filters.private)
 async def list_groups_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="𝗢𝗼𝗽𝘀! 𝗦𝗼𝗿𝗿𝘆 𝘀𝘄𝗲𝗲𝘁𝗶𝗲, 𝘁𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗶𝘀 𝗼𝗻𝗹𝘆 𝗳𝗼𝗿 𝗺𝘆 𝗯𝗼𝘀𝘀. 𝗬𝗼𝘂 𝗱𝗼𝗻'𝘁 𝗵𝗮𝘃𝗲 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻. 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
@@ -260,17 +252,16 @@ async def list_groups_command(client: Client, message: Message):
 
     group_list_text += "\n𝗧𝗵𝗶𝘀 𝗱𝗮𝘁𝗮 𝗶𝘀 𝗳𝗿𝗼𝗺 𝘁𝗵𝗲 𝘁𝗿𝗮𝗰𝗸𝗶𝗻𝗴 𝗱𝗮𝘁𝗮𝗯𝗮𝘀𝗲, 𝗶𝘁'𝘀 𝗮 𝘀𝗲𝗰𝗿𝗲𝘁! 🤫\n**Powered By:** @asbhaibsr"
     await send_and_auto_delete_reply(message, text=group_list_text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+    # FIX: Added 'client' argument
     await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Groups list command processed by owner {message.from_user.id}.")
 
 @app.on_message(filters.command("leavegroup") & filters.private)
 async def leave_group_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="𝗢𝗼𝗽𝘀! 𝗦𝗼𝗿𝗿𝘆 𝘀𝘄𝗲𝗲𝘁𝗶𝗲, 𝘁𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗶𝘀 𝗼𝗻𝗹𝘆 𝗳𝗼𝗿 𝗺𝘆 𝗯𝗼𝘀𝘀. 𝗬𝗼𝘂 𝗱𝗼𝗻'𝘁 𝗵𝗮𝘃𝗲 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻. 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
@@ -305,17 +296,16 @@ async def leave_group_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text=f"𝗔𝗻 𝗲𝗿𝗿𝗼𝗿 𝗼𝗰𝗰𝘂𝗿𝗿𝗲𝗱 𝘄𝗵𝗶𝗹𝗲 𝗹𝗲𝗮𝘃𝗶𝗻𝗴 𝘁𝗵𝗲 𝗴𝗿𝗼𝘂𝗽: {e}. 𝗢𝗵 𝗻𝗼! 😢", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Error leaving group {group_id_str}: {e}.")
 
+    # FIX: Added 'client' argument
     await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
 @app.on_message(filters.command("cleardata") & filters.private)
 async def clear_data_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="𝗦𝗼𝗿𝗿𝘆, 𝗱𝗮𝗿𝗹𝗶𝗻𝗴! 𝗧𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗶𝘀 𝗼𝗻𝗹𝘆 𝗳𝗼𝗿 𝗺𝘆 𝗯𝗼𝘀𝘀. 🤫", parse_mode=ParseMode.MARKDOWN)
@@ -379,17 +369,16 @@ async def clear_data_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝗜 𝗱𝗶𝗱𝗻'𝘁 𝗳𝗶𝗻𝗱 𝗮𝗻𝘆𝘁𝗵𝗶𝗻𝗴 𝘁𝗼 𝗱𝗲𝗹𝗲𝘁𝗲. 𝗜𝘁 𝘀𝗲𝗲𝗺𝘀 𝘆𝗼𝘂'𝘃𝗲 𝗮𝗹𝗿𝗲𝗮𝗱𝘆 𝗰𝗹𝗲𝗮𝗻𝗲𝗱 𝗲𝘃𝗲𝗿𝘆𝘁𝗵𝗶𝗻𝗴! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
 
+    # FIX: Added 'client' argument
     await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
 @app.on_message(filters.command("deletemessage") & filters.private)
 async def delete_specific_message_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="𝗢𝗼𝗽𝘀! 𝗦𝗼𝗿𝗿𝘆 𝘀𝘄𝗲𝗲𝘁𝗶𝗲, 𝘁𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗶𝘀 𝗼𝗻𝗹𝘆 𝗳𝗼𝗿 𝗺𝘆 𝗯𝗼𝘀𝘀. 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
@@ -430,17 +419,16 @@ async def delete_specific_message_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝗜 𝗱𝗶𝗱𝗻'𝘁 𝗳𝗶𝗻𝗱 𝗮𝗻𝘆 **𝘁𝗲𝘅𝘁 𝗺𝗲𝘀𝘀𝗮𝗴𝗲** 𝗶𝗻 𝗺𝘆 𝗱𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝘄𝗶𝘁𝗵 𝘆𝗼𝘂𝗿 𝗾𝘂𝗲𝗿𝘆. 𝗖𝗵𝗲𝗰𝗸 𝘁𝗵𝗲 𝘀𝗽𝗲𝗹𝗹𝗶𝗻𝗴? 🤔", parse_mode=ParseMode.MARKDOWN)
 
+    # FIX: Added 'client' argument
     await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
 @app.on_message(filters.command("delsticker") & filters.private)
 async def delete_specific_sticker_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="𝗢𝗼𝗽𝘀! 𝗦𝗼𝗿𝗿𝘆 𝘀𝘄𝗲𝗲𝘁𝗶𝗲, 𝘁𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗶𝘀 𝗼𝗻𝗹𝘆 𝗳𝗼𝗿 𝗺𝘆 𝗯𝗼𝘀𝘀. 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
@@ -489,17 +477,16 @@ async def delete_specific_sticker_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝗜 𝗱𝗶𝗱𝗻'𝘁 𝗳𝗶𝗻𝗱 𝗮𝗻𝘆 **𝘀𝘁𝗶𝗰𝗸𝗲𝗿** 𝗶𝗻 𝗺𝘆 𝗱𝗮𝘁𝗮𝗯𝗮𝘀𝗲. 𝗘𝗶𝘁𝗵𝗲𝗿 𝘁𝗵𝗲𝗿𝗲 𝗮𝗿𝗲 𝗻𝗼 𝘀𝘁𝗶𝗰𝗸𝗲𝗿𝘀, 𝗼𝗿 𝘁𝗵𝗲 𝗽𝗲𝗿𝗰𝗲𝗻𝘁𝗮𝗴𝗲 𝗶𝘀 𝘁𝗼𝗼 𝗹𝗼𝘄! 🤔", parse_mode=ParseMode.MARKDOWN)
 
+    # FIX: Added 'client' argument
     await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
 @app.on_message(filters.command("clearearning") & filters.private)
 async def clear_earning_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="𝗦𝗼𝗿𝗿𝘆 𝗱𝗮𝗿𝗹𝗶𝗻𝗴! 𝗧𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗶𝘀 𝗼𝗻𝗹𝘆 𝗳𝗼𝗿 𝗺𝘆 𝗯𝗼𝘀𝘀. 🚫", parse_mode=ParseMode.MARKDOWN)
@@ -509,17 +496,16 @@ async def clear_earning_command(client: Client, message: Message):
     await send_and_auto_delete_reply(message, text="💰 **𝗘𝗮𝗿𝗻𝗶𝗻𝗴 𝗱𝗮𝘁𝗮 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗰𝗹𝗲𝗮𝗿𝗲𝗱!** 𝗡𝗼𝘄 𝗲𝘃𝗲𝗿𝘆𝗼𝗻𝗲 𝘄𝗶𝗹𝗹 𝘀𝘁𝗮𝗿𝘁 𝗳𝗿𝗼𝗺 𝘇𝗲𝗿𝗼 𝗮𝗴𝗮𝗶𝗻! 😉", parse_mode=ParseMode.MARKDOWN)
     logger.info(f"Owner {message.from_user.id} manually triggered earning data reset.")
 
+    # FIX: Added 'client' argument
     await store_message(client, message)
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
 @app.on_message(filters.command("restart") & filters.private)
 async def restart_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="𝗦𝗼𝗿𝗿𝘆, 𝗱𝗮𝗿𝗹𝗶𝗻𝗴! 𝗧𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗶𝘀 𝗼𝗻𝗹𝘆 𝗳𝗼𝗿 𝗺𝘆 𝗯𝗼𝘀𝘀. 🚫", parse_mode=ParseMode.MARKDOWN)
@@ -530,16 +516,17 @@ async def restart_command(client: Client, message: Message):
     import asyncio
     import os
     import sys
+    # FIX: No need to store message right before restarting, but keeping the call for completeness if store_message is critical.
+    # The client object is still valid here.
+    # await store_message(client, message) 
     await asyncio.sleep(0.5)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
 @app.on_message(filters.command("clearall") & filters.private)
 async def clear_all_dbs_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="𝗧𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗶𝘀 𝗼𝗻𝗹𝘆 𝗳𝗼𝗿 𝗺𝘆 𝗯𝗼𝘀𝘀. 🚫", parse_mode=ParseMode.MARKDOWN)
@@ -563,15 +550,14 @@ async def clear_all_dbs_command(client: Client, message: Message):
         parse_mode=ParseMode.MARKDOWN
     )
     logger.info(f"Owner {message.from_user.id} initiated /clearall command. Waiting for confirmation.")
+    # FIX: Added 'client' argument
     await store_message(client, message) 
 
 @app.on_message(filters.command("clearmydata"))
 async def clear_my_data_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     target_user_id = None
     if len(message.command) > 1 and message.from_user.id == OWNER_ID:
@@ -626,6 +612,7 @@ async def clear_my_data_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text=f"𝗦𝗼𝗺𝗲𝘁𝗵𝗶𝗻𝗴 𝘄𝗲𝗻𝘁 𝘄𝗿𝗼𝗻𝗴 𝘄𝗵𝗶𝗹𝗲 𝗱𝗲𝗹𝗲𝘁𝗶𝗻𝗴 𝗱𝗮𝘁𝗮: {e}. 𝗢𝗵 𝗻𝗼! 😱", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Error clearing data for user {target_user_id}: {e}")
     
+    # FIX: Added 'client' argument
     await store_message(client, message)
     
     # FIX: Corrected update_user_info arguments
@@ -639,11 +626,9 @@ async def clear_my_data_command(client: Client, message: Message):
 
 @app.on_message(filters.command("start") & filters.group)
 async def start_group_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     user_name = message.from_user.first_name if message.from_user else "Friend"
     welcome_message = (
@@ -671,6 +656,7 @@ async def start_group_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
+    # FIX: Added 'client' argument
     await store_message(client, message)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.")
@@ -682,15 +668,13 @@ async def start_group_command(client: Client, message: Message):
 
 @app.on_message(filters.command("settings") & filters.group)
 async def open_settings_command(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
+    if is_on_command_cooldown(message.from_user.id):
         return
-    update_command_cooldown(message.from_user.id, chat_type)
+    update_command_cooldown(message.from_user.id)
 
     # 1. Check for Admin/Owner status
     if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
-        await send_and_auto_delete_reply(message, text="𝗧𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗰𝗮𝗻 𝗼𝗻𝗹𝘆 𝗯𝗲 𝘂𝘀𝗲d by 𝗺𝘆 𝗯𝗼𝘀𝘀 (𝗔𝗱𝗺𝗶𝗻/𝗢𝘄𝗻𝗲𝗿)! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text="𝗧𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗰𝗮𝗻 𝗼𝗻𝗹𝘆 𝗯𝗲 𝘂𝘀𝗲𝗱 𝗯𝘆 𝗺𝘆 𝗯𝗼𝘀𝘀 (𝗔𝗱𝗺𝗶𝗻/𝗢𝘄𝗻𝗲𝗿)! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
         return
 
     # 2. Fetch current settings and default punishment
@@ -717,7 +701,7 @@ async def open_settings_command(client: Client, message: Message):
         "warn": "⚠️ Wᴀʀɴ Uꜱᴇʀ",
         "ban": "⛔️ Bᴀɴ Uꜱᴇʀ"
     }
-    punishment_text = punishment_map.get(punishment, "🗑️ Dᴇʟᴇ𝘁ᴇ Mᴇꜱꜱᴀɢᴇ")
+    punishment_text = punishment_map.get(punishment, "🗑️ Dᴇʟᴇᴛᴇ Mᴇꜱꜱᴀɢᴇ")
 
     # 3. Create the Main Settings Keyboard (Styled Buttons)
     keyboard = InlineKeyboardMarkup(
@@ -764,163 +748,10 @@ async def open_settings_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
+    # CRITICAL FIX: The previous log showed this exact line causing a TypeError.
     await store_message(client, message)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Group settings command processed in chat {message.chat.id} by admin {message.from_user.id}.")
-
-# -----------------------------------------------------
-# AI COMMANDS (Merged from aicomamds.py)
-# -----------------------------------------------------
-
-# --- AI Mode Configuration ---
-AI_MODES = {
-    "default": "Default AI Mode (Balanced)",
-    "realgirl": "Real Girl Mode (Casual Hinglish)",
-    "romanticgirl": "Romantic Girl Mode (Loving Hinglish)",
-    "study": "Study Mode (Motivational & Educational)"
-}
-
-# --- Utility function to update AI Mode in DB ---
-async def set_ai_mode_in_db(chat_id: int, mode: str):
-    try:
-        # Note: Using update_one from the imported group_tracking_collection
-        group_tracking_collection.update_one(
-            {"_id": chat_id},
-            {"$set": {"ai_mode": mode}},
-            upsert=True
-        )
-        return True
-    except Exception as e:
-        logger.error(f"Error setting AI mode for chat {chat_id}: {e}")
-        return False
-
-# --- Helper to create AI Mode buttons ---
-def ai_mode_buttons(current_mode):
-    buttons = []
-    # Real Girl, Romantic Girl, Study
-    modes_to_show = ["realgirl", "romanticgirl", "study"]
-    
-    row = []
-    for mode in modes_to_show:
-        desc = AI_MODES[mode]
-        text = f"✅ {desc}" if mode == current_mode else desc
-        row.append(InlineKeyboardButton(text, callback_data=f"set_ai_mode_{mode}"))
-        if len(row) == 2:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
-    
-    # Default mode button in a new row
-    default_text = f"✅ {AI_MODES['default']}" if current_mode == 'default' else AI_MODES['default']
-    buttons.append([InlineKeyboardButton(default_text, callback_data="set_ai_mode_default")])
-    
-    return InlineKeyboardMarkup(buttons)
-
-# --- Button Callback Handler (for /aimode) ---
-@app.on_callback_query(filters.regex("^set_ai_mode_"))
-async def handle_ai_mode_callback(client: Client, callback_query):
-    # Only allow chat admins or owner to change the mode
-    if not await is_admin_or_owner(client, callback_query.message.chat.id, callback_query.from_user.id):
-        return await callback_query.answer("Only admins can change the AI mode.", show_alert=True)
-
-    try:
-        # data format: set_ai_mode_MODE_NAME
-        new_mode = callback_query.data.split("_")[-1]
-        
-        if new_mode not in AI_MODES:
-            return await callback_query.answer("Invalid mode selected.", show_alert=True)
-
-        if await set_ai_mode_in_db(callback_query.message.chat.id, new_mode):
-            await callback_query.answer(f"AI Mode set to: {AI_MODES[new_mode]}", show_alert=True)
-            
-            # Edit the message to show the new status
-            await callback_query.message.edit_text(
-                f"**⚙️ AI Mode Updated!**\n\n**Current Mode:** `{AI_MODES[new_mode]}`\n\nNiche diye gaye buttons se mode change karein:",
-                reply_markup=ai_mode_buttons(new_mode),
-                parse_mode=ParseMode.MARKDOWN
-            )
-        else:
-            await callback_query.answer("Failed to update AI mode in database.", show_alert=True)
-            
-    except Exception as e:
-        logger.error(f"Error handling AI mode callback: {e}")
-        await callback_query.answer(f"Error: {e}", show_alert=True)
-
-
-# --- /aimode Command Handler (For Buttons) ---
-@app.on_message(filters.command("aimode") & filters.group)
-async def aimode_command_handler(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
-        return
-    update_command_cooldown(message.from_user.id, chat_type)
-    
-    if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
-        return await message.reply_text("⛔ **Permission Denied!**\n\nAI mode sirf **Admins** hi change kar sakte hain.", parse_mode=ParseMode.MARKDOWN)
-
-    group_data = group_tracking_collection.find_one({"_id": message.chat.id})
-    current_mode = group_data.get("ai_mode", "default") if group_data else "default"
-
-    await send_and_auto_delete_reply(
-        message, 
-        text=f"**⚙️ AI Mode Control**\n\n**Current Mode:** `{AI_MODES[current_mode]}`\n\nNiche diye gaye buttons se mode change karein:",
-        reply_markup=ai_mode_buttons(current_mode),
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-# --- /mode on/off Command Handler (Unified) ---
-@app.on_message(filters.regex(r"^/(realgirl|romanticgirl|study)\s+(on|off)$") & filters.group)
-async def mode_on_off_command_handler(client: Client, message: Message):
-    # 🌟 FIX 1: Pass chat_type to cooldown functions
-    chat_type = message.chat.type 
-    if is_on_command_cooldown(message.from_user.id, chat_type):
-        return
-    update_command_cooldown(message.from_user.id, chat_type)
-    
-    if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
-        return await message.reply_text("⛔ **Permission Denied!**\n\nAI mode sirf **Admins** hi control kar sakte hain.", parse_mode=ParseMode.MARKDOWN)
-
-    # Parse command
-    match = filters.regex(r"^/(realgirl|romanticgirl|study)\s+(on|off)$").match(message.text)
-    if not match: return # Should not happen with filters.regex
-
-    command_mode = match.group(1)
-    command_state = match.group(2)
-    
-    group_data = group_tracking_collection.find_one({"_id": message.chat.id})
-    current_mode = group_data.get("ai_mode", "default") if group_data else "default"
-    
-    new_mode = "default"
-    if command_state == "on":
-        new_mode = command_mode
-    elif command_state == "off" and current_mode == command_mode:
-        # If the currently active mode is being turned off, switch to default
-        new_mode = "default"
-    elif command_state == "off" and current_mode != command_mode:
-        # If user turns off a mode that is not currently active
-        await send_and_auto_delete_reply(
-            message, 
-            text=f"**ℹ️ AI Mode Status**\n\n`/{command_mode} off` command ka asar nahi hoga kyunki **Current Mode** already `{AI_MODES[current_mode]}` hai.",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-    
-    if new_mode == current_mode:
-        await send_and_auto_delete_reply(
-            message, 
-            text=f"**ℹ️ AI Mode Status**\n\nMode already set to **{AI_MODES[current_mode]}**.",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-
-    if await set_ai_mode_in_db(message.chat.id, new_mode):
-        await send_and_auto_delete_reply(
-            message, 
-            text=f"**✅ AI Mode Changed!**\n\nBot ka naya mode ab **`{AI_MODES[new_mode]}`** hai.\n({AI_MODES[new_mode]})",
-            parse_mode=ParseMode.MARKDOWN
-        )
