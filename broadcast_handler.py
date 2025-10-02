@@ -14,9 +14,8 @@ from config import (
     logger, OWNER_ID
 )
 from utils import (
-    # is_on_command_cooldown, update_command_cooldown, # REMOVED: Cooldowns are removed for client.ask
     send_and_auto_delete_reply,
-    store_message # ✅ store_message needs 'client' and 'message' as arguments
+    store_message 
 )
 
 # Broadcast Sending Logic (Helper Function)
@@ -61,32 +60,49 @@ async def send_broadcast_message(client: Client, chat_id: int, message: Message)
 
 @app.on_message(filters.command("broadcast") & filters.private)
 async def pm_broadcast(client: Client, message: Message):
-    # Cooldown checks are intentionally REMOVED here to prevent client.ask from being blocked.
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
         
-    b_msg = None # b_msg ko pehle initialize karein
+    b_msg = None
     try:
-        # Owner se broadcast message pucho
-        # FIX: client.listen ko client.ask se badla gaya
-        b_msg = await client.ask(
+        # Step 1: Prompt the user (Prompt message ko save kar rahe hain)
+        prompt_msg = await client.send_message(
             chat_id=message.from_user.id,
             text="**🚀 Private Broadcast:** Ab mujhe woh message bhejo jise tum users ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬",
-            timeout=600 # 10 minutes timeout
+            parse_mode=ParseMode.MARKDOWN
         )
+
+        # FIX: client.ask/listen ki jagah manual check logic
+        timeout = 600 # 10 minutes timeout
+        start_time = time.time()
         
-    except Exception as e:
-        # Ye listen error ke liye hai (agar client object mein dikkat hai, jo pehle tha)
-        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi internal error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
-        logger.warning(f"Broadcast cancelled by error during ask: {e}")
-        return
-    
-    # client.ask timeout hone par 'None' return karta hai
-    if b_msg is None:
+        # 10 minute tak intezaar karo
+        while time.time() - start_time < timeout:
+            await asyncio.sleep(1) 
+            
+            # Chat history mein next message check karo
+            async for next_message in client.get_chat_history(message.from_user.id, limit=5):
+                # Check: Agar message, prompt_msg ke baad aaya ho AUR Owner ne bheja ho
+                if next_message.date > prompt_msg.date and next_message.from_user and next_message.from_user.id == OWNER_ID:
+                    b_msg = next_message
+                    break
+            
+            if b_msg:
+                break
+        
+        # Check if the message is valid (i.e., not None after timeout)
+        if b_msg is None:
+             raise asyncio.TimeoutError
+             
+    except asyncio.TimeoutError:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.warning("Broadcast cancelled by timeout: User failed to reply in time.")
+        return
+    except Exception as e:
+        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        logger.warning(f"Broadcast cancelled by error during listening process: {e}")
         return
     
     # Target IDs nikalna (Groups aur Owner ID ko hata kar)
@@ -107,7 +123,7 @@ async def pm_broadcast(client: Client, message: Message):
                                    f"Sent: **0** / Blocked: **0** / Deleted: **0** (Total: {total_targets})", 
                                    parse_mode=ParseMode.MARKDOWN)
 
-    start_time = time.time()
+    start_time_broadcast = time.time()
     done = 0
     blocked = 0
     deleted = 0
@@ -146,7 +162,7 @@ async def pm_broadcast(client: Client, message: Message):
                 logger.warning(f"Failed to edit broadcast status message: {edit_e}")
                 await asyncio.sleep(1) # Wait before next action
                 
-    time_taken = datetime.timedelta(seconds=int(time.time()-start_time))
+    time_taken = datetime.timedelta(seconds=int(time.time()-start_time_broadcast))
     final_message = (f"🎉 **Private Broadcast Complete!** 🎉\n" 
                      f"Completed in **{time_taken}** seconds.\n\n" 
                      f"Total Users Targeted: **{total_targets}**\n" 
@@ -163,7 +179,6 @@ async def pm_broadcast(client: Client, message: Message):
         logger.error(f"Failed to send final broadcast summary: {final_edit_e}. Sending as new message instead.")
         await message.reply_text(final_message, parse_mode=ParseMode.MARKDOWN)
 
-    # ✅ FIX: client argument added
     await store_message(client, message)
 
 
@@ -173,32 +188,49 @@ async def pm_broadcast(client: Client, message: Message):
 
 @app.on_message(filters.command("grp_broadcast") & filters.private)
 async def broadcast_group(client: Client, message: Message):
-    # Cooldown checks are intentionally REMOVED here to prevent client.ask from being blocked.
 
     if message.from_user.id != OWNER_ID:
         await send_and_auto_delete_reply(message, text="Oops! Sorry sweetie, yeh command sirf mere boss ke liye hai. 🤷‍♀️ (Code by @asbhaibsr)", parse_mode=ParseMode.MARKDOWN)
         return
         
-    b_msg = None # b_msg ko pehle initialize karein
+    b_msg = None
     try:
-        # Owner se broadcast message pucho
-        # FIX: client.listen ko client.ask se badla gaya
-        b_msg = await client.ask(
+        # Step 1: Prompt the user
+        prompt_msg = await client.send_message(
             chat_id=message.from_user.id,
             text="**🚀 Group Broadcast:** Ab mujhe woh message bhejo jise tum Groups ko bhejna chahte ho. Photo, video, ya text kuch bhi! 💬",
-            timeout=600 # 10 minutes timeout
+            parse_mode=ParseMode.MARKDOWN
         )
+
+        # FIX: client.ask/listen ki jagah manual check logic
+        timeout = 600 # 10 minutes timeout
+        start_time = time.time()
         
-    except Exception as e:
-        # Ye listen error ke liye hai (agar client object mein dikkat hai)
-        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi internal error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
-        logger.warning(f"Broadcast cancelled by error during ask: {e}")
-        return
-    
-    # client.ask timeout hone par 'None' return karta hai
-    if b_msg is None:
+        # 10 minute tak intezaar karo
+        while time.time() - start_time < timeout:
+            await asyncio.sleep(1) 
+            
+            # Chat history mein next message check karo
+            async for next_message in client.get_chat_history(message.from_user.id, limit=5):
+                # Check: Agar message, prompt_msg ke baad aaya ho AUR Owner ne bheja ho
+                if next_message.date > prompt_msg.date and next_message.from_user and next_message.from_user.id == OWNER_ID:
+                    b_msg = next_message
+                    break
+            
+            if b_msg:
+                break
+        
+        # Check if the message is valid
+        if b_msg is None:
+             raise asyncio.TimeoutError
+             
+    except asyncio.TimeoutError:
         await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya tumne time out kar diya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.warning("Broadcast cancelled by timeout: User failed to reply in time.")
+        return
+    except Exception as e:
+        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya ya koi error aa gayi. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        logger.warning(f"Broadcast cancelled by error during listening process: {e}")
         return
     
     # Target IDs nikalna (Sirf Groups)
@@ -217,7 +249,7 @@ async def broadcast_group(client: Client, message: Message):
                                    f"Sent: **0** / Failed: **0** (Total: {total_targets})", 
                                    parse_mode=ParseMode.MARKDOWN)
 
-    start_time = time.time()
+    start_time_broadcast = time.time()
     done = 0
     failed = 0
     success = 0
@@ -249,7 +281,7 @@ async def broadcast_group(client: Client, message: Message):
                 logger.warning(f"Failed to edit broadcast status message: {edit_e}")
                 await asyncio.sleep(1) # Wait before next action
                 
-    time_taken = datetime.timedelta(seconds=int(time.time()-start_time))
+    time_taken = datetime.timedelta(seconds=int(time.time()-start_time_broadcast))
     final_message = (f"🎉 **Group Broadcast Complete!** 🎉\n" 
                      f"Completed in **{time_taken}** seconds.\n\n" 
                      f"Total Groups Targeted: **{total_targets}**\n" 
@@ -264,5 +296,4 @@ async def broadcast_group(client: Client, message: Message):
         logger.error(f"Failed to send final broadcast summary: {final_edit_e}. Sending as new message instead.")
         await message.reply_text(final_message, parse_mode=ParseMode.MARKDOWN)
 
-    # ✅ FIX: client argument added
     await store_message(client, message)
