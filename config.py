@@ -105,8 +105,8 @@ except Exception as e:
     exit(1)
 
 # --- Pyrogram Client ---
-# FIX: 'Client' object has no attribute 'ask' error ke liye with_listeners ka upyog
-app = Client.with_listeners(
+# FIX: 'Client.with_listeners' ko hata kar, simple Client call wapas
+app = Client(
     "self_learning_bot",
     api_id=API_ID,
     api_hash=API_HASH,
