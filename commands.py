@@ -1,4 +1,4 @@
-#commands.py
+# commands.py
 
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -6,6 +6,7 @@ from pyrogram.enums import ChatType, ChatMemberStatus, ParseMode
 from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError
 from datetime import datetime
 import re 
+import asyncio # <-- Added for restart
 
 # Import utilities and configurations
 from config import (
@@ -76,7 +77,7 @@ async def top_users_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="😢 𝗡𝗼 𝘂𝘀𝗲𝗿𝘀 𝗮𝗿𝗲 𝗼𝗻 𝘁𝗵𝗲 𝗹𝗲𝗮𝗱𝗲𝗿𝗯𝗼𝗮𝗿𝗱 𝘆𝗲𝘁! 𝗕𝗲 𝘁𝗵𝗲 𝗳𝗶𝗿𝘀𝘁 𝗯𝘆 𝗯𝗲𝗶𝗻𝗴 𝗮𝗰𝘁𝗶𝘃𝗲! ✨\n\n**Powered By:** @asbhaibsr", parse_mode=ParseMode.MARKDOWN)
         return
 
-    earning_messages = ["👑 **𝗧𝗼𝗽 𝗔𝗰𝘁𝗶𝘃𝗲 𝗨𝘀𝗲𝗿𝘀 - ✨ 𝗩𝗜𝗣 𝗟𝗲𝗮𝗱𝗲𝗿𝗯𝗼𝗮𝗿𝗱! ✨** 👑\n\n"]
+    earning_messages = ["👑 **𝗧𝗼𝗽 𝗔𝗰𝘁𝗶𝘃𝗲 𝗨𝘀𝗲𝗿𝘀 - ✨ 𝗩𝗜𝗣 𝗟𝗲𝗮𝗱𝗲𝗿𝗯𝗼𝗮𝗮𝗿𝗱! ✨** 👑\n\n"]
     prizes = {
         1: "💰 ₹50", 2: "💸 ₹30", 3: "🎁 ₹20",
         4: f"🎬 1 𝗪𝗲𝗲𝗸 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗣𝗹𝗮𝗻 𝗼𝗳 @{ASFILTER_BOT_USERNAME}",
@@ -364,7 +365,7 @@ async def clear_data_command(client: Client, message: Message):
     total_deleted = deleted_count_old + deleted_count_owner_taught + deleted_count_conversational
 
     if total_deleted > 0:
-        await send_and_auto_delete_reply(message, text=f"𝗪𝗼𝘄! 🤩 𝗜 𝗵𝗮𝘃𝗲 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗱𝗲𝗹𝗲𝘁𝗲𝗱 𝘆𝗼𝘂𝗿 **{percentage}%** 𝗱𝗮𝘁𝗮! 𝗔 𝘁𝗼𝘁𝗮𝗹 𝗼𝗳 **{total_deleted}** 𝗲𝗻𝘁𝗿𝗶𝗲𝘀 (𝗢𝗹𝗱: {deleted_count_old}, 𝗢𝘄𝗻𝗲𝗿-𝗧𝗮𝘂𝗴𝗵𝘁: {deleted_count_owner_taught}, 𝗖𝗼𝗻𝘃𝗲𝗿𝘀𝗮𝘁𝗶𝗼𝗻𝗮𝗹: {deleted_count_conversational}) 𝗮𝗿𝗲 𝗰𝗹𝗲𝗮𝗻𝗲𝗱. 𝗜 𝗳𝗲𝗲𝗹 𝗮 𝗯𝗶𝘁 𝗹𝗶𝗴𝗵𝘁𝗲𝗿 𝗻𝗼𝘄. ✨", parse_mode=ParseMode.MARKDOWN)
+        await send_and_auto_delete_reply(message, text=f"𝗪𝗼𝘄! 🤩 𝗜 𝗵𝗮𝘃𝗲 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗱𝗲𝗹𝗲𝘁𝗲𝗱 𝘆𝗼𝘂𝗿 **{percentage}%** 𝗱𝗮𝘁𝗮! 𝗔 𝘁𝗼𝘁𝗮𝗹 𝗼𝗳 **{total_deleted}** 𝗲𝗻𝘁𝗿𝗶𝗲𝘀 (𝗢𝗹𝗱: {deleted_count_old}, 𝗢𝘄𝗻𝗲𝗿-𝗧𝗮𝘂𝗴𝗵𝘁: {deleted_count_owner_taught}, 𝗖𝗼𝗻𝘃𝗲𝗿𝘀𝗮𝘁𝗶𝗼𝗻𝗮𝗹: {deleted_count_conversational}) 𝗮𝗿𝗲 𝗰𝗹𝗲𝗮𝗻𝗲𝗱. 𝗜 𝗳𝗲𝗲𝗹 𝗮 b𝗶𝘁 𝗹𝗶𝗴𝗵𝘁𝗲𝗿 𝗻𝗼𝘄. ✨", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Cleared {total_deleted} messages across collections based on {percentage}% request.")
     else:
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝗜 𝗱𝗶𝗱𝗻'𝘁 𝗳𝗶𝗻𝗱 𝗮𝗻𝘆𝘁𝗵𝗶𝗻𝗴 𝘁𝗼 𝗱𝗲𝗹𝗲𝘁𝗲. 𝗜𝘁 𝘀𝗲𝗲𝗺𝘀 𝘆𝗼𝘂'𝘃𝗲 𝗮𝗹𝗿𝗲𝗮𝗱𝘆 𝗰𝗹𝗲𝗮𝗻𝗲𝗱 𝗲𝘃𝗲𝗿𝘆𝘁𝗵𝗶𝗻𝗴! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
@@ -513,7 +514,6 @@ async def restart_command(client: Client, message: Message):
 
     await send_and_auto_delete_reply(message, text="𝗢𝗸𝗮𝘆, 𝗱𝗮𝗿𝗹𝗶𝗻𝗴! 𝗜'𝗺 𝘁𝗮𝗸𝗶𝗻𝗴 𝗮 𝘀𝗵𝗼𝗿𝘁 𝗻𝗮𝗽 𝗻𝗼𝘄 𝗮𝗻𝗱 𝘁𝗵𝗲𝗻 𝗜'𝗹𝗹 𝗯𝗲 𝗯𝗮𝗰𝗸, 𝗰𝗼𝗺𝗽𝗹𝗲𝘁𝗲𝗹𝘆 𝗳𝗿𝗲𝘀𝗵 𝗮𝗻𝗱 𝗲𝗻𝗲𝗿𝗴𝗲𝘁𝗶𝗰! 𝗣𝗹𝗲𝗮𝘀𝗲 𝘄𝗮𝗶𝘁 𝗮 𝗹𝗶𝘁𝘁𝗹𝗲, 𝗼𝗸𝗮𝘆? ✨", parse_mode=ParseMode.MARKDOWN)
     logger.info("Bot is restarting...")
-    import asyncio
     import os
     import sys
     # FIX: No need to store message right before restarting, but keeping the call for completeness if store_message is critical.
@@ -605,7 +605,7 @@ async def clear_my_data_command(client: Client, message: Message):
                 logger.info(f"Owner {message.from_user.id} cleared data for user {target_user_id}.")
         else:
             if target_user_id == message.from_user.id:
-                await send_and_auto_delete_reply(message, text="𝗬𝗼𝘂 𝗱𝗼𝗻'𝘁 𝗵𝗮𝘃𝗲 𝗮𝗻𝘆 𝗱𝗮𝘁𝗮 𝘀𝘁𝗼𝗿𝗲𝗱 𝘁𝗼 𝗱𝗲𝗹𝗲𝘁𝗲. 𝗠𝘆 𝗱𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝗶𝘀 𝗰𝗼𝗺𝗽𝗹𝗲𝘁𝗲𝗹𝘆 𝗲𝗺𝗽𝘁𝘆 𝗳𝗼𝗿 𝘆𝗼𝘂! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
+                await send_and_auto_delete_reply(message, text="𝗬𝗼𝘂 𝗱𝗼𝗻't 𝗵𝗮𝘃𝗲 𝗮𝗻𝘆 𝗱𝗮𝘁𝗮 𝘀𝘁𝗼𝗿𝗲𝗱 𝘁𝗼 𝗱𝗲𝗹𝗲𝘁𝗲. 𝗠𝘆 𝗱𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝗶𝘀 𝗰𝗼𝗺𝗽𝗹𝗲𝘁𝗲𝗹𝘆 𝗲𝗺𝗽𝘁𝘆 𝗳𝗼𝗿 𝘆𝗼𝘂! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
             else:
                 await send_and_auto_delete_reply(message, text=f"𝗡𝗼 𝗱𝗮𝘁𝗮 𝗳𝗼𝘂𝗻𝗱 𝗳𝗼𝗿 𝘂𝘀𝗲𝗿 `{target_user_id}` 𝘁𝗼 𝗱𝗲𝗹𝗲𝘁𝗲.", parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
@@ -666,6 +666,83 @@ async def start_group_command(client: Client, message: Message):
     logger.info(f"Group start command processed in chat {message.chat.id}.")
 
 
+# --- NEW: AI MODE COMMAND ---
+@app.on_message(filters.command("setaimode") & filters.group)
+async def set_ai_mode_command(client: Client, message: Message):
+    if is_on_command_cooldown(message.from_user.id):
+        return
+    update_command_cooldown(message.from_user.id)
+
+    # 1. Check for Admin/Owner status
+    if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
+        await send_and_auto_delete_reply(message, text="⚠️ 𝗬𝗲 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝘀𝗶𝗿𝗳 𝗚𝗿𝗼𝘂𝗽 𝗔𝗱𝗺𝗶𝗻/𝗢𝘄𝗻𝗲𝗿 𝗵𝗶 𝘂𝘀𝗲 𝗸𝗮𝗿 𝘀𝗮𝗸𝘁𝗲 𝗵𝗮𝗶𝗻! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    # 2. Fetch current AI mode
+    current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
+    current_ai_mode = current_status_doc.get("ai_mode", "off") if current_status_doc else "off"
+    
+    # 3. Define AI Modes (Hindi/Hinglish Friendly)
+    ai_modes = {
+        "off": "❌ Oғғ",
+        "realgirl": "👧 Rᴇᴀʟ Gɪʀʟ",
+        "romanticgirl": "💖 Rᴏᴍᴀɴᴛɪᴄ Gɪʀʟ",
+        "motivationgirl": "💪 Mᴏᴛɪᴠᴀᴛɪᴏɴ Gɪʀʟ",
+        "studygirl": "📚 Sᴛᴜᴅʏ Gɪʀʟ",
+        "gemini": "✨ Gᴇᴍɪɴɪ (Sᴜᴘᴇʀ AI)", # New mode as requested
+    }
+    
+    # 4. Create Buttons
+    keyboard_buttons = []
+    current_row = []
+    
+    # Off/Default Button
+    status_off = "✅ " if current_ai_mode == "off" else ""
+    keyboard_buttons.append([InlineKeyboardButton(f"{status_off}❌ AI Mᴏᴅᴇ Oғғ", callback_data="set_ai_mode_off")])
+
+    # Dynamic Mode Buttons
+    for mode_key, mode_name in ai_modes.items():
+        if mode_key != "off":
+            status = "✅ " if current_ai_mode == mode_key else ""
+            button = InlineKeyboardButton(f"{status}{mode_name}", callback_data=f"set_ai_mode_{mode_key}")
+            current_row.append(button)
+            if len(current_row) == 2:
+                keyboard_buttons.append(current_row)
+                current_row = []
+    
+    if current_row:
+        keyboard_buttons.append(current_row)
+
+    # Close Button
+    keyboard_buttons.append([InlineKeyboardButton("❌ Cʟ𝗼𝘀𝗲 Mᴇɴᴜ", callback_data="close_settings")])
+    
+    keyboard = InlineKeyboardMarkup(keyboard_buttons)
+
+    # 5. Send Message
+    mode_display = ai_modes.get(current_ai_mode, "❌ Oғғ")
+    settings_message = (
+        f"👑 **AI Mᴏᴅᴇ Sᴇᴛᴛɪɴɢꜱ 👑**\n\n"
+        "𝗛𝗲𝗹𝗹𝗼 𝗕𝗼𝘀𝘀, 𝘆𝗲𝗵𝗮𝗻 𝘀𝗲 𝗮𝗽𝗽𝗮𝗻𝗮 **AI 𝗽𝗲𝗿𝘀𝗼𝗻𝗮𝗹𝗶𝘁𝘆** 𝘀𝗲𝘁 𝗸𝗮𝗿𝗼.\n"
+        "𝗕𝗼𝘁 𝘂𝘀 𝗵𝗶 𝗮𝗻𝗱𝗮𝗮𝘇 𝗺𝗮𝗶𝗻, 𝗯𝗶𝗸𝘂𝗹 𝗿𝗲𝗮𝗹 𝗹𝗮𝗱𝗸𝗶 𝗷𝗮𝗶𝘀𝗲, 𝗯𝗮𝗮𝘁 𝗸𝗮𝗿𝗲𝗴𝗶! 🤩\n\n"
+        f"**Cᴜʀʀᴇ𝗻𝘁 AI Mᴏ𝗱𝗲:** **{mode_display}**"
+    )
+
+    await send_and_auto_delete_reply(
+        message,
+        text=settings_message,
+        reply_markup=keyboard,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    await store_message(client, message)
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        await update_group_info(message.chat.id, message.chat.title, message.chat.username)
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    logger.info(f"Group /setaimode command processed in chat {message.chat.id} by admin {message.from_user.id}.")
+# --- END NEW AI MODE COMMAND ---
+
+
 @app.on_message(filters.command("settings") & filters.group)
 async def open_settings_command(client: Client, message: Message):
     if is_on_command_cooldown(message.from_user.id):
@@ -685,6 +762,7 @@ async def open_settings_command(client: Client, message: Message):
     linkdel_enabled = current_status_doc.get("linkdel_enabled", False) if current_status_doc else False
     biolinkdel_enabled = current_status_doc.get("biolinkdel_enabled", False) if current_status_doc else False
     usernamedel_enabled = current_status_doc.get("usernamedel_enabled", False) if current_status_doc else False
+    ai_mode = current_status_doc.get("ai_mode", "off") if current_status_doc else "off" # New AI Mode
     
     punishment = current_status_doc.get("default_punishment", "delete") if current_status_doc else "delete"
     
@@ -703,6 +781,14 @@ async def open_settings_command(client: Client, message: Message):
     }
     punishment_text = punishment_map.get(punishment, "🗑️ Dᴇʟᴇᴛᴇ Mᴇꜱꜱᴀɢᴇ")
 
+    # AI Mode Text
+    ai_modes = {
+        "off": "❌ Oғғ", "realgirl": "👧 Rᴇᴀʟ", "romanticgirl": "💖 Rᴏᴍ", 
+        "motivationgirl": "💪 Mᴏᴛɪ", "studygirl": "📚 Sᴛᴜᴅʏ", "gemini": "✨ Gᴇᴍɪɴɪ"
+    }
+    ai_mode_text = ai_modes.get(ai_mode, "❌ Oғғ")
+
+
     # 3. Create the Main Settings Keyboard (Styled Buttons)
     keyboard = InlineKeyboardMarkup(
         [
@@ -718,6 +804,10 @@ async def open_settings_command(client: Client, message: Message):
             ],
             [
                 InlineKeyboardButton(f"🗣️ @Uꜱᴇ𝗿𝗻𝗮𝗺𝗲 D𝗲𝗹𝗲𝘁𝗲: {username_status}", callback_data="toggle_setting_usernamedel_enabled"),
+            ],
+            # NEW AI MODE BUTTON
+            [
+                InlineKeyboardButton(f"✨ AI Mᴏᴅᴇ: {ai_mode_text}", callback_data="open_ai_mode_settings"),
             ],
             # Punishment and Biolink Exception
             [
@@ -735,10 +825,11 @@ async def open_settings_command(client: Client, message: Message):
 
     # 4. Send the Settings Message (Translated and styled)
     settings_message = (
-        f"⚙️ **𝗚𝗿𝗼𝘂𝗽 𝗦𝗲𝘁𝘁𝗶𝗻𝗴𝘀: {message.chat.title}** 🛠️\n\n"
+        f"⚙️ 𝗚𝗿𝗼𝘂𝗽 𝗦𝗲𝘁𝘁𝗶𝗻𝗴𝘀: {message.chat.title} 🛠️\n\n"
         "𝗛𝗲𝗹𝗹𝗼, 𝗕𝗼𝘀𝘀! 𝗬𝗼𝘂 𝗰𝗮𝗻 𝗰𝗼𝗻𝘁𝗿𝗼𝗹 𝘁𝗵𝗲 𝗴𝗿𝗼𝘂𝗽 𝗿𝘂𝗹𝗲𝘀 𝗮𝗻𝗱 𝗯𝗼𝘁 𝗳𝘂𝗻𝗰𝘁𝗶𝗼𝗻𝘀 𝗳𝗿𝗼𝗺 𝘁𝗵𝗲 𝗯𝘂𝘁𝘁𝗼𝗻𝘀 𝗯𝗲𝗹𝗼𝘄.\n"
-        "𝗨𝘀𝗲𝗿𝘀 𝘄𝗵𝗼 𝗯𝗿𝗲𝗮𝗸 𝘆𝗼𝘂𝗿 𝗳𝗶𝗹𝘁𝗲𝗿 𝘀𝗲𝘁𝘁𝗶𝗻𝗴𝘀 𝘄𝗶𝗹𝗹 𝗿𝗲𝗰𝗲𝗶𝘃𝗲 𝘁𝗵𝗲 **𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁**.\n\n"
-        f"**𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁:** {punishment_text}\n"
+        "**AI Mᴏᴅᴇ:** Bᴏᴛ ᴋɪ ᴘᴇʀsᴏɴᴀʟɪᴛʏ ᴀᴜʀ ᴊᴀᴡᴀʙ ᴅᴇɴᴇ ᴋᴀ ᴛᴀʀɪᴋᴀ ɪ𝘀 𝘀𝗲 𝘀𝗲𝘁 𝗵𝗼𝗴𝗮. **Cᴜʀʀᴇ𝗻𝘁: {ai_mode_text}**\n\n"
+        "𝗨𝘀𝗲𝗿𝘀 𝘄𝗵𝗼 𝗯𝗿𝗲𝗮𝗸 𝘆𝗼𝘂𝗿 𝗳𝗶𝗹𝘁𝗲𝗿 𝘀𝗲𝘁𝘁𝗶𝗻𝗴𝘀 𝘄𝗶𝗹𝗹 𝗿𝗲𝗰𝗲𝗶𝘃𝗲 𝘁𝗵𝗲 𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁.\n\n"
+        f"𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁: {punishment_text}\n"
         "__𝗖𝗵𝗼𝗼𝘀𝗲 𝘄𝗵𝗮𝘁 𝗽𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁 𝘁𝗼 𝗴𝗶𝘃𝗲 𝘁𝗼 𝗿𝘂𝗹𝗲-𝗯𝗿𝗲𝗮𝗸𝗲𝗿𝘀 𝗳𝗿𝗼𝗺 '𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁'.__"
     )
 
@@ -755,3 +846,4 @@ async def open_settings_command(client: Client, message: Message):
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Group settings command processed in chat {message.chat.id} by admin {message.from_user.id}.")
+
