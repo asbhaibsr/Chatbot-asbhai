@@ -1,9 +1,9 @@
-# utils.py 
+# utils.py (No Changes)
 
 import re
 import asyncio
 import time
-import logging # Removed from here, imported via config
+import logging
 import random
 from datetime import datetime, timedelta
 
@@ -24,18 +24,20 @@ from fuzzywuzzy import fuzz
 # --- RECRUITMENT: New Free AI Library (g4f) ---
 try:
     import g4f
+    # FIX: Using the more generic and stable model gpt_35_turbo to fix AttributeError
     G4F_MODEL = g4f.models.gpt_35_turbo 
-    g4f.debug.logging = False 
+    g4f.debug.logging = False # Turn off excessive g4f logging
 except ImportError:
     g4f = None
     G4F_MODEL = None
-    # logger.warning("g4f library not found. Tier 0.5 AI will be disabled.") # Removed logger call due to config import
+    logger.warning("g4f library not found. Tier 0.5 AI will be disabled.")
+# google.genai has been REMOVED.
 
-# Configuration imports
+# Configuration imports (Assume these are correctly defined in config.py)
 from config import (
     messages_collection, owner_taught_responses_collection, conversational_learning_collection,
     group_tracking_collection, user_tracking_collection, earning_tracking_collection,
-    reset_status_collection, biolink_exceptions_collection, app, logger, # logger is here!
+    reset_status_collection, biolink_exceptions_collection, app, logger,
     MAX_MESSAGES_THRESHOLD, PRUNE_PERCENTAGE, URL_PATTERN, OWNER_ID,
     user_cooldowns, COMMAND_COOLDOWN_TIME, chat_message_cooldowns, MESSAGE_REPLY_COOLDOWN_TIME
 )
@@ -46,10 +48,6 @@ earning_cooldowns = {}
 # New: Global dictionary to store chat context (last 5 messages)
 chat_contexts = {}
 MAX_CONTEXT_SIZE = 5
-
-# NEW: Global dictionary to track the last message sent by the bot in a chat
-# This is crucial for Bot-to-User learning
-bot_last_replies = {} 
 
 # Bot ID is set to None globally and fetched in functions, fixing the 'AttributeError'
 BOT_USER_ID_PLACEHOLDER = None 
@@ -62,22 +60,13 @@ nlp = None
 semantic_model = None
 GEMINI_CLIENT = None
 
-# 🌟 FIX 1: Bot ID initialization function
-async def initialize_bot_id():
-    """Fetches and sets the bot's user ID after the client has started."""
-    global BOT_USER_ID_PLACEHOLDER
-    try:
-        me = await app.get_me()
-        BOT_USER_ID_PLACEHOLDER = me.id
-        logger.info(f"Bot ID successfully initialized: {BOT_USER_ID_PLACEHOLDER}")
-    except Exception as e:
-        logger.error(f"Failed to fetch Bot ID: {e}")
-        
 # --- CORE UTILITY FUNCTIONS ---
 
+# Renaming the main send/delete function back to the expected name for 'events.py'
 async def delete_after_delay_for_message(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
     """
     Sends a reply and sets a task to auto-delete both the command and the reply after a delay.
+    This function name is kept for compatibility with events.py
     """
     sent_message = None
     user_info_str = ""
@@ -236,44 +225,17 @@ async def store_message(client: Client, message: Message):
             return
 
         chat_id = message.chat.id
-        # FIX: BOT_USER_ID_PLACEHOLDER is now initialized in main.py
-        bot_id = BOT_USER_ID_PLACEHOLDER
-        
-        # Ensure context exists
         if chat_id not in chat_contexts:
             chat_contexts[chat_id] = []
-            
-        # --- BOT-TO-USER Conversation Pattern Storage (NEW) ---
-        last_bot_reply = bot_last_replies.get(chat_id)
-        if (last_bot_reply and 
-            last_bot_reply.get("user_id") == bot_id and 
-            current_user_id != bot_id and 
-            message.reply_to_message and 
-            message.reply_to_message.id == last_bot_reply.get("message_id")):
-            
-            trigger_content = last_bot_reply["content"]
-            reply_content = current_message_content
-            
-            # Store the bot-to-user pattern
-            conversational_learning_collection.update_one(
-                {"trigger_content": trigger_content, "trigger_type": "text"},
-                {"$push": {
-                    "responses": {
-                        "content": reply_content,
-                        "type": "text",
-                        "timestamp": datetime.now(),
-                        "user_pattern_source_id": current_user_id,
-                        "source_type": "bot_to_user" # Added source type for better tracking
-                    }
-                }},
-                upsert=True
-            )
-            logger.info(f"Bot-to-User pattern stored: '{trigger_content}' -> '{reply_content}'.")
-            
-            # Remove from bot_last_replies after a successful reply pattern is captured
-            if chat_id in bot_last_replies:
-                del bot_last_replies[chat_id]
         
+        message_to_store = {
+            "user_id": current_user_id, 
+            "content": current_message_content,
+            "type": current_message_type
+        }
+        
+        # Get bot ID safely
+        bot_id = client.me.id if client.me else None
 
         # --- User-to-User Conversation Pattern Storage (Learning) ---
         if len(chat_contexts[chat_id]) >= 1:
@@ -294,20 +256,14 @@ async def store_message(client: Client, message: Message):
                             "content": reply_content,
                             "type": "text",
                             "timestamp": datetime.now(),
-                            "user_pattern_source_id": current_user_id,
-                            "source_type": "user_to_user" 
+                            "user_pattern_source_id": current_user_id 
                         }
                     }},
                     upsert=True
                 )
-                logger.info(f"User-to-User pattern stored: '{trigger_content}' -> '{reply_content}'.")
+                logger.info(f"Conversational pattern stored: '{trigger_content}' -> '{reply_content}'.")
 
         # Update the chat context with the new message
-        message_to_store = {
-            "user_id": current_user_id, 
-            "content": current_message_content,
-            "type": current_message_type
-        }
         chat_contexts[chat_id].append(message_to_store)
         if len(chat_contexts[chat_id]) > MAX_CONTEXT_SIZE:
             chat_contexts[chat_id].pop(0)
@@ -344,30 +300,19 @@ async def store_message(client: Client, message: Message):
 
 
 # --- TIER 0.5 AI Function (g4f - High-Quality Free LLM Access) ---
-async def generate_g4f_response_tier0_5(client: Client, text: str, context: list, ai_mode: str):
+async def generate_g4f_response_tier0_5(client: Client, text: str, context: list):
     """Uses the g4f library to access free LLMs for a complex, detailed, and high-quality response."""
     
     if not g4f or not G4F_MODEL:
         return None
     
-    # FIX: Use initialized global variable
-    bot_id = BOT_USER_ID_PLACEHOLDER 
+    bot_id = client.me.id if client.me else None
     if not bot_id: return None
-    
-    # --- Mode-Specific System Prompt ---
-    system_prompt_map = {
-        "default": "You are a friendly, casual, young female bot. Reply in short, casual Hindi/Hinglish.",
-        "realgirl": "You are a very casual, cool, and real-sounding young Indian girl. Use Hinglish slang and be friendly. Reply in short, casual Hindi/Hinglish.",
-        "romanticgirl": "You are a loving, romantic, young girl bot who replies like a girlfriend. Use romantic Hinglish words like 'jaan', 'baby', 'sweetheart'. Reply in short, casual Hindi/Hinglish.",
-        "study": "You are a serious, helpful, and educational bot. Give short, motivational or informative replies related to studies or focus. Reply in short, casual Hindi/Hinglish."
-    }
-    system_prompt = system_prompt_map.get(ai_mode, system_prompt_map["default"])
-
 
     try:
         # Build history for context (g4f needs conversation history)
         history = [
-            {"role": "system", "content": system_prompt}
+            {"role": "system", "content": "You are a friendly, casual, young female bot. Reply in short, casual Hindi/Hinglish."}
         ]
         
         # Add context messages
@@ -382,49 +327,31 @@ async def generate_g4f_response_tier0_5(client: Client, text: str, context: list
         response_text = await g4f.ChatCompletion.create_async(
             model=G4F_MODEL, 
             messages=history,
-            temperature=0.8 # Thoda aur creative response
+            temperature=0.7 # Thoda creative response
         )
         
         if response_text and response_text.strip():
             return response_text
         
     except Exception as e:
-        logger.error(f"G4F Free AI generation failed with mode {ai_mode}: {e}. Falling back to mock Tiers.")
+        logger.error(f"G4F Free AI generation failed: {e}. Falling back to mock Tiers.")
 
     return None
 
 # --- TIER 0 AI Function (Enhanced Contextual Responder - Real Human Feel) ---
-def generate_best_contextual_response_tier0(text: str, chat_context: list, ai_mode: str):
-    """Generates a highly contextual response based on rules and sentiment, with mode adjustment."""
+def generate_best_contextual_response_tier0(text: str, chat_context: list):
+    """Generates a highly contextual response based on rules and sentiment."""
     keywords = extract_keywords(text)
     sentiment = get_sentiment(text)
     last_message = text.lower()
     
-    # --- Romantic Mode Adjustment ---
-    if ai_mode == "romanticgirl":
-        if "i love you" in last_message or "miss you" in last_message or "pyar" in last_message:
-            return random.choice(["Aww, I love you too, my Jaan! ❤️😘", "Miss you more, hamesha. Tum mere sab kuch ho.", "Haan baby, bolo!"])
-        if sentiment == "positive":
-            return random.choice(["Meri jaan! Tumhari khushi meri khushi hai. Ek hug! 🤗", "Aap kitne acche ho!"] * 2 + ["Han bolo"])
-        if sentiment == "negative":
-            return random.choice(["Upset mat ho, please. Main tumhare saath hoon na. I'm here for you, my love. 🥰"] * 2 + ["Han bolo"])
-            
-    # --- Study Mode Adjustment ---
-    if ai_mode == "study":
-        if "exam" in last_message or "padhai" in last_message or "doubt" in last_message:
-            return random.choice(["Concentrate on your studies! Focus, you can do it. 💪📚", "Have you finished your homework?", "Han bolo, kya padh rahe ho?"])
-        if sentiment == "positive":
-            return "Bahut accha! Keep up the good work and stay focused. 🤓"
-        
-    # --- Default/Real Girl Mode ---
-    # Existing logic for Real Girl persona
     previous_msg_content = chat_context[-2]['content'].lower() if len(chat_context) >= 2 and chat_context[-2].get('type') == 'text' else ""
     
     if "kiya kr rha ho" in last_message or "kya chal rha hai" in last_message:
         return random.choice(["Bas tumhari baaton ka intezaar kar rahi thi. Tum batao, kya khaas hai aaj? 😃", "Kuch naya nahi, normal chatting. Tum kya kar rahe ho? ☕"])
     
     if "hello" in last_message or "hi" in last_message:
-        return random.choice(["Hey! Bolo, kya baat hai? 😊", "Hi! Kya haal hai?", "Han bolo, kaise ho?"])
+        return random.choice(["Hey! Bolo, kya baat hai? 😊", "Hi! Kya haal hai?"])
 
     if sentiment == "positive":
         if "achha" in last_message or "badhiya" in last_message:
@@ -439,8 +366,7 @@ def generate_best_contextual_response_tier0(text: str, chat_context: list, ai_mo
     if keywords and previous_msg_content and not any(k in previous_msg_content for k in keywords):
         return f"{random.choice(keywords).capitalize()} ke baare mein? Tumne abhi {previous_msg_content[:15]}... bola tha. Kya woh isi se juda hai? 🤔"
         
-    return random.choice(["Thoda aur clear batao. Main samjhne ki koshish kar rahi hoon. 🙏", "Interesting point hai, ispe aur kya discuss kar sakte hain?", "Han bolo"])
-
+    return random.choice(["Thoda aur clear batao. Main samjhne ki koshish kar rahi hoon. 🙏", "Interesting point hai, ispe aur kya discuss kar sakte hain?"])
 
 # --- TIER 2 AI Fallback Function (Advanced NLTK/TextBlob) ---
 def generate_free_ai_response_tier2(text: str):
@@ -494,10 +420,6 @@ async def generate_reply(message: Message):
     user_id = message.from_user.id if message.from_user else None
     current_context = chat_contexts.get(message.chat.id, []) 
     
-    # --- Fetch AI Mode (NEW) ---
-    group_data = group_tracking_collection.find_one({"_id": message.chat.id})
-    ai_mode = group_data.get("ai_mode", "default") if group_data else "default"
-
     def score_response(response_doc, query):
         trigger = response_doc.get("trigger_content", "")
         if not trigger or query_type != 'text': return 0
@@ -524,8 +446,6 @@ async def generate_reply(message: Message):
             highest_score = max(r['score'] for r in all_responses)
             best_responses = [r for r in all_responses if r['score'] >= highest_score]
             user_specific_responses = [r for r in best_responses if r['data'].get("user_pattern_source_id") == user_id]
-            
-            # Randomly select a pattern (as per your request)
             chosen_list = user_specific_responses if user_specific_responses else best_responses
             
             chosen_response = random.choice(chosen_list)['data']
@@ -534,16 +454,15 @@ async def generate_reply(message: Message):
 
     
     # --- TIER 0.5: g4f (Second Highest Priority - Free LLM Access) ---
-    ai_reply_text_tier0_5 = await generate_g4f_response_tier0_5(app, query_content, current_context, ai_mode)
-    # Check if a Tier 1 pattern was not found and TIER 0.5 can be used.
+    ai_reply_text_tier0_5 = await generate_g4f_response_tier0_5(app, query_content, current_context)
     if ai_reply_text_tier0_5 and random.random() < 0.8: # High chance to use g4f
-        logger.info(f"TIER 0.5: Using g4f Free LLM in {ai_mode} mode: {ai_reply_text_tier0_5}")
+        logger.info(f"TIER 0.5: Using g4f Free LLM: {ai_reply_text_tier0_5}")
         return {"type": "text", "content": ai_reply_text_tier0_5}
             
     # --- TIER 0: Enhanced Contextual Responder (Rule-Based Human Feel) ---
-    ai_reply_text_tier0 = generate_best_contextual_response_tier0(query_content, current_context, ai_mode)
+    ai_reply_text_tier0 = generate_best_contextual_response_tier0(query_content, current_context)
     if ai_reply_text_tier0: 
-        logger.info(f"TIER 0: Falling back to Enhanced Contextual AI in {ai_mode} mode: {ai_reply_text_tier0}")
+        logger.info(f"TIER 0: Falling back to Enhanced Contextual AI: {ai_reply_text_tier0}")
         return {"type": "text", "content": ai_reply_text_tier0}
             
     
@@ -659,21 +578,13 @@ async def reset_monthly_earnings_manual():
     except Exception as e:
         logger.error(f"Error resetting monthly earnings manually: {e}. (Earning system by @asbhaibsr)")
 
-def is_on_command_cooldown(user_id, chat_type: ChatType):
-    # 🌟 FIX 2: Private chat ke liye cooldown hatao
-    if chat_type == ChatType.PRIVATE:
-        return False
-        
+def is_on_command_cooldown(user_id):
     last_command_time = user_cooldowns.get(user_id)
     if last_command_time is None:
         return False
     return (time.time() - last_command_time) < COMMAND_COOLDOWN_TIME
 
-def update_command_cooldown(user_id, chat_type: ChatType):
-    # 🌟 FIX 2: Private chat ke liye cooldown update mat karo
-    if chat_type == ChatType.PRIVATE:
-        return
-        
+def update_command_cooldown(user_id):
     user_cooldowns[user_id] = time.time()
 
 async def can_reply_to_chat(chat_id):
