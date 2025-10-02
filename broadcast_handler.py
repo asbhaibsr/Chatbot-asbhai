@@ -75,8 +75,8 @@ async def pm_broadcast(client: Client, message: Message):
         )
         
     except Exception as e:
-        # If client.ask is truly missing, this catches the error.
-        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya. Agar bar-bar 'Internal Error: ask method missing' aaye, to Pyrogram ko update karo. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        # Agar 'ask' method ab bhi missing hai, to yahan catch hoga
+        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Critical Broadcast Error: client.ask failed with: {e}")
         return
     
@@ -184,8 +184,8 @@ async def broadcast_group(client: Client, message: Message):
         )
         
     except Exception as e:
-        # If client.ask is truly missing, this catches the error.
-        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya. Agar bar-bar 'Internal Error: ask method missing' aaye, to Pyrogram ko update karo. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
+        # Agar 'ask' method ab bhi missing hai, to yahan catch hoga
+        await send_and_auto_delete_reply(message, text="Mera dhyan bhatak gaya. Broadcast cancel ho gaya. 😥", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Critical Broadcast Error: client.ask failed with: {e}")
         return
     
