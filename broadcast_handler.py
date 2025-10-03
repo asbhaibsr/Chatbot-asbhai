@@ -14,7 +14,7 @@ from config import (
     logger, OWNER_ID
 )
 from utils import (
-    send_and_auto_delete_reply,
+    delete_after_delay_for_message,
     store_message 
 )
 
