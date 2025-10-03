@@ -1,12 +1,10 @@
-# broadcast_handler.py (नया और सही कोड)
-
 import asyncio
 import time
 import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ParseMode
-from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError
+from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError, StopPropagation
 
 # 'config' और 'utils' से आवश्यक चीज़ें इम्पोर्ट करें
 from config import (
@@ -24,7 +22,8 @@ from utils import (
 waiting_for_reply = {}
 
 # यह लिस्नर सिर्फ ओनर के मैसेज को सुनेगा जब बॉट इंतजार कर रहा हो
-@app.on_message(filters.private & filters.user(OWNER_ID) & ~filters.command(), group=-1)
+# 🌟 CORRECTION IS HERE: filters.command() needs an argument.
+@app.on_message(filters.private & filters.user(OWNER_ID) & ~filters.command("dummy_cmd_to_ignore"), group=-1)
 async def message_waiter_handler(client, message: Message):
     user_id = message.from_user.id
     # चेक करें कि क्या बॉट इस यूजर के जवाब का इंतजार कर रहा है
@@ -54,6 +53,7 @@ async def ask_for_message(client, chat_id, text, timeout=600):
 # --- ब्रॉडकास्ट भेजने वाला लॉजिक (इसमें कोई बदलाव नहीं) ---
 async def send_broadcast_message(client: Client, chat_id: int, message: Message):
     try:
+        # ParseMode.MARKDOWN का इस्तेमाल करके मैसेज को कॉपी करें
         await message.copy(chat_id, parse_mode=ParseMode.MARKDOWN)
         return (True, "Success")
     except UserIsBlocked: return (False, "Blocked")
@@ -72,7 +72,7 @@ async def send_broadcast_message(client: Client, chat_id: int, message: Message)
         return (False, "Error")
 
 # -----------------------------------------------------
-# 1. PRIVATE CHAT BROADCAST (/broadcast) - आपका पसंदीदा तरीका
+# 1. PRIVATE CHAT BROADCAST (/broadcast)
 # -----------------------------------------------------
 @app.on_message(filters.command("broadcast") & filters.private & filters.user(OWNER_ID))
 async def pm_broadcast(client: Client, message: Message):
@@ -132,7 +132,7 @@ async def pm_broadcast(client: Client, message: Message):
     await store_message(client, message)
 
 # -----------------------------------------------------
-# 2. GROUP BROADCAST (/grp_broadcast) - आपका पसंदीदा तरीका
+# 2. GROUP BROADCAST (/grp_broadcast)
 # -----------------------------------------------------
 @app.on_message(filters.command("grp_broadcast") & filters.private & filters.user(OWNER_ID))
 async def broadcast_group(client: Client, message: Message):
