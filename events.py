@@ -16,7 +16,7 @@ from config import (
 )
 from utils import (
     update_group_info, update_user_info, store_message, generate_reply,
-    is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message # Renamed in utils.py
+    is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message # <--- Corrected import
 )
 
 # -----------------
@@ -27,24 +27,6 @@ from utils import (
 last_reply_time = {}
 REPLY_COOLDOWN_SECONDS = 8
 cooldown_locks = {}
-
-# -----------------
-# Helper Function for Reply & Auto-Delete (kept for clarity)
-# -----------------
-
-# Renaming the function name to match the one defined in utils.py 
-async def send_and_auto_delete_reply(message, text, parse_mode=None, reply_markup=None, disable_web_page_preview=False, delay=180):
-    sent_message = await delete_after_delay_for_message(
-        message, 
-        text=text, 
-        parse_mode=parse_mode, 
-        reply_markup=reply_markup, 
-        disable_web_page_preview=disable_web_page_preview
-        # Note: delay is handled internally by delete_after_delay_for_message/send_and_auto_delete_reply in utils.py
-    )
-    # The auto-delete task is now handled inside utils.delete_after_delay_for_message
-    return sent_message
-
 
 # -----------------
 # New User Notification Handler
@@ -79,7 +61,7 @@ async def handle_new_user_message(client: Client, message: Message):
             logger.error(f"Failed to send new user notification: {e}")
 
 # -----------------
-# Callback Handlers (CLEANED: only keeping button logging and clearall confirm logic)
+# Callback Handlers
 # -----------------
 
 @app.on_callback_query()
@@ -97,16 +79,12 @@ async def callback_handler(client, callback_query):
     })
 
     if callback_query.data == "buy_git_repo":
-        # Using the utility function from the import
-        await delete_after_delay_for_message( # Renamed in utils.py
+        # Using the utility function directly
+        await delete_after_delay_for_message( 
             callback_query.message,
-            text=f"🤩 𝗜𝗳 𝘆𝗼𝘂 𝘄𝗮𝗻𝘁 𝘆𝗼𝘂𝗿 𝗼𝘄𝗻 𝗯𝗼𝘁 𝗹𝗶𝗸𝗲 𝗺𝗲, 𝘆𝗼𝘂 𝗵𝗮𝘃𝗲 𝘁𝗼 𝗽𝗮𝘆 ₹𝟱𝟬𝟬. 𝗙𝗼𝗿 𝘁𝗵𝗶𝘀, 𝗰𝗼𝗻𝘁𝗮𝗰𝘁 **@{ASBHAI_USERNAME}** 𝗮𝗻𝗱 𝘁𝗲𝗹𝗹 𝗵𝗶𝗺 𝘁𝗵𝗮𝘁 𝘆𝗼𝘂 𝘄𝗮𝗻𝘁 𝘁𝗼 𝗯𝘂𝗶𝗹𝗱 𝘁𝗵𝗶𝘀 𝗯𝗼𝘁'𝘀 𝗰𝗼𝗱𝗲. 𝗛𝘂𝗿𝗿𝘆 𝘂𝗽, 𝗱𝗲𝗮𝗹𝘀 𝗮𝗿𝗲 𝗵𝗼𝘁! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @asbhai_bsr",
+            text=f"🤩 𝗜𝗳 𝘆𝗼𝘂 𝘄𝗮𝗻𝘁 𝘆𝗼𝘂𝗿 𝗼𝘄𝗻 𝗯𝗼𝘁 𝗹𝗶𝗸𝗲 𝗺𝗲, 𝘆𝗼𝘂 𝗵𝗮𝘃𝗲 𝘁𝗼 𝗽𝗮𝘆 ₹𝟱𝟬𝟬. 𝗙𝗼𝗿 𝘁𝗵𝗶𝘀, 𝗰𝗼𝗻𝘁𝗮𝗰𝘁 **@{ASBHAI_USERNAME}** 𝗮𝗻𝗱 𝘁𝗲𝗹𝗹 𝗵𝗶𝗺 𝘁𝗵𝗮𝘁 𝘆𝗼𝘂 𝘄𝗮𝗻𝘁 𝘁𝗼 𝗯𝘂𝗶𝗹𝗱 𝘁𝗵𝗶𝘀 𝗯𝗼𝘁's 𝗰𝗼𝗱𝗲. 𝗛𝘂𝗿𝗿𝘆 𝘂𝗽, 𝗱𝗲𝗮𝗹𝘀 𝗮𝗿𝗲 𝗵𝗼𝘁! 💸\n\n**Owner:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @asbhai_bsr",
             parse_mode=ParseMode.MARKDOWN
         )
-    # The actual logic for show_earning_leaderboard, show_help_menu, show_earning_rules 
-    # should be placed in callbacks.py (which you import) 
-    # to avoid duplicating the command logic in event.py.
-    # The logging is handled above.
 
     logger.info(f"Callback query '{callback_query.data}' processed for user {callback_query.from_user.id}.")
 
@@ -288,6 +266,7 @@ async def handle_message_and_reply(client: Client, message: Message):
         if current_group_settings and current_group_settings.get("linkdel_enabled", False):
             if contains_link(message.text) and not is_sender_admin:
                 try:
+                    # Using the utility function directly
                     await message.delete()
                     sent_delete_alert = await delete_after_delay_for_message(message, text=f"𝗳𝗢𝗵 𝗱𝗲𝗮𝗿! 🧐 𝗦𝗼𝗿𝗿𝘆-𝘀𝗼𝗿𝗿𝘆, **𝗹𝗶𝗻𝗸𝘀 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗹𝗹𝗼𝘄𝗲𝗱 𝗵𝗲𝗿𝗲!** 🚫 𝗬𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗶𝘀 𝗴𝗼𝗻𝗲!💨 𝗣𝗹𝗲𝗮𝘀𝗲 𝗯𝗲 𝗰𝗮𝗿𝗲𝗳𝘂𝗹 𝗻𝗲𝘅𝘁 𝘁𝗶𝗺𝗲.", parse_mode=ParseMode.MARKDOWN)
                     logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
@@ -308,6 +287,7 @@ async def handle_message_and_reply(client: Client, message: Message):
                 if not is_sender_admin and not is_biolink_exception:
                     if URL_PATTERN.search(user_bio):
                         try:
+                            # Using the utility function directly
                             await message.delete()
                             sent_delete_alert = await delete_after_delay_for_message(
                                 message,
@@ -330,6 +310,7 @@ async def handle_message_and_reply(client: Client, message: Message):
         if current_group_settings and current_group_settings.get("usernamedel_enabled", False):
             if contains_mention(message.text) and not is_sender_admin:
                 try:
+                    # Using the utility function directly
                     await message.delete()
                     sent_delete_alert = await delete_after_delay_for_message(message, text=f"𝗳𝗧𝘂𝘁-𝘁𝘂𝘁! 😬 𝗬𝗼𝘂 𝘂𝘀𝗲𝗱 `@`! 𝗦𝗼𝗿𝗿𝘆, 𝘁𝗵𝗮𝘁 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗶𝘀 𝗴𝗼𝗻𝗲 𝘁𝗼 𝘁𝗵𝗲 𝘀𝗸𝘆! 🚀 𝗕𝗲 𝗰𝗮𝗿𝗲𝗳𝘂𝗹 𝗻𝗲𝘅𝘁 𝘁𝗶𝗺𝗲, 𝗼𝗸𝗮𝘆? 😉", parse_mode=ParseMode.MARKDOWN)
                     logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
