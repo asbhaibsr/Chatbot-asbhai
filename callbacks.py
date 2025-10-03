@@ -17,7 +17,7 @@ from config import (
 
 # utils.py से आवश्यक फ़ंक्शन इम्पोर्ट करें
 from utils import (
-    get_top_earning_users, send_and_auto_delete_reply, store_message, 
+    get_top_earning_users, delete_after_delay_for_message, store_message, 
     update_user_info, update_group_info, is_admin_or_owner
 )
 
