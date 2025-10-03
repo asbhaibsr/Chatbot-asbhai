@@ -17,18 +17,27 @@ from config import (
 )
 from utils import (
     is_on_command_cooldown, update_command_cooldown, update_group_info, update_user_info,
-    get_top_earning_users, reset_monthly_earnings_manual, delete_after_delay_for_message, # <--- 🟢 FIX: 'delete_after_delay_for_message' को सीधे आयात किया गया
+    get_top_earning_users, reset_monthly_earnings_manual, delete_after_delay_for_message,
     store_message, is_admin_or_owner
 )
 
 import callbacks # <--- This line is essential for importing callbacks.py
 import broadcast_handler # <--- 🌟 New broadcast file imported 🌟
 
-# 🔴 REMOVED: Alias the utility function to the expected name for cleaner code.
-#             यह लाइन अब ज़रूरी नहीं है क्योंकि 'delete_after_delay_for_message'
-#             को सीधे 'send_and_auto_delete_reply' के रूप में इस्तेमाल किया जा रहा है
-#             या सीधे इंपोर्ट किया जा रहा है।
-send_and_auto_delete_reply = delete_after_delay_for_message # <--- 🟢 FIX: अब यह केवल एक साधारण असाइनमेंट है
+# 🟢 Utility alias (kept for backward compatibility with the rest of the code)
+send_and_auto_delete_reply = delete_after_delay_for_message 
+
+# --- AI Modes Map for Display (Must match the one in callbacks.py) ---
+AI_MODES_MAP = {
+    "off": {"label": "❌ AI Mᴏᴅᴇ Oғғ", "display": "❌ Oғғ"},
+    "realgirl": {"label": "👧 Rᴇᴀʟ Gɪʀʟ", "display": "👧 Rᴇᴀʟ"},
+    "romanticgirl": {"label": "💖 Rᴏᴍᴀɴᴛɪᴄ Gɪʀʟ", "display": "💖 Rᴏᴍ"},
+    "motivationgirl": {"label": "💪 Mᴏᴛɪᴠᴀᴛɪᴏɴ Gɪʀʟ", "display": "💪 Mᴏᴛɪ"},
+    "studygirl": {"label": "📚 Sᴛᴜᴅʏ Gɪʀʟ", "display": "📚 Sᴛᴜᴅʏ"},
+    "gemini": {"label": "✨ Gᴇᴍɪɴɪ (Sᴜᴘᴇʀ AI)", "display": "✨ Gᴇᴍɪɴɪ"},
+}
+# -----------------------------------------------------
+
 
 # -----------------------------------------------------
 # PRIVATE CHAT COMMANDS
@@ -66,7 +75,6 @@ async def start_private_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
-    # FIX: store_message removed to prevent it from blocking execution due to command filter.
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private start command processed for user {message.from_user.id}.")
@@ -139,7 +147,6 @@ async def top_users_command(client: Client, message: Message):
         ]
     )
     await send_and_auto_delete_reply(message, text="\n".join(earning_messages), reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-    # FIX: store_message removed
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
@@ -173,7 +180,6 @@ async def stats_private_command(client: Client, message: Message):
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
-    # FIX: store_message removed
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private stats command processed for user {message.from_user.id}.")
@@ -204,7 +210,6 @@ async def stats_group_command(client: Client, message: Message):
         f"**Powered By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
     )
     await send_and_auto_delete_reply(message, text=stats_text, parse_mode=ParseMode.MARKDOWN)
-    # FIX: store_message removed
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
@@ -257,7 +262,6 @@ async def list_groups_command(client: Client, message: Message):
 
     group_list_text += "\n𝗧𝗵𝗶𝘀 𝗱𝗮𝘁𝗮 𝗶𝘀 𝗳𝗿𝗼𝗺 𝘁𝗵𝗲 𝘁𝗿𝗮𝗰𝗸𝗶𝗻𝗴 𝗱𝗮𝘁𝗮𝗯𝗮𝘀𝗲, 𝗶𝘁'𝘀 𝗮 𝘀𝗲𝗰𝗿𝗲𝘁! 🤫\n**Powered By:** @asbhaibsr"
     await send_and_auto_delete_reply(message, text=group_list_text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-    # FIX: store_message removed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Groups list command processed by owner {message.from_user.id}.")
 
@@ -300,7 +304,6 @@ async def leave_group_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text=f"𝗔𝗻 𝗲𝗿𝗿𝗼𝗿 𝗼𝗰𝗰𝘂𝗿𝗿𝗲𝗱 𝘄𝗵𝗶𝗹𝗲 𝗹𝗲𝗮𝘃𝗶𝗻𝗴 𝘁𝗵𝗲 𝗴𝗿𝗼𝘂𝗽: {e}. 𝗢𝗵 𝗻𝗼! 😢", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Error leaving group {group_id_str}: {e}.")
 
-    # FIX: store_message removed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -347,8 +350,6 @@ async def clear_data_command(client: Client, message: Message):
     if total_owner_taught > 0:
         docs_to_delete_owner = int(total_owner_taught * (percentage / 100))
         oldest_owner_taught_ids = []
-        # FIX: The field 'responses.timestamp' might not be indexed correctly for sorting. Using 'responses.0.timestamp' might be more accurate if responses is an array.
-        # But for now, keeping original logic and trusting the DB design.
         for doc in owner_taught_responses_collection.find({}).sort("responses.timestamp", 1).limit(docs_to_delete_owner):
             oldest_owner_taught_ids.append(doc['_id'])
         if oldest_owner_taught_ids:
@@ -357,8 +358,6 @@ async def clear_data_command(client: Client, message: Message):
     if total_conversational > 0:
         docs_to_delete_conv = int(total_conversational * (percentage / 100))
         oldest_conv_ids = []
-        # FIX: The field 'responses.timestamp' might not be indexed correctly for sorting. Using 'responses.0.timestamp' might be more accurate if responses is an array.
-        # But for now, keeping original logic and trusting the DB design.
         for doc in conversational_learning_collection.find({}).sort("responses.timestamp", 1).limit(docs_to_delete_conv):
             oldest_conv_ids.append(doc['_id'])
         if oldest_conv_ids:
@@ -372,7 +371,6 @@ async def clear_data_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝗜 𝗱𝗶𝗱𝗻't 𝗳𝗶𝗻𝗱 𝗮𝗻𝘆𝘁𝗵𝗶𝗻𝗴 𝘁𝗼 𝗱𝗲𝗹𝗲𝘁𝗲. 𝗜𝘁 𝘀𝗲𝗲𝗺𝘀 𝘆𝗼𝘂'𝘃𝗲 𝗮𝗹𝗿𝗲𝗮𝗱𝘆 𝗰𝗹𝗲𝗮𝗻𝗲𝗱 𝗲𝘃𝗲𝗿𝘆𝘁𝗵𝗶𝗻𝗴! 🤷‍♀️", parse_mode=ParseMode.MARKDOWN)
 
-    # FIX: store_message removed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -421,7 +419,6 @@ async def delete_specific_message_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝗜 𝗱𝗶𝗱𝗻't 𝗳𝗶𝗻𝗱 𝗮𝗻𝘆 **𝘁𝗲𝘅𝘁 𝗺𝗲𝘀𝘀𝗮𝗴𝗲** 𝗶𝗻 𝗺𝘆 𝗱𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝘄𝗶𝘁𝗵 𝘆𝗼𝘂𝗿 𝗾𝘂𝗲𝗿𝘆. 𝗖𝗵𝗲𝗰𝗸 𝘁𝗵𝗲 𝘀𝗽𝗲𝗹𝗹𝗶𝗻𝗴? 🤔", parse_mode=ParseMode.MARKDOWN)
 
-    # FIX: store_message removed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -478,7 +475,6 @@ async def delete_specific_sticker_command(client: Client, message: Message):
     else:
         await send_and_auto_delete_reply(message, text="𝗨𝗺𝗺, 𝗜 𝗱𝗶𝗱𝗻't 𝗳𝗶𝗻𝗱 𝗮𝗻𝘆 **𝘀𝘁𝗶𝗰𝗸𝗲𝗿** 𝗶𝗻 𝗺𝘆 𝗱𝗮𝘁𝗮𝗯𝗮𝘀𝗲. 𝗘𝗶𝘁𝗵𝗲𝗿 𝘁𝗵𝗲𝗿𝗲 𝗮𝗿𝗲 𝗻𝗼 𝘀𝘁𝗶𝗰𝗸𝗲𝗿𝘀, 𝗼𝗿 𝘁𝗵𝗲 𝗽𝗲𝗿𝗰𝗲𝗻𝘁𝗮𝗴𝗲 𝗶𝘀 𝘁𝗼𝗼 𝗹𝗼𝘄! 🤔", parse_mode=ParseMode.MARKDOWN)
 
-    # FIX: store_message removed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -496,7 +492,6 @@ async def clear_earning_command(client: Client, message: Message):
     await send_and_auto_delete_reply(message, text="💰 **𝗘𝗮𝗿𝗻𝗶𝗻𝗴 𝗱𝗮𝘁𝗮 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗰𝗹𝗲𝗮𝗿𝗲𝗱!** 𝗡𝗼𝘄 𝗲𝘃𝗲𝗿𝘆𝗼𝗻𝗲 𝘄𝗶𝗹𝗹 𝘀𝘁𝗮𝗿𝘁 𝗳𝗿𝗼𝗺 𝘇𝗲𝗿𝗼 𝗮𝗴𝗮𝗶𝗻! 😉", parse_mode=ParseMode.MARKDOWN)
     logger.info(f"Owner {message.from_user.id} manually triggered earning data reset.")
 
-    # FIX: store_message removed
     await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
@@ -514,7 +509,6 @@ async def restart_command(client: Client, message: Message):
     logger.info("Bot is restarting...")
     import os
     import sys
-    # FIX: store_message removed
     await asyncio.sleep(0.5)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
@@ -531,8 +525,8 @@ async def clear_all_dbs_command(client: Client, message: Message):
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("Yᴇꜱ, Dᴇʟᴇ𝘁𝗲 ⚠️", callback_data='confirm_clearall_dbs'),
-                InlineKeyboardButton("Nᴏ, Kᴇᴇᴘ I𝘁 ✅", callback_data='cancel_clearall_dbs')
+                InlineKeyboardButton("Yᴇꜱ, Dᴇ𝗹𝗲𝘁𝗲 ⚠️", callback_data='confirm_clearall_dbs'),
+                InlineKeyboardButton("Nᴏ, Kᴇ𝗲𝗽 I𝘁 ✅", callback_data='cancel_clearall_dbs')
             ]
         ]
     )
@@ -546,7 +540,6 @@ async def clear_all_dbs_command(client: Client, message: Message):
         parse_mode=ParseMode.MARKDOWN
     )
     logger.info(f"Owner {message.from_user.id} initiated /clearall command. Waiting for confirmation.")
-    # FIX: store_message removed
 
 @app.on_message(filters.command("clearmydata"))
 async def clear_my_data_command(client: Client, message: Message):
@@ -607,8 +600,6 @@ async def clear_my_data_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text=f"𝗦𝗼𝗺𝗲𝘁𝗵𝗶𝗻𝗴 𝘄𝗲𝗻𝘁 𝘄𝗿𝗼𝗻𝗴 𝘄𝗵𝗶𝗹𝗲 𝗱𝗲𝗹𝗲𝘁𝗶𝗻𝗴 𝗱𝗮𝘁𝗮: {e}. 𝗢𝗵 𝗻𝗼! 😱", parse_mode=ParseMode.MARKDOWN)
         logger.error(f"Error clearing data for user {target_user_id}: {e}")
     
-    # FIX: store_message removed
-    
     # FIX: Corrected update_user_info arguments
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -639,7 +630,7 @@ async def start_group_command(client: Client, message: Message):
             ],
             [
                 InlineKeyboardButton("⚙️ Gʀᴏᴜᴘ Sᴇᴛᴛɪɴɢꜱ 🛠️", callback_data="open_group_settings"), 
-                InlineKeyboardButton("💰 Eᴀʀɴɪɴɢ Lᴇ𝗮𝗱𝗲𝗿𝗯𝗼𝗮𝗿𝗱", callback_data="show_earning_leaderboard")
+                InlineKeyboardButton("💰 Eᴀʀɴɪɴɢ Lᴇ𝗮𝗱𝗲𝗿𝗯𝗼𝗮𝗿d", callback_data="show_earning_leaderboard")
             ]
         ]
     )
@@ -650,7 +641,6 @@ async def start_group_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
-    # FIX: store_message removed
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         logger.info(f"Attempting to update group info from /start command in chat {message.chat.id}.")
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
@@ -675,15 +665,8 @@ async def set_ai_mode_command(client: Client, message: Message):
     current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
     current_ai_mode = current_status_doc.get("ai_mode", "off") if current_status_doc else "off"
     
-    # 3. Define AI Modes (Hindi/Hinglish Friendly)
-    ai_modes = {
-        "off": "❌ Oғғ",
-        "realgirl": "👧 Rᴇᴀʟ Gɪʀʟ",
-        "romanticgirl": "💖 Rᴏᴍᴀɴᴛɪᴄ Gɪʀʟ",
-        "motivationgirl": "💪 Mᴏᴛɪᴠᴀᴛɪᴏɴ Gɪʀʟ",
-        "studygirl": "📚 Sᴛᴜᴅʏ Gɪʀʟ",
-        "gemini": "✨ Gᴇᴍɪɴɪ (Sᴜᴘᴇʀ AI)", # New mode as requested
-    }
+    # 3. Define AI Modes (Hindi/Hinglish Friendly) - Using the global map for consistency
+    ai_modes = {k: v["label"] for k, v in AI_MODES_MAP.items()} # Use label for buttons
     
     # 4. Create Buttons
     keyboard_buttons = []
@@ -691,13 +674,14 @@ async def set_ai_mode_command(client: Client, message: Message):
     
     # Off/Default Button
     status_off = "✅ " if current_ai_mode == "off" else ""
-    keyboard_buttons.append([InlineKeyboardButton(f"{status_off}❌ AI Mᴏᴅᴇ Oғғ", callback_data="set_ai_mode_off")])
+    # 🟢 FIX: Used AI_MODES_MAP for the label
+    keyboard_buttons.append([InlineKeyboardButton(f"{status_off}{AI_MODES_MAP['off']['label']}", callback_data="set_ai_mode_off")])
 
     # Dynamic Mode Buttons
-    for mode_key, mode_name in ai_modes.items():
+    for mode_key, mode_data in AI_MODES_MAP.items():
         if mode_key != "off":
             status = "✅ " if current_ai_mode == mode_key else ""
-            button = InlineKeyboardButton(f"{status}{mode_name}", callback_data=f"set_ai_mode_{mode_key}")
+            button = InlineKeyboardButton(f"{status}{mode_data['label']}", callback_data=f"set_ai_mode_{mode_key}")
             current_row.append(button)
             if len(current_row) == 2:
                 keyboard_buttons.append(current_row)
@@ -706,13 +690,13 @@ async def set_ai_mode_command(client: Client, message: Message):
     if current_row:
         keyboard_buttons.append(current_row)
 
-    # Close Button (UI Suggestion Fix: Changed to Back to Settings)
-    keyboard_buttons.append([InlineKeyboardButton("🔙 Sᴇᴛᴛɪɴɢꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")]) # 🟢 FIX: Back to Main Setting
+    # Back Button
+    keyboard_buttons.append([InlineKeyboardButton("🔙 Sᴇᴛᴛɪɴɢꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")]) 
     
     keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
     # 5. Send Message
-    mode_display = ai_modes.get(current_ai_mode, "❌ Oғғ")
+    mode_display = AI_MODES_MAP.get(current_ai_mode, AI_MODES_MAP["off"])["label"]
     settings_message = (
         f"👑 **AI Mᴏᴅᴇ Sᴇᴛᴛɪɴɢꜱ 👑**\n\n"
         "𝗛𝗲𝗹𝗹𝗼 𝗕𝗼𝘀𝘀, 𝘆𝗲𝗵𝗮𝗻 𝘀𝗲 𝗮𝗽𝗽𝗮𝗻𝗮 **AI 𝗽𝗲𝗿𝘀𝗼𝗻𝗮𝗹𝗶𝘁𝘆** 𝘀𝗲𝘁 𝗸𝗮𝗿𝗼.\n"
@@ -727,7 +711,6 @@ async def set_ai_mode_command(client: Client, message: Message):
         parse_mode=ParseMode.MARKDOWN
     )
 
-    # FIX: store_message removed
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
@@ -772,14 +755,10 @@ async def open_settings_command(client: Client, message: Message):
         "warn": "⚠️ Wᴀʀɴ Uꜱᴇʀ",
         "ban": "⛔️ Bᴀɴ Uꜱᴇʀ"
     }
-    punishment_text = punishment_map.get(punishment, "🗑️ Dᴇʟᴇᴛᴇ Mᴇꜱꜱᴀɢᴇ")
+    punishment_text = punishment_map.get(punishment, "🗑️ Dᴇ𝗹𝗲𝘁𝗲 Mᴇꜱꜱᴀɢᴇ")
 
-    # AI Mode Text
-    ai_modes_display = {
-        "off": "❌ Oғғ", "realgirl": "👧 Rᴇᴀʟ", "romanticgirl": "💖 Rᴏᴍ", 
-        "motivationgirl": "💪 Mᴏᴛɪ", "studygirl": "📚 Sᴛᴜᴅʏ", "gemini": "✨ Gᴇᴍɪɴɪ"
-    }
-    ai_mode_text = ai_modes_display.get(ai_mode, "❌ Oғғ")
+    # 🟢 FIX: Use AI_MODES_MAP for consistent display
+    ai_mode_text = AI_MODES_MAP.get(ai_mode, AI_MODES_MAP["off"])["display"]
 
 
     # 3. Create the Main Settings Keyboard (Styled Buttons)
@@ -800,6 +779,7 @@ async def open_settings_command(client: Client, message: Message):
             ],
             # NEW AI MODE BUTTON
             [
+                # 🟢 FIX: Use the correct callback to open the AI Mode settings
                 InlineKeyboardButton(f"✨ AI Mᴏᴅᴇ: {ai_mode_text}", callback_data="open_ai_mode_settings"),
             ],
             # Punishment and Biolink Exception
@@ -820,7 +800,7 @@ async def open_settings_command(client: Client, message: Message):
     settings_message = (
         f"⚙️ **𝗚𝗿𝗼𝘂𝗽 𝗦𝗲𝘁𝘁𝗶𝗻𝗴𝘀: {message.chat.title}** 🛠️\n\n"
         "𝗛𝗲𝗹𝗹𝗼, 𝗕𝗼𝘀𝘀! 𝗬𝗼𝘂 𝗰𝗮𝗻 𝗰𝗼𝗻𝘁𝗿𝗼𝗹 𝘁𝗵𝗲 𝗴𝗿𝗼𝘂𝗽 𝗿𝘂𝗹𝗲𝘀 𝗮𝗻𝗱 𝗯𝗼𝘁 𝗳𝘂𝗻𝗰𝘁𝗶𝗼𝗻𝘀 𝗳𝗿𝗼𝗺 𝘁𝗵𝗲 𝗯𝘂𝘁𝘁𝗼𝗻𝘀 𝗯𝗲𝗹𝗼𝘄.\n"
-        "**AI Mᴏᴅᴇ:** Bᴏᴛ ᴋɪ ᴘᴇʀsᴏɴᴀʟɪᴛʏ ᴀᴜʀ ᴊᴀ𝘄𝗮𝗯 ᴅᴇɴᴇ ᴋᴀ 𝘁𝗮𝗿𝗶𝗸𝗮 𝗶𝘀 𝘀𝗲 𝘀𝗲𝘁 𝗵𝗼𝗴𝗮. **Cᴜʀʀ𝗲𝗻𝘁: {ai_mode_text}**\n\n"
+        "**AI Mᴏᴅᴇ:** Bᴏᴛ ᴋɪ ᴘᴇʀsᴏɴᴀʟɪᴛʏ ᴀᴜʀ ᴊ𝗮𝘄𝗮𝗯 ᴅᴇɴᴇ ᴋᴀ 𝘁𝗮𝗿𝗶𝗸𝗮 𝗶𝘀 𝘀𝗲 𝘀𝗲𝘁 𝗵𝗼𝗴𝗮. **Cᴜʀʀ𝗲𝗻𝘁: {ai_mode_text}**\n\n"
         "𝗨𝘀𝗲𝗿𝘀 𝘄𝗵𝗼 𝗯𝗿𝗲𝗮𝗸 𝘆𝗼𝘂𝗿 𝗳𝗶𝗹𝘁𝗲𝗿 𝘀𝗲𝘁𝘁𝗶𝗻𝗴𝘀 𝘄𝗶𝗹𝗹 𝗿𝗲𝗰𝗲𝗶𝘃𝗲 𝘁𝗵𝗲 **𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁**.\n\n"
         f"**𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁:** {punishment_text}\n"
         "__𝗖𝗵𝗼𝗼𝘀𝗲 𝘄𝗵𝗮𝘁 𝗽𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁 𝘁𝗼 𝗴𝗶𝘃𝗲 𝘁𝗼 𝗿𝘂𝗹𝗲-𝗯𝗿𝗲𝗮𝗸𝗲𝗿𝘀 𝗳𝗿𝗼𝗺 '𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁'.__"
@@ -832,9 +812,9 @@ async def open_settings_command(client: Client, message: Message):
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
-    # FIX: store_message removed
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Group settings command processed in chat {message.chat.id} by admin {message.from_user.id}.")
+
