@@ -1,69 +1,143 @@
-# events.py
+# events.py (अंतिम और सही किया गया कोड)
 
-# Import necessary libraries
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ChatType, ParseMode, ChatMemberStatus
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Import utilities and configurations
 from config import (
-    app, buttons_collection, group_tracking_collection, user_tracking_collection,
+    app, group_tracking_collection, user_tracking_collection,
     messages_collection, owner_taught_responses_collection, conversational_learning_collection,
-    biolink_exceptions_collection, earning_tracking_collection, logger, reset_status_collection,
+    biolink_exceptions_collection, earning_tracking_collection, logger,
     OWNER_ID, ASBHAI_USERNAME, URL_PATTERN
 )
 from utils import (
     update_group_info, update_user_info, store_message, generate_reply,
-    is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message # <--- Corrected import
+    is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message
 )
 
 # -----------------
-# Cooldown Logic
+# 1. New User Notification Handler (PM)
 # -----------------
-
-# Cooldown logic for group replies
-last_reply_time = {}
-REPLY_COOLDOWN_SECONDS = 8
-cooldown_locks = {}
-
-# -----------------
-# New User Notification Handler
-# -----------------
-
-@app.on_message(filters.private & filters.incoming & ~filters.me)
+@app.on_message(filters.private & filters.incoming & ~filters.me & ~filters.service)
 async def handle_new_user_message(client: Client, message: Message):
+    if message.text and message.text.startswith('/'):
+        # अगर यूजर ने पहली बार में ही कोई कमांड दी है, तो उसे कमांड हैंडलर को संभालने दें।
+        # यहाँ सिर्फ यूजर की जानकारी सेव होगी।
+        user_exists = user_tracking_collection.find_one({"_id": message.from_user.id})
+        if not user_exists:
+            await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        return
+
+    # यह सिर्फ पहली बार मैसेज करने वाले नए यूजर्स के लिए काम करेगा
     user_exists = user_tracking_collection.find_one({"_id": message.from_user.id})
-    
     if not user_exists:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
         
         notification_text = (
-            f"🆕 𝗡𝗲𝘄 𝗨𝘀𝗲𝗿 𝗔𝗹𝗲𝗿𝘁!\n"
-            f"𝗔 𝗻𝗲𝘄 𝘂𝘀𝗲𝗿 𝗵𝗮𝘀 𝗷𝗼𝗶𝗻𝗲𝗱 𝘁𝗵𝗲 𝗯𝗼𝘁!\n\n"
-            f"• 𝗨𝘀𝗲𝗿 𝗜𝗗: `{message.from_user.id}`\n"
-            f"• 𝗨𝘀𝗲𝗿𝗻𝗮𝗺𝗲: @{message.from_user.username if message.from_user.username else 'N/A'}\n"
-            f"• 𝗡𝗮𝗺𝗲: {message.from_user.first_name or ''} {message.from_user.last_name or ''}\n"
-            f"• 𝗙𝗶𝗿𝘀𝘁 𝗠𝗲𝘀𝘀𝗮𝗴𝗲: {message.text or 'N/A (media message)'}\n"
-            f"• 𝗧𝗶𝗺𝗲: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            f"Code By: @asbhaibsr\nUpdates: @asbhai_bsr"
+            f"**🆕 नया यूजर अलर्ट!**\n"
+            f"एक नए यूजर ने बॉट से बात शुरू की है!\n\n"
+            f"• **यूजर आईडी:** `{message.from_user.id}`\n"
+            f"• **यूजरनेम:** @{message.from_user.username if message.from_user.username else 'N/A'}\n"
+            f"• **नाम:** {message.from_user.first_name or ''}\n"
+            f"• **पहला मैसेज:** `{message.text or 'N/A (मीडिया)'}`"
         )
-        
         try:
-            await client.send_message(
-                chat_id=OWNER_ID,
-                text=notification_text,
-                parse_mode=ParseMode.MARKDOWN
-            )
-            logger.info(f"Sent new user notification to owner for user {message.from_user.id}")
+            await client.send_message(OWNER_ID, notification_text, parse_mode=ParseMode.MARKDOWN)
         except Exception as e:
-            logger.error(f"Failed to send new user notification: {e}")
+            logger.error(f"नए यूजर का नोटिफिकेशन भेजने में विफल: {e}")
 
 # -----------------
-# Callback Handlers
+# 2. Member Handlers (बॉट को ग्रुप में जोड़ना या हटाना)
 # -----------------
+@app.on_chat_member_updated()
+async def chat_member_updated_handler(client: Client, update):
+    me = await client.get_me()
+    chat = update.chat
+    
+    # --- जब बॉट को ग्रुप में जोड़ा जाए ---
+    if update.new_chat_member and update.new_chat_member.user.id == me.id:
+        await update_group_info(chat.id, chat.title, chat.username)
+        
+        group_link = f"https://t.me/{chat.username}" if chat.username else ""
+        if not group_link:
+            try:
+                # प्राइवेट ग्रुप के लिए इनवाइट लिंक बनाएं
+                invite_link = await client.export_chat_invite_link(chat.id)
+                group_link = invite_link
+            except Exception:
+                group_link = "लिंक उपलब्ध नहीं (बॉट एडमिन नहीं है?)"
 
+        added_by = update.from_user
+        notification_message = (
+            f"**🥳 नए ग्रुप का अलर्ट!**\n"
+            f"बॉट को एक नए ग्रुप में जोड़ा गया है।\n\n"
+            f"• **ग्रुप का नाम:** {chat.title}\n"
+            f"• **ग्रुप आईडी:** `{chat.id}`\n"
+            f"• **ग्रुप लिंक:** {group_link}\n"
+            f"• **किसने जोड़ा:** {added_by.first_name} (@{added_by.username or 'N/A'})"
+        )
+        try:
+            await client.send_message(OWNER_ID, notification_message, disable_web_page_preview=True)
+        except Exception as e:
+            logger.error(f"ओनर को नए ग्रुप '{chat.title}' के बारे में सूचित करने में विफल: {e}")
+
+    # --- जब बॉट को ग्रुप से हटाया जाए ---
+    if update.old_chat_member and update.old_chat_member.user.id == me.id:
+        # ग्रुप से जुड़ा सारा डेटा हटाएं
+        group_tracking_collection.delete_one({"_id": chat.id})
+        messages_collection.delete_many({"chat_id": chat.id})
+        # आप अपनी जरूरत के हिसाब से और भी कलेक्शन से डेटा हटा सकते हैं
+        logger.info(f"बॉट को ग्रुप '{chat.title}' ({chat.id}) से हटा दिया गया। सारा डेटा साफ कर दिया गया है।")
+        
+        removed_by = update.from_user
+        notification_message = (
+            f"**💔 ग्रुप छोड़ने का अलर्ट!**\n"
+            f"बॉट को एक ग्रुप से हटा दिया गया है।\n\n"
+            f"• **ग्रुप का नाम:** {chat.title}\n"
+            f"• **ग्रुप आईडी:** `{chat.id}`\n"
+            f"• **किसने हटाया:** {removed_by.first_name} (@{removed_by.username or 'N/A'})\n\n"
+            f"**नोट:** इस ग्रुप से जुड़ा सारा डेटा हटा दिया गया है।"
+        )
+        try:
+            await client.send_message(OWNER_ID, notification_message)
+        except Exception as e:
+            logger.error(f"ओनर को ग्रुप '{chat.title}' छोड़ने के बारे में सूचित करने में विफल: {e}")
+
+# -----------------
+# 3. Main Message Handler (यह AI और बाकी ग्रुप फीचर्स को संभालता है)
+# -----------------
+@app.on_message(
+    (filters.text | filters.sticker | filters.photo | filters.video | filters.document) & 
+    ~filters.private & ~filters.service
+)
+async def handle_group_message(client: Client, message: Message):
+    if not message.from_user or message.from_user.is_bot or (message.text and message.text.startswith('/')):
+        return
+
+    # ग्रुप की जानकारी और यूजर की जानकारी अपडेट करें
+    await update_group_info(message.chat.id, message.chat.title, message.chat.username)
+    await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    
+    # मैसेज को डेटाबेस में स्टोर करें
+    await store_message(client, message)
+    
+    # AI से रिप्लाई जेनरेट करें
+    reply_doc = await generate_reply(message)
+    if reply_doc and reply_doc.get("type"):
+        try:
+            if reply_doc["type"] == "text":
+                await message.reply_text(reply_doc["content"])
+            elif reply_doc["type"] == "sticker" and reply_doc.get("sticker_id"):
+                await message.reply_sticker(reply_doc["sticker_id"])
+        except Exception as e:
+            logger.error(f"ग्रुप में रिप्लाई भेजने में विफल: {e}")
+
+# -----------------
+# 4. Callback Handlers 
+# -----------------
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
     await callback_query.answer()
