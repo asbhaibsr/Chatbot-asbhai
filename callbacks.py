@@ -16,13 +16,25 @@ from config import (
 )
 
 # utils.py से आवश्यक फ़ंक्शन इम्पोर्ट करें
-# यह लाइन अब काम करेगी क्योंकि utils.py में फ़ंक्शन का नाम ठीक कर दिया गया है।
-from utils import get_top_earning_users, send_and_auto_delete_reply, store_message, update_user_info, update_group_info, is_admin_or_owner
+from utils import (
+    get_top_earning_users, send_and_auto_delete_reply, store_message, 
+    update_user_info, update_group_info, is_admin_or_owner
+)
 
 
 # -----------------------------------------------------
 # UTILITY FUNCTIONS FOR SETTINGS
 # -----------------------------------------------------
+
+# AI Modes की मैपिंग (AI Mode Settings के लिए)
+AI_MODES_MAP = {
+    "off": {"label": "❌ AI Mᴏᴅᴇ Oғғ", "display": "❌ Oғғ"},
+    "realgirl": {"label": "👧 Rᴇᴀʟ Gɪʀʟ", "display": "👧 Rᴇᴀʟ"},
+    "romanticgirl": {"label": "💖 Rᴏᴍᴀɴᴛɪᴄ Gɪʀʟ", "display": "💖 Rᴏᴍ"},
+    "motivationgirl": {"label": "💪 Mᴏᴛɪᴠᴀᴛɪᴏɴ Gɪʀʟ", "display": "💪 Mᴏᴛɪ"},
+    "studygirl": {"label": "📚 Sᴛᴜᴅʏ Gɪʀʟ", "display": "📚 Sᴛᴜᴅʏ"},
+    "gemini": {"label": "✨ Gᴇᴍɪɴɪ (Sᴜᴘᴇʀ AI)", "display": "✨ Gᴇᴍɪɴɪ"},
+}
 
 # यह फ़ंक्शन सेटिंग्स मैसेज को री-जनरेट और एडिट करने के लिए है
 async def refresh_settings_menu(client: Client, chat_id: int, message_id: int, user_id: int):
@@ -30,7 +42,12 @@ async def refresh_settings_menu(client: Client, chat_id: int, message_id: int, u
     
     # Check Admin/Owner status again (in case an old button is pressed)
     if not await is_admin_or_owner(client, chat_id, user_id):
-        return  # Do nothing if the user is no longer an admin
+        # Admin check failed, but we shouldn't fail silently if the message still exists
+        try:
+            await client.answer_callback_query(user_id, "माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
+        except:
+            pass
+        return  
 
     # 1. Fetch current settings and default punishment
     current_status_doc = group_tracking_collection.find_one({"_id": chat_id})
@@ -40,61 +57,72 @@ async def refresh_settings_menu(client: Client, chat_id: int, message_id: int, u
     linkdel_enabled = current_status_doc.get("linkdel_enabled", False) if current_status_doc else False
     biolinkdel_enabled = current_status_doc.get("biolinkdel_enabled", False) if current_status_doc else False
     usernamedel_enabled = current_status_doc.get("usernamedel_enabled", False) if current_status_doc else False
-    
+    ai_mode = current_status_doc.get("ai_mode", "off") if current_status_doc else "off" # New AI Mode
     punishment = current_status_doc.get("default_punishment", "delete") if current_status_doc else "delete"
     
-    # Status texts
-    bot_status = "✅ चालू (ON)" if bot_enabled else "❌ बंद (OFF)"
-    link_status = "✅ चालू (ON)" if linkdel_enabled else "❌ बंद (OFF)"
-    biolink_status = "✅ चालू (ON)" if biolinkdel_enabled else "❌ बंद (OFF)"
-    username_status = "✅ चालू (ON)" if usernamedel_enabled else "❌ बंद (OFF)"
+    # Status texts (English-Hindi mix for styling as per commands.py)
+    bot_status = "✅ O𝙽" if bot_enabled else "❌ O𝙵𝙵"
+    link_status = "✅ O𝙽" if linkdel_enabled else "❌ O𝙵𝙵"
+    biolink_status = "✅ O𝙽" if biolinkdel_enabled else "❌ O𝙵𝙵"
+    username_status = "✅ O𝙽" if usernamedel_enabled else "❌ O𝙵𝙵"
     
-    # Punishment text
+    # Punishment text (English-Hindi mix for styling as per commands.py)
     punishment_map = {
-        "delete": "🗑️ डिलीट मैसेज",
-        "mute": "🔇 म्यूट करें",
-        "warn": "⚠️ वार्न करें",
-        "ban": "⛔️ बैन करें"
+        "delete": "🗑️ Dᴇʟᴇᴛᴇ Mᴇꜱꜱᴀɢᴇ",
+        "mute": "🔇 Mᴜᴛᴇ Uꜱᴇʀ",
+        "warn": "⚠️ Wᴀʀɴ Uꜱᴇʀ",
+        "ban": "⛔️ Bᴀɴ Uꜱᴇʀ"
     }
-    punishment_text = punishment_map.get(punishment, "🗑️ डिलीट मैसेज")
+    punishment_text = punishment_map.get(punishment, "🗑️ Dᴇʟᴇᴛᴇ Mᴇꜱꜱᴀɢᴇ")
+
+    # AI Mode Text
+    ai_mode_text = AI_MODES_MAP.get(ai_mode, AI_MODES_MAP["off"])["display"]
+
 
     # 2. Create the Main Settings Keyboard
     keyboard = InlineKeyboardMarkup(
         [
             # Module Toggles
             [
-                InlineKeyboardButton(f"🤖 बॉट चैटिंग: {bot_status}", callback_data="toggle_setting_bot_enabled"),
+                InlineKeyboardButton(f"🤖 Bᴏᴛ Cʜᴀᴛᴛɪɴɢ: {bot_status}", callback_data="toggle_setting_bot_enabled"),
             ],
             [
-                InlineKeyboardButton(f"🔗 लिंक डिलीट: {link_status}", callback_data="toggle_setting_linkdel_enabled"),
+                InlineKeyboardButton(f"🔗 Lɪɴᴋ Dᴇ𝗹𝗲𝘁𝗲: {link_status}", callback_data="toggle_setting_linkdel_enabled"),
             ],
             [
-                InlineKeyboardButton(f"👤 बायो लिंक डिलीट: {biolink_status}", callback_data="toggle_setting_biolinkdel_enabled"),
+                InlineKeyboardButton(f"👤 Bɪᴏ Lɪɴᴋ D𝗲𝗹𝗲𝘁𝗲: {biolink_status}", callback_data="toggle_setting_biolinkdel_enabled"),
             ],
             [
-                InlineKeyboardButton(f"🗣️ @यूज़रनेम डिलीट: {username_status}", callback_data="toggle_setting_usernamedel_enabled"),
+                InlineKeyboardButton(f"🗣️ @Uꜱᴇ𝗿𝗻𝗮𝗺𝗲 D𝗲𝗹𝗲𝘁𝗲: {username_status}", callback_data="toggle_setting_usernamedel_enabled"),
+            ],
+            # NEW AI MODE BUTTON
+            [
+                InlineKeyboardButton(f"✨ AI Mᴏᴅᴇ: {ai_mode_text}", callback_data="open_ai_mode_settings"),
             ],
             # Punishment and Biolink Exception
             [
-                InlineKeyboardButton(f"🔨 डिफ़ॉल्ट सज़ा: {punishment_text}", callback_data="open_punishment_settings"),
+                InlineKeyboardButton(f"🔨 Dᴇ𝗳𝗮𝘂𝗹𝘁 Pᴜ𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁: {punishment_text}", callback_data="open_punishment_settings"),
             ],
             [
-                 InlineKeyboardButton("👤 बायो लिंक छूट (Exceptions) 📝", callback_data="open_biolink_exceptions")
+                 InlineKeyboardButton("👤 Bɪ𝗼 L𝗶𝗻𝗸 Exᴄᴇᴘᴛɪᴏ𝗻ꜱ 📝", callback_data="open_biolink_exceptions")
             ],
             # Close Button
             [
-                InlineKeyboardButton("❌ सेटिंग्स बंद करें", callback_data="close_settings")
+                InlineKeyboardButton("❌ Cʟ𝗼𝘀𝗲 S𝗲𝘁𝘁𝗶𝗻𝗴ꜱ", callback_data="close_settings")
             ]
         ]
     )
+    
+    chat_title = await client.get_chat(chat_id) # Get the full chat object
 
     # 3. Generate the Settings Message
     settings_message = (
-        f"⚙️ **ग्रुप सेटिंग्स** 🛠️\n\n"
-        "नमस्ते, बॉस! आप नीचे दिए गए बटनों से ग्रुप के नियम और बॉट के फ़ंक्शंस कंट्रोल कर सकते हैं।\n"
-        "आपके सभी फ़िल्टर सेटिंग्स को तोड़ने पर यूज़र्स को **डिफ़ॉल्ट सज़ा** मिलेगी।\n\n"
-        f"**डिफ़ॉल्ट सज़ा:** {punishment_text}\n"
-        "__नियमों को तोड़ने वाले को कौनसी सज़ा देनी है, वो 'डिफ़ॉल्ट सज़ा' से चुनें।__"
+        f"⚙️ **𝗚𝗿𝗼𝘂𝗽 𝗦𝗲𝘁𝘁𝗶𝗻𝗴𝘀: {chat_title.title}** 🛠️\n\n"
+        "𝗛𝗲𝗹𝗹𝗼, 𝗕𝗼𝘀𝘀! 𝗬𝗼𝘂 𝗰𝗮𝗻 𝗰𝗼𝗻𝘁𝗿𝗼𝗹 𝘁𝗵𝗲 𝗴𝗿𝗼𝘂𝗽 𝗿𝘂𝗹𝗲𝘀 𝗮𝗻𝗱 𝗯𝗼𝘁 𝗳𝘂𝗻𝗰𝘁𝗶𝗼𝗻𝘀 𝗳𝗿𝗼𝗺 𝘁𝗵𝗲 𝗯𝘂𝘁𝘁𝗼𝗻𝘀 𝗯𝗲𝗹𝗼𝘄.\n"
+        "**AI Mᴏᴅᴇ:** Bᴏᴛ ᴋɪ ᴘᴇʀsᴏɴᴀʟɪᴛʏ ᴀᴜʀ ᴊ𝗮𝘄𝗮𝗯 ᴅᴇɴᴇ ᴋᴀ 𝘁𝗮𝗿𝗶𝗸𝗮 𝗶𝘀 𝘀𝗲 𝘀𝗲𝘁 𝗵𝗼𝗴𝗮. **Cᴜʀʀ𝗲𝗻𝘁: {ai_mode_text}**\n\n"
+        "𝗨𝘀𝗲𝗿𝘀 𝘄𝗵𝗼 𝗯𝗿𝗲𝗮𝗸 𝘆𝗼𝘂𝗿 𝗳𝗶𝗹𝘁𝗲𝗿 𝘀𝗲𝘁𝘁𝗶𝗻𝗴𝘀 𝘄𝗶𝗹𝗹 𝗿𝗲𝗰𝗲𝗶𝘃𝗲 𝘁𝗵𝗲 **𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁**.\n\n"
+        f"**𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁:** {punishment_text}\n"
+        "__𝗖𝗵𝗼𝗼𝘀𝗲 𝘄𝗵𝗮𝘁 𝗽𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁 𝘁𝗼 𝗴𝗶𝘃𝗲 𝘁𝗼 𝗿𝘂𝗹𝗲-𝗯𝗿𝗲𝗮𝗸𝗲𝗿𝘀 𝗳𝗿𝗼𝗺 '𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁'.__"
     )
 
     # 4. Edit the message
@@ -102,24 +130,117 @@ async def refresh_settings_menu(client: Client, chat_id: int, message_id: int, u
         await client.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            text=settings_message,
+            text=settings_message.format(ai_mode_text=ai_mode_text), # 🟢 FIX: Added .format() for AI Mode Text
             reply_markup=keyboard,
             parse_mode=ParseMode.MARKDOWN
         )
     except Exception as e:
         logger.error(f"Failed to edit settings message in chat {chat_id}: {e}")
 
+# -----------------------------------------------------
+# AI MODE SUB-MENU HANDLERS
+# -----------------------------------------------------
+
+@app.on_callback_query(filters.regex("open_ai_mode_settings"))
+async def open_ai_mode_settings_callback(client: Client, callback_query: CallbackQuery):
+    """Opens the submenu to select the default punishment."""
+    chat_id = callback_query.message.chat.id
+    user_id = callback_query.from_user.id
+
+    if not await is_admin_or_owner(client, chat_id, user_id):
+        await callback_query.answer("⚠️ माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
+        return
+
+    current_status_doc = group_tracking_collection.find_one({"_id": chat_id})
+    current_ai_mode = current_status_doc.get("ai_mode", "off") if current_status_doc else "off"
+    
+    # AI Mode buttons with checkmark for current selection
+    keyboard_buttons = []
+    current_row = []
+
+    # Off/Default Button
+    status_off = "✅ " if current_ai_mode == "off" else ""
+    keyboard_buttons.append([InlineKeyboardButton(f"{status_off}{AI_MODES_MAP['off']['label']}", callback_data="set_ai_mode_off")])
+
+    # Dynamic Mode Buttons
+    for mode_key, mode_data in AI_MODES_MAP.items():
+        if mode_key != "off":
+            status = "✅ " if current_ai_mode == mode_key else ""
+            button = InlineKeyboardButton(f"{status}{mode_data['label']}", callback_data=f"set_ai_mode_{mode_key}")
+            current_row.append(button)
+            if len(current_row) == 2:
+                keyboard_buttons.append(current_row)
+                current_row = []
+    
+    if current_row:
+        keyboard_buttons.append(current_row)
+
+    # Back Button
+    keyboard_buttons.append([InlineKeyboardButton("🔙 Sᴇᴛᴛɪɴɢꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")])
+    
+    keyboard = InlineKeyboardMarkup(keyboard_buttons)
+
+    current_mode_display = AI_MODES_MAP.get(current_ai_mode, AI_MODES_MAP["off"])["label"]
+    
+    ai_mode_message = (
+        "👑 **AI Mᴏᴅᴇ Sᴇᴛᴛɪɴɢꜱ 👑**\n\n"
+        "𝗛𝗲𝗹𝗹𝗼 𝗕𝗼𝘀𝘀, 𝘆𝗲𝗵𝗮𝗻 𝘀𝗲 𝗮𝗽𝗻𝗮 **AI 𝗽𝗲𝗿𝘀𝗼𝗻𝗮𝗹𝗶𝘁𝘆** 𝘀𝗲𝘁 𝗸𝗮𝗿𝗼.\n"
+        "𝗕𝗼𝘁 𝘂𝘀 𝗵𝗶 𝗮𝗻𝗱𝗮𝗮𝘇 𝗺𝗮𝗶𝗻, 𝗯𝗶𝗸𝘂𝗹 𝗿𝗲𝗮𝗹 𝗹𝗮𝗱𝗸𝗶 𝗷𝗮𝗶𝘀𝗲, 𝗯𝗮𝗮𝘁 𝗸𝗮𝗿𝗲𝗴𝗶! 🤩\n\n"
+        f"**Cᴜʀ𝗿𝗲𝗻𝘁 AI Mᴏ𝗱𝗲:** **{current_mode_display}**"
+    )
+
+    await client.edit_message_text(
+        chat_id=chat_id,
+        message_id=callback_query.message.id,
+        text=ai_mode_message,
+        reply_markup=keyboard,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await callback_query.answer()
+
+
+@app.on_callback_query(filters.regex("^set_ai_mode_"))
+async def set_ai_mode_callback(client: Client, callback_query: CallbackQuery):
+    """Sets the new AI mode and returns to the main settings."""
+    chat_id = callback_query.message.chat.id
+    user_id = callback_query.from_user.id
+    new_ai_mode = callback_query.data.replace("set_ai_mode_", "")
+    
+    if not await is_admin_or_owner(client, chat_id, user_id):
+        await callback_query.answer("⚠️ माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
+        return
+
+    # 1. Validate AI Mode
+    if new_ai_mode not in AI_MODES_MAP:
+        await callback_query.answer("अमान्य AI मोड विकल्प।", show_alert=True)
+        return
+
+    # 2. Update the database
+    group_tracking_collection.update_one(
+        {"_id": chat_id},
+        {"$set": {"ai_mode": new_ai_mode}},
+        upsert=True
+    )
+    
+    # 3. Refresh the main menu
+    await refresh_settings_menu(client, chat_id, callback_query.message.id, user_id)
+    
+    # 4. Answer the query
+    action_text = AI_MODES_MAP.get(new_ai_mode, AI_MODES_MAP["off"])["display"]
+    await callback_query.answer(f"✨ AI मोड अब **{action_text}** पर सेट कर दिया गया है।", show_alert=True)
+
 
 # -----------------------------------------------------
-# NEW SETTINGS HANDLERS
+# GROUP SETTINGS HANDLERS (GROUP & PUNISHMENT)
 # -----------------------------------------------------
 
 @app.on_callback_query(filters.regex("open_group_settings"))
 @app.on_callback_query(filters.regex("settings_back_to_main"))
 async def open_settings_from_callback(client: Client, callback_query: CallbackQuery):
     """Opens or returns to the main settings menu."""
+    await callback_query.answer() # Answer early for speed
     if not await is_admin_or_owner(client, callback_query.message.chat.id, callback_query.from_user.id):
-        await callback_query.answer("माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
+        await callback_query.answer("⚠️ माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
         return
 
     # Call the refresh function to display the main settings
@@ -129,7 +250,6 @@ async def open_settings_from_callback(client: Client, callback_query: CallbackQu
         callback_query.message.id,
         callback_query.from_user.id
     )
-    await callback_query.answer()
 
 
 @app.on_callback_query(filters.regex("^toggle_setting_"))
@@ -140,7 +260,7 @@ async def toggle_setting_callback(client: Client, callback_query: CallbackQuery)
     setting_key = callback_query.data.replace("toggle_setting_", "")
     
     if not await is_admin_or_owner(client, chat_id, user_id):
-        await callback_query.answer("माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
+        await callback_query.answer("⚠️ माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
         return
 
     # 1. Fetch current status
@@ -182,7 +302,7 @@ async def open_punishment_settings_callback(client: Client, callback_query: Call
     user_id = callback_query.from_user.id
 
     if not await is_admin_or_owner(client, chat_id, user_id):
-        await callback_query.answer("माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
+        await callback_query.answer("⚠️ माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
         return
 
     current_status_doc = group_tracking_collection.find_one({"_id": chat_id})
@@ -196,32 +316,36 @@ async def open_punishment_settings_callback(client: Client, callback_query: Call
     keyboard = InlineKeyboardMarkup(
         [
             [
-                get_punishment_button("delete", "🗑️ डिलीट मैसेज"),
-                get_punishment_button("mute", "🔇 म्यूट करें")
+                get_punishment_button("delete", "🗑️ Dᴇʟᴇᴛᴇ Mᴇꜱꜱᴀɢᴇ"),
+                get_punishment_button("mute", "🔇 Mᴜᴛᴇ Uꜱᴇʀ")
             ],
             [
-                get_punishment_button("warn", "⚠️ वार्न करें"),
-                get_punishment_button("ban", "⛔️ बैन करें")
+                get_punishment_button("warn", "⚠️ Wᴀʀɴ Uꜱᴇʀ"),
+                get_punishment_button("ban", "⛔️ Bᴀɴ Uꜱᴇʀ")
             ],
             [
-                InlineKeyboardButton("🔙 सेटिंग्स मेन्यू", callback_data="settings_back_to_main")
+                InlineKeyboardButton("🔙 Sᴇᴛᴛɪɴɢꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")
             ]
         ]
     )
     
     punishment_message = (
-        "🔨 **डिफ़ॉल्ट सज़ा सेटिंग्स** 🔨\n\n"
+        "🔨 **Dᴇ𝗳𝗮𝘂𝗹𝘁 Pᴜ𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁 Sᴇ𝘁𝘁𝗶𝗻𝗴ꜱ** 🔨\n\n"
         "वह कार्रवाई चुनें जो बॉट यूज़र्स पर लागू करेगा जब वे किसी भी **फ़िल्टर नियम** (लिंक, बायो लिंक, यूज़रनेम) का उल्लंघन करेंगे।\n\n"
-        f"**वर्तमान सज़ा:** **{current_punishment.upper()}**"
+        f"**Cᴜʀ𝗿𝗲𝗻𝘁 Pᴜ𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁:** **{current_punishment.upper()}**"
     )
 
-    await client.edit_message_text(
-        chat_id=chat_id,
-        message_id=callback_query.message.id,
-        text=punishment_message,
-        reply_markup=keyboard,
-        parse_mode=ParseMode.MARKDOWN
-    )
+    try:
+        await client.edit_message_text(
+            chat_id=chat_id,
+            message_id=callback_query.message.id,
+            text=punishment_message,
+            reply_markup=keyboard,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logger.error(f"Failed to edit punishment settings message in chat {chat_id}: {e}")
+
     await callback_query.answer()
 
 
@@ -233,7 +357,7 @@ async def set_punishment_callback(client: Client, callback_query: CallbackQuery)
     new_punishment = callback_query.data.replace("set_punishment_", "")
     
     if not await is_admin_or_owner(client, chat_id, user_id):
-        await callback_query.answer("माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
+        await callback_query.answer("⚠️ माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
         return
 
     # 1. Validate punishment
@@ -270,14 +394,14 @@ async def open_biolink_exceptions_callback(client: Client, callback_query: Callb
     user_id = callback_query.from_user.id
     
     if not await is_admin_or_owner(client, chat_id, user_id):
-        await callback_query.answer("माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
+        await callback_query.answer("⚠️ माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
         return
 
     # 1. Fetch current exceptions for this chat
     exceptions = biolink_exceptions_collection.find_one({"_id": chat_id})
     exception_users = exceptions.get("user_ids", []) if exceptions else []
     
-    # 2. Prepare the list of users (fetching usernames/first names is tricky here, so we show IDs for simplicity)
+    # 2. Prepare the list of users
     list_text = "कोई छूट नहीं दी गई है। 🤷‍♀️"
     if exception_users:
         list_text = "\n".join([f"• `{uid}`" for uid in exception_users])
@@ -296,7 +420,7 @@ async def open_biolink_exceptions_callback(client: Client, callback_query: Callb
 
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🔙 सेटिंग्स मेन्यू", callback_data="settings_back_to_main")]
+            [InlineKeyboardButton("🔙 Sᴇᴛᴛɪɴɢꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")]
         ]
     )
 
@@ -321,7 +445,7 @@ async def close_settings_callback(client: Client, callback_query: CallbackQuery)
     user_id = callback_query.from_user.id
 
     if not await is_admin_or_owner(client, chat_id, user_id):
-        await callback_query.answer("माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
+        await callback_query.answer("⚠️ माफ़ करना, आप अब एडमिन नहीं हैं।", show_alert=True)
         return
 
     try:
@@ -345,7 +469,7 @@ async def close_settings_callback(client: Client, callback_query: CallbackQuery)
             pass # Ignore final failure
 
 # -----------------------------------------------------
-# EXISTING HANDLERS (UPDATED /HELP)
+# MAIN MENU / HELP / LEADERBOARD HANDLERS
 # -----------------------------------------------------
 
 @app.on_callback_query(filters.regex("show_help_menu"))
@@ -355,7 +479,8 @@ async def show_help_menu_callback(client: Client, callback_query: CallbackQuery)
     help_message = (
         "यह रही आपकी मदद, डार्लिंग! 🥰\n\n"
         "**👥 ग्रुप कमांड्स (एडमिन के लिए):**\n"
-        "• `/settings` - **सभी ग्रुप सेटिंग्स (चैटिंग, लिंक्स, यूज़रनेम फ़िल्टर और सज़ा) मैनेज करने के लिए मेन्यू खोलें।** (नया!)\n"
+        "• `/settings` - **सभी ग्रुप सेटिंग्स (चैटिंग, लिंक्स, यूज़रनेम फ़िल्टर, AI Mode और सज़ा) मैनेज करने के लिए मेन्यू खोलें।** (नया!)\n"
+        "• `/setaimode` - **AI Bot की पर्सनालिटी सेट करें (e.g., Real Girl, Gemini)।** (नया!)\n"
         "• `/addbiolink <user_id>` - बायो लिंक फ़िल्टर से यूज़र को छूट दें।\n"
         "• `/rembiolink <user_id>` - बायो लिंक फ़िल्टर से यूज़र की छूट हटाएँ।\n\n"
         "**👤 सामान्य और निजी कमांड्स:**\n"
@@ -377,13 +502,10 @@ async def show_help_menu_callback(client: Client, callback_query: CallbackQuery)
     await callback_query.message.edit_text(
         text=help_message,
         reply_markup=keyboard,
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True 
     )
     await callback_query.answer() 
-
-# -----------------------------------------------------
-# UNCHANGED EXISTING HANDLERS
-# -----------------------------------------------------
 
 @app.on_callback_query(filters.regex("show_earning_rules"))
 async def show_earning_rules_callback(client: Client, callback_query: CallbackQuery):
@@ -409,7 +531,8 @@ async def show_earning_rules_callback(client: Client, callback_query: CallbackQu
     await callback_query.message.edit_text(
         text=earning_rules_message,
         reply_markup=keyboard,
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True 
     )
     await callback_query.answer()
 
@@ -454,7 +577,7 @@ async def show_earning_leaderboard_callback(client: Client, callback_query: Call
         keyboard = InlineKeyboardMarkup(
             [[InlineKeyboardButton("🔙 मुख्य मेन्यू", callback_data="start_menu_from_help")]]
         )
-        await callback_query.message.edit_text(text="😢 अब तक कोई भी उपयोगकर्ता लीडरबोर्ड पर नहीं है! सक्रिय होकर पहले बनें! ✨\n\n**Powered By:** @asbhaibsr", parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+        await callback_query.message.edit_text(text="😢 अब तक कोई भी उपयोगकर्ता लीडरबोर्ड पर नहीं है! सक्रिय होकर पहले बनें! ✨\n\n**Powered By:** @asbhaibsr", parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard, disable_web_page_preview=True)
         await callback_query.answer()
         return
 
@@ -517,12 +640,15 @@ async def show_earning_leaderboard_callback(client: Client, callback_query: Call
     await callback_query.message.edit_text(text="\n".join(earning_messages), reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
     await callback_query.answer()
 
-# --- clearall_dbs के लिए कॉलबैक हैंडलर (UNCHANGED) ---
+# -----------------------------------------------------
+# OWNER-ONLY CALLBACK HANDLERS
+# -----------------------------------------------------
+
 @app.on_callback_query(filters.regex("confirm_clearall_dbs"))
 async def confirm_clearall_dbs_callback(client: Client, callback_query: CallbackQuery):
     logger.info(f"Clear All DBs confirmation received from owner {callback_query.from_user.id}")
     if callback_query.from_user.id != OWNER_ID:
-        await callback_query.answer("आप अधिकृत नहीं हैं।", show_alert=True)
+        await callback_query.answer("⚠️ आप अधिकृत नहीं हैं।", show_alert=True)
         return
 
     try:
@@ -556,7 +682,7 @@ async def confirm_clearall_dbs_callback(client: Client, callback_query: Callback
 async def cancel_clearall_dbs_callback(client: Client, callback_query: CallbackQuery):
     logger.info(f"Clear All DBs cancellation received from owner {callback_query.from_user.id}")
     if callback_query.from_user.id != OWNER_ID:
-        await callback_query.answer("आप अधिकृत नहीं हैं।", show_alert=True)
+        await callback_query.answer("⚠️ आप अधिकृत नहीं हैं।", show_alert=True)
         return
     
     await callback_query.message.edit_text(
