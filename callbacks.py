@@ -33,6 +33,7 @@ AI_MODES_MAP = {
     "romanticgirl": {"label": "💖 Rᴏᴍᴀɴᴛɪᴄ Gɪʀʟ", "display": "💖 Rᴏᴍ"},
     "motivationgirl": {"label": "💪 Mᴏᴛɪᴠᴀᴛɪᴏɴ Gɪʀʟ", "display": "💪 Mᴏᴛɪ"},
     "studygirl": {"label": "📚 Sᴛᴜᴅʏ Gɪʀʟ", "display": "📚 Sᴛᴜᴅʏ"},
+    # 🟢 FIX: Added Gemini mode
     "gemini": {"label": "✨ Gᴇᴍɪɴɪ (Sᴜᴘᴇʀ AI)", "display": "✨ Gᴇᴍɪɴɪ"},
 }
 
@@ -75,7 +76,7 @@ async def refresh_settings_menu(client: Client, chat_id: int, message_id: int, u
     }
     punishment_text = punishment_map.get(punishment, "🗑️ Dᴇʟᴇᴛᴇ Mᴇꜱꜱᴀɢᴇ")
 
-    # AI Mode Text
+    # 🟢 FIX: Use AI_MODES_MAP for consistent display
     ai_mode_text = AI_MODES_MAP.get(ai_mode, AI_MODES_MAP["off"])["display"]
 
 
@@ -97,7 +98,7 @@ async def refresh_settings_menu(client: Client, chat_id: int, message_id: int, u
             ],
             # NEW AI MODE BUTTON
             [
-                InlineKeyboardButton(f"✨ AI Mᴏᴅᴇ: {ai_mode_text}", callback_data="open_ai_mode_settings"),
+                InlineKeyboardButton(f"✨ AI Mᴏᴅ𝗲: {ai_mode_text}", callback_data="open_ai_mode_settings"),
             ],
             # Punishment and Biolink Exception
             [
@@ -108,18 +109,24 @@ async def refresh_settings_menu(client: Client, chat_id: int, message_id: int, u
             ],
             # Close Button
             [
-                InlineKeyboardButton("❌ Cʟ𝗼𝘀𝗲 S𝗲𝘁𝘁𝗶𝗻𝗴ꜱ", callback_data="close_settings")
+                InlineKeyboardButton("❌ Cʟ𝗼𝘀𝗲 S𝗲𝘁𝘁𝗶𝗻gꜱ", callback_data="close_settings")
             ]
         ]
     )
     
-    chat_title = await client.get_chat(chat_id) # Get the full chat object
+    # 🟢 FIX: Get chat title safely
+    try:
+        chat_obj = await client.get_chat(chat_id)
+        chat_title = chat_obj.title
+    except Exception:
+        chat_title = "Unknown Group"
+
 
     # 3. Generate the Settings Message
     settings_message = (
-        f"⚙️ **𝗚𝗿𝗼𝘂𝗽 𝗦𝗲𝘁𝘁𝗶𝗻𝗴𝘀: {chat_title.title}** 🛠️\n\n"
+        f"⚙️ **𝗚𝗿𝗼𝘂𝗽 𝗦𝗲𝘁𝘁𝗶𝗻𝗴𝘀: {chat_title}** 🛠️\n\n"
         "𝗛𝗲𝗹𝗹𝗼, 𝗕𝗼𝘀𝘀! 𝗬𝗼𝘂 𝗰𝗮𝗻 𝗰𝗼𝗻𝘁𝗿𝗼𝗹 𝘁𝗵𝗲 𝗴𝗿𝗼𝘂𝗽 𝗿𝘂𝗹𝗲𝘀 𝗮𝗻𝗱 𝗯𝗼𝘁 𝗳𝘂𝗻𝗰𝘁𝗶𝗼𝗻𝘀 𝗳𝗿𝗼𝗺 𝘁𝗵𝗲 𝗯𝘂𝘁𝘁𝗼𝗻𝘀 𝗯𝗲𝗹𝗼𝘄.\n"
-        "**AI Mᴏᴅᴇ:** Bᴏᴛ ᴋɪ ᴘᴇʀsᴏɴᴀʟɪᴛʏ ᴀᴜʀ ᴊ𝗮𝘄𝗮𝗯 ᴅᴇɴᴇ ᴋᴀ 𝘁𝗮𝗿𝗶𝗸𝗮 𝗶𝘀 𝘀𝗲 𝘀𝗲𝘁 𝗵𝗼𝗴𝗮. **Cᴜʀʀ𝗲𝗻𝘁: {ai_mode_text}**\n\n"
+        "**AI Mᴏᴅ𝗲:** Bᴏᴛ ᴋɪ ᴘᴇʀsᴏɴᴀʟɪᴛʏ ᴀᴜʀ ᴊ𝗮𝘄𝗮𝗯 ᴅᴇɴᴇ ᴋᴀ 𝘁𝗮𝗿𝗶𝗸𝗮 𝗶𝘀 𝘀𝗲 𝘀𝗲𝘁 𝗵𝗼𝗴𝗮. **Cᴜʀʀ𝗲𝗻𝘁: {ai_mode_text}**\n\n"
         "𝗨𝘀𝗲𝗿𝘀 𝘄𝗵𝗼 𝗯𝗿𝗲𝗮𝗸 𝘆𝗼𝘂𝗿 𝗳𝗶𝗹𝘁𝗲𝗿 𝘀𝗲𝘁𝘁𝗶𝗻𝗴𝘀 𝘄𝗶𝗹𝗹 𝗿𝗲𝗰𝗲𝗶𝘃𝗲 𝘁𝗵𝗲 **𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁**.\n\n"
         f"**𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁:** {punishment_text}\n"
         "__𝗖𝗵𝗼𝗼𝘀𝗲 𝘄𝗵𝗮𝘁 𝗽𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁 𝘁𝗼 𝗴𝗶𝘃𝗲 𝘁𝗼 𝗿𝘂𝗹𝗲-𝗯𝗿𝗲𝗮𝗸𝗲𝗿𝘀 𝗳𝗿𝗼𝗺 '𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁'.__"
@@ -159,6 +166,7 @@ async def open_ai_mode_settings_callback(client: Client, callback_query: Callbac
     current_row = []
 
     # Off/Default Button
+    # 🟢 FIX: Use AI_MODES_MAP for the label
     status_off = "✅ " if current_ai_mode == "off" else ""
     keyboard_buttons.append([InlineKeyboardButton(f"{status_off}{AI_MODES_MAP['off']['label']}", callback_data="set_ai_mode_off")])
 
@@ -180,12 +188,13 @@ async def open_ai_mode_settings_callback(client: Client, callback_query: Callbac
     
     keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
-    current_mode_display = AI_MODES_MAP.get(current_ai_mode, AI_MODES_MAP["off"])["label"]
+    # 🟢 FIX: Used 'label' for better display in the title, 'display' for main settings
+    current_mode_display = AI_MODES_MAP.get(current_ai_mode, AI_MODES_MAP["off"])["label"] 
     
     ai_mode_message = (
         "👑 **AI Mᴏᴅᴇ Sᴇᴛᴛɪɴɢꜱ 👑**\n\n"
         "𝗛𝗲𝗹𝗹𝗼 𝗕𝗼𝘀𝘀, 𝘆𝗲𝗵𝗮𝗻 𝘀𝗲 𝗮𝗽𝗻𝗮 **AI 𝗽𝗲𝗿𝘀𝗼𝗻𝗮𝗹𝗶𝘁𝘆** 𝘀𝗲𝘁 𝗸𝗮𝗿𝗼.\n"
-        "𝗕𝗼𝘁 𝘂𝘀 𝗵𝗶 𝗮𝗻𝗱𝗮𝗮𝘇 𝗺𝗮𝗶𝗻, 𝗯𝗶𝗸𝘂𝗹 𝗿𝗲𝗮𝗹 𝗹𝗮𝗱𝗸𝗶 𝗷𝗮𝗶𝘀𝗲, 𝗯𝗮𝗮𝘁 𝗸𝗮𝗿𝗲𝗴𝗶! 🤩\n\n"
+        "𝗕𝗼𝘁 𝘂𝘀 𝗵𝗶 𝗮𝗻𝗱𝗮𝗮𝘇 𝗺𝗮𝗶𝗻, 𝗯𝗶𝗸𝘂𝗹 𝗿𝗲𝗮𝗹 𝗹𝗮𝗱𝗸𝗶 𝗷𝗮𝗶𝘀𝗲, 𝗯𝗮𝗮𝘁 𝗸𝗮𝗿𝗲गी! 🤩\n\n"
         f"**Cᴜʀ𝗿𝗲𝗻𝘁 AI Mᴏ𝗱𝗲:** **{current_mode_display}**"
     )
 
@@ -226,6 +235,7 @@ async def set_ai_mode_callback(client: Client, callback_query: CallbackQuery):
     await refresh_settings_menu(client, chat_id, callback_query.message.id, user_id)
     
     # 4. Answer the query
+    # 🟢 FIX: Use 'display' for the answer text, as it's shorter
     action_text = AI_MODES_MAP.get(new_ai_mode, AI_MODES_MAP["off"])["display"]
     await callback_query.answer(f"✨ AI मोड अब **{action_text}** पर सेट कर दिया गया है।", show_alert=True)
 
@@ -324,7 +334,7 @@ async def open_punishment_settings_callback(client: Client, callback_query: Call
                 get_punishment_button("ban", "⛔️ Bᴀɴ Uꜱᴇʀ")
             ],
             [
-                InlineKeyboardButton("🔙 Sᴇᴛᴛɪɴɢꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")
+                InlineKeyboardButton("🔙 Sᴇᴛᴛ𝗶𝗻𝗴ꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")
             ]
         ]
     )
@@ -420,7 +430,7 @@ async def open_biolink_exceptions_callback(client: Client, callback_query: Callb
 
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🔙 Sᴇᴛᴛɪɴɢꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")]
+            [InlineKeyboardButton("🔙 Sᴇᴛᴛ𝗶𝗻𝗴ꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")]
         ]
     )
 
