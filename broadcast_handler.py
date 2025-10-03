@@ -6,7 +6,7 @@ import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ParseMode
-from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError, StopPropagation
+from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError
 
 # 'config' और 'utils' से आवश्यक चीज़ें इम्पोर्ट करें
 from config import (
