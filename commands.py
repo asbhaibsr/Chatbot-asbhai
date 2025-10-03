@@ -17,16 +17,18 @@ from config import (
 )
 from utils import (
     is_on_command_cooldown, update_command_cooldown, update_group_info, update_user_info,
-    get_top_earning_users, reset_monthly_earnings_manual, delete_after_delay_for_message, # Renamed function for consistency
+    get_top_earning_users, reset_monthly_earnings_manual, delete_after_delay_for_message, # <--- 🟢 FIX: 'delete_after_delay_for_message' को सीधे आयात किया गया
     store_message, is_admin_or_owner
 )
 
 import callbacks # <--- This line is essential for importing callbacks.py
 import broadcast_handler # <--- 🌟 New broadcast file imported 🌟
 
-# Alias the utility function to the expected name for cleaner code
-send_and_auto_delete_reply = delete_after_delay_for_message
-
+# 🔴 REMOVED: Alias the utility function to the expected name for cleaner code.
+#             यह लाइन अब ज़रूरी नहीं है क्योंकि 'delete_after_delay_for_message'
+#             को सीधे 'send_and_auto_delete_reply' के रूप में इस्तेमाल किया जा रहा है
+#             या सीधे इंपोर्ट किया जा रहा है।
+send_and_auto_delete_reply = delete_after_delay_for_message # <--- 🟢 FIX: अब यह केवल एक साधारण असाइनमेंट है
 
 # -----------------------------------------------------
 # PRIVATE CHAT COMMANDS
@@ -53,7 +55,7 @@ async def start_private_command(client: Client, message: Message):
             ],
             [
                 InlineKeyboardButton("ℹ️ Hᴇʟᴘ ❓", callback_data="show_help_menu"),
-                InlineKeyboardButton("💰 Eᴀʀɴɪɴɢ Lᴇᴀᴅᴇʀʙᴏᴀʀᴅ", callback_data="show_earning_leaderboard")
+                InlineKeyboardButton("💰 Eᴀʀɴɪɴɢ Lᴇ𝗮𝗱𝗲𝗿𝗯𝗼𝗮𝗿𝗱", callback_data="show_earning_leaderboard")
             ]
         ]
     )
@@ -132,7 +134,7 @@ async def top_users_command(client: Client, message: Message):
         [
             [
                 InlineKeyboardButton("💰 Wɪᴛʜᴅʀᴀᴡ", url=f"https://t.me/{ASBHAI_USERNAME}"),
-                InlineKeyboardButton("💰 Eᴀʀɴɪ𝗻𝗴 Rᴜ𝗹ᴇꜱ", callback_data="show_earning_rules")
+                InlineKeyboardButton("💰 E𝗮𝗿𝗻𝗶𝗻𝗴 Rᴜ𝗹𝗲ꜱ", callback_data="show_earning_rules")
             ]
         ]
     )
@@ -637,7 +639,7 @@ async def start_group_command(client: Client, message: Message):
             ],
             [
                 InlineKeyboardButton("⚙️ Gʀᴏᴜᴘ Sᴇᴛᴛɪɴɢꜱ 🛠️", callback_data="open_group_settings"), 
-                InlineKeyboardButton("💰 Eᴀʀɴɪɴɢ Lᴇᴀᴅᴇʀʙᴏᴀʀᴅ", callback_data="show_earning_leaderboard")
+                InlineKeyboardButton("💰 Eᴀʀɴɪɴɢ Lᴇ𝗮𝗱𝗲𝗿𝗯𝗼𝗮𝗿𝗱", callback_data="show_earning_leaderboard")
             ]
         ]
     )
@@ -704,8 +706,8 @@ async def set_ai_mode_command(client: Client, message: Message):
     if current_row:
         keyboard_buttons.append(current_row)
 
-    # Close Button
-    keyboard_buttons.append([InlineKeyboardButton("❌ Cʟ𝗼𝘀𝗲 Mᴇɴᴜ", callback_data="close_settings")])
+    # Close Button (UI Suggestion Fix: Changed to Back to Settings)
+    keyboard_buttons.append([InlineKeyboardButton("🔙 Sᴇᴛᴛɪɴɢꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")]) # 🟢 FIX: Back to Main Setting
     
     keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
@@ -773,11 +775,11 @@ async def open_settings_command(client: Client, message: Message):
     punishment_text = punishment_map.get(punishment, "🗑️ Dᴇʟᴇᴛᴇ Mᴇꜱꜱᴀɢᴇ")
 
     # AI Mode Text
-    ai_modes = {
+    ai_modes_display = {
         "off": "❌ Oғғ", "realgirl": "👧 Rᴇᴀʟ", "romanticgirl": "💖 Rᴏᴍ", 
         "motivationgirl": "💪 Mᴏᴛɪ", "studygirl": "📚 Sᴛᴜᴅʏ", "gemini": "✨ Gᴇᴍɪɴɪ"
     }
-    ai_mode_text = ai_modes.get(ai_mode, "❌ Oғғ")
+    ai_mode_text = ai_modes_display.get(ai_mode, "❌ Oғғ")
 
 
     # 3. Create the Main Settings Keyboard (Styled Buttons)
@@ -805,7 +807,7 @@ async def open_settings_command(client: Client, message: Message):
                 InlineKeyboardButton(f"🔨 Dᴇ𝗳𝗮𝘂𝗹𝘁 Pᴜ𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁: {punishment_text}", callback_data="open_punishment_settings"),
             ],
             [
-                 InlineKeyboardButton("👤 Bɪ𝗼 L𝗶𝗻𝗸 Exᴄᴇᴘᴛɪᴏɴꜱ 📝", callback_data="open_biolink_exceptions")
+                 InlineKeyboardButton("👤 Bɪ𝗼 L𝗶𝗻𝗸 Exᴄᴇᴘᴛɪᴏ𝗻ꜱ 📝", callback_data="open_biolink_exceptions")
             ],
             # Close Button
             [
@@ -818,7 +820,7 @@ async def open_settings_command(client: Client, message: Message):
     settings_message = (
         f"⚙️ **𝗚𝗿𝗼𝘂𝗽 𝗦𝗲𝘁𝘁𝗶𝗻𝗴𝘀: {message.chat.title}** 🛠️\n\n"
         "𝗛𝗲𝗹𝗹𝗼, 𝗕𝗼𝘀𝘀! 𝗬𝗼𝘂 𝗰𝗮𝗻 𝗰𝗼𝗻𝘁𝗿𝗼𝗹 𝘁𝗵𝗲 𝗴𝗿𝗼𝘂𝗽 𝗿𝘂𝗹𝗲𝘀 𝗮𝗻𝗱 𝗯𝗼𝘁 𝗳𝘂𝗻𝗰𝘁𝗶𝗼𝗻𝘀 𝗳𝗿𝗼𝗺 𝘁𝗵𝗲 𝗯𝘂𝘁𝘁𝗼𝗻𝘀 𝗯𝗲𝗹𝗼𝘄.\n"
-        "**AI Mᴏᴅᴇ:** Bᴏᴛ ᴋɪ ᴘᴇʀsᴏɴᴀʟɪᴛʏ ᴀᴜʀ ᴊᴀᴡᴀʙ ᴅᴇɴᴇ ᴋᴀ 𝘁𝗮𝗿𝗶𝗸𝗮 𝗶𝘀 𝘀𝗲 𝘀𝗲𝘁 𝗵𝗼𝗴𝗮. **Cᴜʀʀ𝗲𝗻𝘁: {ai_mode_text}**\n\n"
+        "**AI Mᴏᴅᴇ:** Bᴏᴛ ᴋɪ ᴘᴇʀsᴏɴᴀʟɪᴛʏ ᴀᴜʀ ᴊᴀ𝘄𝗮𝗯 ᴅᴇɴᴇ ᴋᴀ 𝘁𝗮𝗿𝗶𝗸𝗮 𝗶𝘀 𝘀𝗲 𝘀𝗲𝘁 𝗵𝗼𝗴𝗮. **Cᴜʀʀ𝗲𝗻𝘁: {ai_mode_text}**\n\n"
         "𝗨𝘀𝗲𝗿𝘀 𝘄𝗵𝗼 𝗯𝗿𝗲𝗮𝗸 𝘆𝗼𝘂𝗿 𝗳𝗶𝗹𝘁𝗲𝗿 𝘀𝗲𝘁𝘁𝗶𝗻𝗴𝘀 𝘄𝗶𝗹𝗹 𝗿𝗲𝗰𝗲𝗶𝘃𝗲 𝘁𝗵𝗲 **𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁**.\n\n"
         f"**𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁:** {punishment_text}\n"
         "__𝗖𝗵𝗼𝗼𝘀𝗲 𝘄𝗵𝗮𝘁 𝗽𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁 𝘁𝗼 𝗴𝗶𝘃𝗲 𝘁𝗼 𝗿𝘂𝗹𝗲-𝗯𝗿𝗲𝗮𝗸𝗲𝗿𝘀 𝗳𝗿𝗼𝗺 '𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁'.__"
@@ -826,7 +828,7 @@ async def open_settings_command(client: Client, message: Message):
 
     await send_and_auto_delete_reply(
         message,
-        text=settings_message,
+        text=settings_message.format(ai_mode_text=ai_mode_text), # .format() added for clean variable insertion
         reply_markup=keyboard,
         parse_mode=ParseMode.MARKDOWN
     )
