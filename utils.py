@@ -1,5 +1,3 @@
-# utils.py
-
 import re
 import asyncio
 import time
@@ -62,12 +60,11 @@ GEMINI_CLIENT = None
 
 # --- CORE UTILITY FUNCTIONS ---
 
-# Renaming the main send/delete function back to the expected name for 'events.py'
-async def delete_after_delay_for_message(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
+# Renaming the function from 'delete_after_delay_for_message' to the name expected by callbacks.py
+async def send_and_auto_delete_reply(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
     """
     Sends a reply and sets a task to auto-delete both the command and the reply after a delay.
-    This function name is kept for compatibility with events.py
-    NOTE: In events.py, the wrapper 'send_and_auto_delete_reply' is now using this utility function.
+    This function name is kept for compatibility with commands.py and callbacks.py
     """
     sent_message = None
     user_info_str = ""
@@ -100,7 +97,7 @@ async def delete_after_delay_for_message(message: Message, text: str = None, pho
             sticker=sticker
         )
     else:
-        logger.warning(f"delete_after_delay_for_message called with no content for message {message.id}.")
+        logger.warning(f"send_and_auto_delete_reply called with no content for message {message.id}.")
         return None
 
     # Do not auto-delete 'start' command reply - CRITICAL for private chat commands
@@ -121,9 +118,6 @@ async def delete_after_delay_for_message(message: Message, text: str = None, pho
 
     asyncio.create_task(delete_task())
     return sent_message
-
-# Renaming the new function for use in the rest of the code for clarity
-# Removed the duplicate function definition here to avoid issues, relying on the single definition above.
 
 
 def get_sentiment(text):
