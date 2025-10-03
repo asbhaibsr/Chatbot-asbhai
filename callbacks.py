@@ -1,3 +1,5 @@
+# callbacks.py 
+
 from pyrogram import Client, filters
 from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.enums import ParseMode, ChatType
@@ -14,6 +16,7 @@ from config import (
 )
 
 # utils.py से आवश्यक फ़ंक्शन इम्पोर्ट करें
+# यह लाइन अब काम करेगी क्योंकि utils.py में फ़ंक्शन का नाम ठीक कर दिया गया है।
 from utils import get_top_earning_users, send_and_auto_delete_reply, store_message, update_user_info, update_group_info, is_admin_or_owner
 
 
