@@ -666,3 +666,21 @@ def is_on_command_cooldown(user_id):
 
 def update_command_cooldown(user_id):
     user_cooldowns[user_id] = time.time()
+    
+# --- FIX FOR NameError: name 'can_reply_to_chat' is not defined ---
+
+def update_message_reply_cooldown(chat_id: int):
+    """Updates the last message time for a chat to enforce reply cooldown."""
+    chat_message_cooldowns[chat_id] = time.time()
+
+async def can_reply_to_chat(chat_id: int):
+    """
+    Checks if the bot can reply to a message in the given chat based on the cooldown.
+    Returns True if not on cooldown, False otherwise.
+    """
+    last_reply_time = chat_message_cooldowns.get(chat_id)
+    if last_reply_time is None:
+        return True
+    
+    # Use the MESSAGE_REPLY_COOLDOWN_TIME defined in config
+    return (time.time() - last_reply_time) >= MESSAGE_REPLY_COOLDOWN_TIME
