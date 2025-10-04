@@ -1,12 +1,14 @@
-# broadcast_handler.py (नया और सही कोड)
+#broadcast_handler.py
 
 import asyncio
 import time
 import datetime
 from pyrogram import Client, filters
+# 🌟 FIX 1: StopPropagation को pyrogram.errors से हटाकर सीधे pyrogram से इम्पोर्ट किया गया।
+from pyrogram import StopPropagation
 from pyrogram.types import Message
 from pyrogram.enums import ParseMode
-from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError, StopPropagation
+from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError 
 
 # 'config' और 'utils' से आवश्यक चीज़ें इम्पोर्ट करें
 from config import (
@@ -24,7 +26,8 @@ from utils import (
 waiting_for_reply = {}
 
 # यह लिस्नर सिर्फ ओनर के मैसेज को सुनेगा जब बॉट इंतजार कर रहा हो
-@app.on_message(filters.private & filters.user(OWNER_ID) & ~filters.command(), group=-1)
+# 🌟 FIX 2: TypeError को ठीक करने के लिए filters.command() में एक डमी आर्गुमेंट जोड़ा गया।
+@app.on_message(filters.private & filters.user(OWNER_ID) & ~filters.command("dummy_cmd_to_ignore"), group=-1)
 async def message_waiter_handler(client, message: Message):
     user_id = message.from_user.id
     # चेक करें कि क्या बॉट इस यूजर के जवाब का इंतजार कर रहा है
@@ -33,6 +36,7 @@ async def message_waiter_handler(client, message: Message):
         # अगर हाँ, तो मैसेज को ब्रॉडकास्ट फंक्शन तक पहुँचाएँ
         future.set_result(message)
         # और इस मैसेज को आगे किसी और फंक्शन (जैसे AI चैट) तक जाने से रोकें
+        # StopPropagation अब सही तरह से इम्पोर्ट हो रहा है।
         raise StopPropagation
 
 async def ask_for_message(client, chat_id, text, timeout=600):
@@ -51,9 +55,10 @@ async def ask_for_message(client, chat_id, text, timeout=600):
         waiting_for_reply.pop(chat_id, None)
         return None
 
-# --- ब्रॉडकास्ट भेजने वाला लॉजिक (इसमें कोई बदलाव नहीं) ---
+# --- ब्रॉडकास्ट भेजने वाला लॉजिक ---
 async def send_broadcast_message(client: Client, chat_id: int, message: Message):
     try:
+        # ParseMode.MARKDOWN का इस्तेमाल करके मैसेज को कॉपी करें
         await message.copy(chat_id, parse_mode=ParseMode.MARKDOWN)
         return (True, "Success")
     except UserIsBlocked: return (False, "Blocked")
@@ -72,7 +77,7 @@ async def send_broadcast_message(client: Client, chat_id: int, message: Message)
         return (False, "Error")
 
 # -----------------------------------------------------
-# 1. PRIVATE CHAT BROADCAST (/broadcast) - आपका पसंदीदा तरीका
+# 1. PRIVATE CHAT BROADCAST (/broadcast)
 # -----------------------------------------------------
 @app.on_message(filters.command("broadcast") & filters.private & filters.user(OWNER_ID))
 async def pm_broadcast(client: Client, message: Message):
@@ -132,7 +137,7 @@ async def pm_broadcast(client: Client, message: Message):
     await store_message(client, message)
 
 # -----------------------------------------------------
-# 2. GROUP BROADCAST (/grp_broadcast) - आपका पसंदीदा तरीका
+# 2. GROUP BROADCAST (/grp_broadcast)
 # -----------------------------------------------------
 @app.on_message(filters.command("grp_broadcast") & filters.private & filters.user(OWNER_ID))
 async def broadcast_group(client: Client, message: Message):
