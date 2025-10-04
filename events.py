@@ -66,12 +66,6 @@ async def handle_bot_start_notification(client: Client, message: Message):
         except Exception as e:
             logger.error(f"Failed to send new user notification: {e}")
 
-# IMPORTANT: We need a generic handler to just update user info for all PM messages, 
-# but it won't send a notification unless it's /start. We can use the main handler 
-# for this (see below), or a simple dummy handler. For simplicity, let's rely on the 
-# main handler for general PM user tracking, and this one for the specific /start notification.
-
-
 # -----------------
 # Callback Handlers (No change here)
 # -----------------
@@ -266,8 +260,9 @@ async def left_member_handler(client: Client, message: Message):
 
 @app.on_raw_update()
 async def raw_update_handler(client: Client, update, users, chats):
-    # This handler is used to detect user blocking the bot (which generates a specific update)
-    if hasattr(update, 'message') and update.message and update.message.chat:
+    # **यह वह जगह है जहाँ मुख्य फिक्स लागू किया गया है।**
+    # 'Message' object has no attribute 'chat' एरर को रोकने के लिए सुरक्षित चेक जोड़ा गया है।
+    if hasattr(update, 'message') and update.message and hasattr(update.message, 'chat') and update.message.chat:
         user_id = update.message.chat.id
         
         # Check if the user ID is in the user tracking collection
@@ -394,6 +389,12 @@ async def handle_message_and_reply(client: Client, message: Message):
 
         if reply_doc and reply_doc.get("type"):
             try:
+                # Typing action
+                if is_group_chat and (message.text or message.caption):
+                    # अगर ग्रुप में है और मैसेज टेक्स्ट या कैप्शन है, तो typing action दिखाएं।
+                    await client.send_chat_action(chat_id, "typing")
+                    await asyncio.sleep(1) # थोड़ा इंतज़ार (Wait)
+
                 if reply_doc.get("type") == "text":
                     await message.reply_text(reply_doc["content"], parse_mode=ParseMode.MARKDOWN)
                 elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
