@@ -17,7 +17,7 @@ from config import (
 from utils import (
     update_group_info, update_user_info, store_message, generate_reply,
     is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message,
-    update_message_reply_cooldown # Added this import to ensure cooldown logic works with utils.py
+    update_message_reply_cooldown 
 )
 
 # -----------------
@@ -121,7 +121,7 @@ async def chat_member_updated_handler(client: Client, update: ChatMemberUpdated)
                 logger.error(f"Could not notify owner about new group {group_title}: {e}.")
 
         # Bot was removed from a group (The requested fix + Data Cleanup)
-        # FIX: Added a check for update.old_chat_member to make it more reliable for 'left' event.
+        # FIX: Added update.old_chat_member check for reliability
         elif update.new_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED] and \
              update.old_chat_member and update.old_chat_member.status not in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
             
@@ -186,19 +186,21 @@ async def chat_member_updated_handler(client: Client, update: ChatMemberUpdated)
             except Exception as e:
                 logger.error(f"Could not notify owner about user blocking bot: {e}.")
     
-    # 2. --- Handle Regular Member Left/Kick Updates (Existing Logic) ---
+    # 2. --- Handle Regular Member Left/Kick Updates (Existing Logic - Now with better check) ---
     if update.new_chat_member and update.old_chat_member:
         user_id = update.new_chat_member.user.id
         
         # We only care about regular members leaving/being kicked, not the bot itself
         if user_id != me.id:
             
-            # Check if the member's status changed TO LEFT or BANNED (meaning they left or were kicked/banned)
+            # Check if the member's status changed TO LEFT or BANNED 
+            # AND the previous status was NOT LEFT/BANNED. This is the robust way.
             if update.new_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED] and \
                update.old_chat_member.status not in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
                 
                 # Check if the action was performed by an admin/owner (meaning a kick/ban)
                 action_by_user_id = update.from_user.id if update.from_user else None
+                # If the user leaving is NOT the same as the user taking the action, it's an admin action (kick/ban)
                 is_admin_action = (action_by_user_id is not None) and (action_by_user_id != user_id)
                 
                 member_name = update.new_chat_member.user.first_name or f"User ID: {user_id}"
