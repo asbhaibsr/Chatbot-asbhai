@@ -128,9 +128,6 @@ async def delete_after_delay_for_message(message: Message, text: str = None, pho
     asyncio.create_task(delete_task())
     return sent_message
 
-# Renaming the new function for use in the rest of the code for clarity
-# Removed the duplicate function definition here to avoid issues, relying on the single definition above.
-
 
 def get_sentiment(text):
     if not text:
@@ -334,7 +331,7 @@ async def store_message(client: Client, message: Message):
 
 # --- NEW: AI Personality Prompt Generator ---
 def get_ai_role_prompt(ai_mode: str):
-    base_prompt = "Tum ek friendly, casual, young female bot ho. Hinglish (Hindi + English) me chote aur natural sentences me reply karo. Real logo ki tarah hi likhna, zaroori nahi ki har jagah sahi commas ya punctuation ho. Jaise log aam taur par chat karte hain, waise hi karo. Sirf chat ke liye reply karna."
+    base_prompt = "Tum ek friendly, casual, young female bot ho. Hinglish (Hindi + English) me chote aur natural sentences me reply karo. Real logo ki tarah hi likhna, zaroori nahi ki har jagah sahi commas ya punctuation ho. Jaise log aam taur par chat karte hain, waise ही karo. Sirf chat ke liye reply karna."
     
     if ai_mode == "realgirl":
         return f"{base_prompt} Tum hamesha bohot chill, easy-going aur thodi natkhat (mischievous) ho. Reply me emoji zaroor use karna. Boht zyada formal ya lamba reply mat dena."
@@ -473,6 +470,27 @@ async def generate_reply(message: Message):
     if not message.text or message.from_user.is_self or message.text.startswith('/'):
         return {"type": None}
     
+    # --- START OF NEW CRITICAL CHECK (Tier 0.5 - Bot Reply Rule) ---
+    me = await app.get_me()
+    bot_username = me.username.lower() if me and me.username else BOT_NAME.lower() 
+
+    # 1. Ignore if message is a reply to another user (User-to-User conversation)
+    if message.reply_to_message:
+        replied_to_bot = (message.reply_to_message.from_user and message.reply_to_message.from_user.is_self)
+        
+        # Check if bot is mentioned in text
+        # Check for both username and BOT_NAME mention
+        bot_mentioned = (contains_mention(message.text) and 
+                         (f"@{bot_username}" in message.text.lower() or f"@{BOT_NAME.lower()}" in message.text.lower()))
+        
+        # If it's a reply to *anyone* and it's *not* a reply to the bot and the bot is *not* mentioned
+        if not replied_to_bot and not bot_mentioned:
+            logger.info("Reply suppressed: User-to-User conversation ignored (Tier 0.5 feature).")
+            return {"type": None}
+            
+    # If the message passes the reply check (direct msg, reply to bot, or bot is mentioned), proceed.
+    # --- END OF NEW CRITICAL CHECK (Tier 0.5 - Bot Reply Rule) ---
+    
     await app.invoke(SetTyping(peer=await app.resolve_peer(message.chat.id), action=SendMessageTypingAction()))
     await asyncio.sleep(0.5)
 
@@ -489,7 +507,7 @@ async def generate_reply(message: Message):
     if not bot_enabled:
         return {"type": None}
     
-    # Check if a reply is on cooldown
+    # Check if a reply is on cooldown (This is redundant now, as the main handler handles it, but keeping for safety)
     if not await can_reply_to_chat(chat_id):
         logger.info(f"Reply suppressed for chat {chat_id} due to cooldown.")
         return {"type": None}
