@@ -7,7 +7,7 @@ from pyrogram.enums import ParseMode
 import nltk
 import os
 import sys
-import asyncio # New import for running async code
+import asyncio # Although we remove asyncio.run(), we keep it just in case.
 from datetime import datetime
 
 # NLTK data download check and setup
@@ -34,29 +34,24 @@ except Exception as e:
     sys.exit(1)
 
 # Import necessary components from other files
-# OWNER_ID ko configuration se import karna zaruri hai.
 from config import app, logger, flask_app, OWNER_ID
 from web import run_flask_app
 
 # It's important to import commands and events so Pyrogram can register the handlers
 import commands
 import events
-import broadcast_handler # 🌟 नई ब्रॉडकास्ट फ़ाइल इम्पोर्ट की गई 🌟
+import broadcast_handler 
 
 # ----------------------------------------------------
-# ✨ NEW: Bot Startup Notification Function (Replaced @app.on_ready) ✨
+# ✨ NEW: Bot Startup Notification Function (Integrated with Startup Cycle) ✨
 # ----------------------------------------------------
 
 async def send_startup_notification(client: Client):
     """
-    Sends a startup notification to the OWNER_ID after the client starts.
-    This function will be run manually after app.start().
+    Sends a startup notification to the OWNER_ID.
+    This function is designed to be run right after the client connects.
     """
     try:
-        # Start the client manually to perform the action
-        await client.start() 
-        logger.info("Pyrogram client manually started for startup action.")
-
         # Get bot's own information
         me = await client.get_me()
         
@@ -77,15 +72,28 @@ async def send_startup_notification(client: Client):
 
     except Exception as e:
         logger.error(f"Failed to send startup notification to owner: {e}")
-    finally:
-        # Stop the client manually if we started it manually.
-        # However, since app.run() will manage the lifecycle,
-        # we let app.run() handle the continuous running part. 
-        # The main app.run() call handles the continuous event loop.
-        pass # We rely on app.run() below to keep it running.
 
 # ----------------------------------------------------
+# ✨ NEW: Main Execution Function to Handle Async Startup ✨
 # ----------------------------------------------------
+
+async def main_bot_runner():
+    """
+    Handles the entire asynchronous lifecycle: startup, notification, and idling.
+    """
+    logger.info("Starting Pyrogram bot...")
+    
+    # 1. Start the client and connect to Telegram
+    await app.start()
+    
+    # 2. Run the startup notification logic immediately after connection
+    await send_startup_notification(app)
+    
+    # 3. Keep the bot running indefinitely
+    await idle()
+    
+    # 4. Stop the client gracefully when idle() is interrupted
+    await app.stop()
 
 
 if __name__ == "__main__":
@@ -93,26 +101,16 @@ if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.start()
 
-    logger.info("Starting Pyrogram bot...")
-    
-    # Run the startup notification function *before* app.run()
-    # We use a separate event loop run_until_complete to execute the async function
-    # inside the synchronous __main__ block, then app.run() takes over.
+    # The main logic is now encapsulated in the async main_bot_runner()
+    # We use asyncio.run() to launch the single main coroutine, 
+    # which manages the Pyrogram client's entire lifecycle.
     try:
-        # Using a quick manual start/stop cycle inside the main loop to send the message
-        # app.run() is the Pyrogram v2 way to start the bot and its handlers.
-        # We will use asyncio.run to execute the async notification logic.
-        asyncio.run(send_startup_notification(app))
-        
+        asyncio.run(main_bot_runner())
+    except KeyboardInterrupt:
+        logger.info("Bot manually stopped via KeyboardInterrupt.")
     except Exception as e:
-        # Ignore error if the bot is already running or start/stop fails, and proceed with app.run()
-        logger.warning(f"Startup notification setup failed (expected if bot runs immediately): {e}. Proceeding with app.run().")
+        logger.error(f"An unhandled error occurred in the main execution: {e}")
 
-
-    # This is the main blocking call that keeps the bot running
-    app.run() 
+    logger.info("Bot execution finished. Thank you for using! Made with ❤️ by @asbhaibsr")
     
-    # Keep the bot running indefinitely
-    idle()
-
-    # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
+    # Since app.stop() is called inside main_bot_runner, we just let the process exit.
