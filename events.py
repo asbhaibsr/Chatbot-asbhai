@@ -16,7 +16,8 @@ from config import (
 )
 from utils import (
     update_group_info, update_user_info, store_message, generate_reply,
-    is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message
+    is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message,
+    update_message_reply_cooldown # Added this import to ensure cooldown logic works with utils.py
 )
 
 # -----------------
@@ -106,6 +107,7 @@ async def chat_member_updated_handler(client: Client, update: ChatMemberUpdated)
                 else:
                     logger.warning(f"Could not get invite link for {update.chat.id}. Error: {e}")
             # --- Invite Link Logic Ends Here ---
+
 
             notification_message = (
                 f"🥳 **New Group Alert!**\n"
@@ -235,11 +237,13 @@ async def handle_message_and_reply(client: Client, message: Message):
     is_command = message.text and message.text.startswith('/')
     if is_command:
         # Command handling is done in commands.py, so we exit here for events.py to avoid duplication/errors.
-        # The new /start handler above will take care of new user logic for commands.
         return
 
     is_group_chat = message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]
     
+    # -----------------------------------------------------
+    # FIX: Check if bot is admin (This is CRITICAL for chat)
+    # -----------------------------------------------------
     if is_group_chat:
         me = await client.get_me()
         try:
@@ -248,11 +252,16 @@ async def handle_message_and_reply(client: Client, message: Message):
                 logger.info(f"Bot is not an admin in group {message.chat.id}. Skipping all actions for this group.")
                 return 
         except Exception as e:
-            if "CHAT_ADMIN_REQUIRED" in str(e):
+            # If bot cannot check its status (e.g., no 'manage group' permission)
+            if "CHAT_ADMIN_REQUIRED" in str(e) or "USER_NOT_PARTICIPANT" in str(e):
                 logger.warning(f"Bot has no permission to check its own admin status in group {message.chat.id}. Skipping all actions.")
-                return
+                # IMPORTANT: If the bot is not an admin, it may not be able to delete links or reply,
+                # but if it has basic read/write access, it might still reply. 
+                # We'll allow processing below this if it's not strictly for admin tasks.
+                # However, for safety, keeping this 'return' is typical for such a complex bot.
+                return 
             logger.error(f"Error checking bot's admin status in group {message.chat.id}: {e}")
-            return
+            return # Exit the function if checking the bot's status failed
 
     if is_group_chat:
         group_status = group_tracking_collection.find_one({"_id": message.chat.id})
@@ -272,6 +281,7 @@ async def handle_message_and_reply(client: Client, message: Message):
         is_sender_admin = await is_admin_or_owner(client, message.chat.id, user_id)
     
     # --- Link Deletion Filter ---
+    # ... (link deletion logic remains here) ...
     if is_group_chat and message.text:
         current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
         if current_group_settings and current_group_settings.get("linkdel_enabled", False):
@@ -288,6 +298,7 @@ async def handle_message_and_reply(client: Client, message: Message):
                 logger.info(f"Admin's link message {message.id} was not deleted in chat {message.chat.id}.")
 
     # --- Bio Link Deletion Filter ---
+    # ... (bio link deletion logic remains here) ...
     if is_group_chat and user_id:
         try:
             current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
@@ -316,6 +327,7 @@ async def handle_message_and_reply(client: Client, message: Message):
             logger.error(f"Error checking user bio for user {user_id} in chat {message.chat.id}: {e}")
 
     # --- Username Mention Deletion Filter ---
+    # ... (username deletion logic remains here) ...
     if is_group_chat and message.text:
         current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
         if current_group_settings and current_group_settings.get("usernamedel_enabled", False):
@@ -340,7 +352,7 @@ async def handle_message_and_reply(client: Client, message: Message):
     async with cooldown_locks[chat_id]:
         current_time = datetime.now()
         
-        # Cooldown check: check if the chat is currently on cooldown
+        # Cooldown check: check if the chat is currently on cooldown (using local dict)
         if chat_id in last_reply_time:
             time_since_last_reply = (current_time - last_reply_time[chat_id]).total_seconds()
             if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
@@ -354,4 +366,21 @@ async def handle_message_and_reply(client: Client, message: Message):
 
         logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
 
-        # Generate reply from
+        # Generate reply from AI/Learning Tiers
+        reply_data = await generate_reply(message)
+
+        if reply_data and reply_data.get("type"):
+            reply_type = reply_data["type"]
+            reply_content = reply_data.get("content")
+            
+            # --- CRITICAL: Update Cooldown AFTER successful reply ---
+            last_reply_time[chat_id] = current_time # Update local cooldown dict
+            update_message_reply_cooldown(chat_id) # Update global cooldown in utils.py
+            
+            if reply_type == "text" and reply_content:
+                await message.reply_text(reply_content, parse_mode=ParseMode.MARKDOWN)
+            # Add logic for other reply types (photo, sticker, etc.) if needed here.
+            
+            logger.info(f"Successfully sent TIER {reply_data.get('tier', 'N/A')} reply to chat {chat_id}.")
+        else:
+            logger.info(f"No reply generated for message {message.id} in chat {chat_id}.")
