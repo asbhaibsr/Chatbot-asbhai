@@ -2,7 +2,7 @@
 
 # Import necessary libraries
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import Message, ChatMemberUpdated
 from pyrogram.enums import ChatType, ParseMode, ChatMemberStatus
 import asyncio
 from datetime import datetime, timedelta
@@ -16,7 +16,7 @@ from config import (
 )
 from utils import (
     update_group_info, update_user_info, store_message, generate_reply,
-    is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message # <--- Corrected import
+    is_admin_or_owner, contains_link, contains_mention, delete_after_delay_for_message
 )
 
 # -----------------
@@ -29,25 +29,31 @@ REPLY_COOLDOWN_SECONDS = 8
 cooldown_locks = {}
 
 # -----------------
-# New User Notification Handler
+# New User, Group Join/Left Handlers (FIXED SECTION)
 # -----------------
 
-@app.on_message(filters.private & filters.incoming & ~filters.me)
-async def handle_new_user_message(client: Client, message: Message):
-    user_exists = user_tracking_collection.find_one({"_id": message.from_user.id})
-    
+@app.on_message(filters.private & filters.command("start"))
+async def start_command_handler(client: Client, message: Message):
+    """
+    Handles the /start command and also checks if it's a new user.
+    This ensures that the new user notification is always sent on the first start.
+    """
+    user_id = message.from_user.id
+    user_exists = user_tracking_collection.find_one({"_id": user_id})
+
+    # If the user is new, send a notification to the owner
     if not user_exists:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        logger.info(f"New user detected with /start command: {user_id}")
+        await update_user_info(user_id, message.from_user.username, message.from_user.first_name)
         
         notification_text = (
-            f"🆕 𝗡𝗲𝘄 𝗨𝘀𝗲𝗿 𝗔𝗹𝗲𝗿𝘁!\n"
-            f"𝗔 𝗻𝗲𝘄 𝘂𝘀𝗲𝗿 𝗵𝗮𝘀 𝗷𝗼𝗶𝗻𝗲𝗱 𝘁𝗵𝗲 𝗯𝗼𝘁!\n\n"
-            f"• 𝗨𝘀𝗲𝗿 𝗜𝗗: `{message.from_user.id}`\n"
-            f"• 𝗨𝘀𝗲𝗿𝗻𝗮𝗺𝗲: @{message.from_user.username if message.from_user.username else 'N/A'}\n"
-            f"• 𝗡𝗮𝗺𝗲: {message.from_user.first_name or ''} {message.from_user.last_name or ''}\n"
-            f"• 𝗙𝗶𝗿𝘀𝘁 𝗠𝗲𝘀𝘀𝗮𝗴𝗲: {message.text or 'N/A (media message)'}\n"
-            f"• 𝗧𝗶𝗺𝗲: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            f"Code By: @asbhaibsr\nUpdates: @asbhai_bsr"
+            f"🆕 **New User Alert!**\n"
+            f"A new user has started the bot!\n\n"
+            f"• **User ID:** `{user_id}`\n"
+            f"• **Username:** @{message.from_user.username or 'N/A'}\n"
+            f"• **Name:** {message.from_user.first_name or ''} {message.from_user.last_name or ''}\n"
+            f"• **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"Powered by @asbhaibsr"
         )
         
         try:
@@ -56,9 +62,95 @@ async def handle_new_user_message(client: Client, message: Message):
                 text=notification_text,
                 parse_mode=ParseMode.MARKDOWN
             )
-            logger.info(f"Sent new user notification to owner for user {message.from_user.id}")
+            logger.info(f"Sent new user notification to owner for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to send new user notification: {e}")
+    
+    # You can add your original /start message logic here if you have one.
+    # For example:
+    # await message.reply("Welcome to the bot!")
+
+
+@app.on_chat_member_updated()
+async def chat_member_updated_handler(client: Client, update: ChatMemberUpdated):
+    """
+    A more reliable handler for detecting when the bot is added to or removed from a group.
+    Added logic to fetch and include the group invite link in the notification.
+    """
+    me = await client.get_me()
+
+    # Check if the update is about the bot itself
+    if update.new_chat_member and update.new_chat_member.user.id == me.id:
+        
+        # Bot was added to a new group
+        if update.new_chat_member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR]:
+            logger.info(f"Bot was added to chat {update.chat.id}. Updating info and notifying owner.")
+            await update_group_info(update.chat.id, update.chat.title, update.chat.username)
+
+            group_title = update.chat.title or f"Unknown Group (ID: {update.chat.id})"
+            added_by_user = update.from_user.first_name if update.from_user else "Unknown User"
+            added_by_user_id = update.from_user.id if update.from_user else "N/A"
+
+            # --- Invite Link Logic Starts Here ---
+            invite_link = "N/A (Bot may not have admin rights or chat is too restricted)"
+            try:
+                # Try to export a new invite link
+                # This works if the bot is an admin with 'invite users' permission
+                link = await client.export_chat_invite_link(chat_id=update.chat.id)
+                invite_link = f"**[Join Group]({link})**"
+            except Exception as e:
+                # If bot is not admin or the chat is private/restricted, an error occurs.
+                # In this case, we'll try to get the public link if available.
+                if update.chat.username:
+                    invite_link = f"**[Group Link](https://t.me/{update.chat.username})**"
+                else:
+                    logger.warning(f"Could not get invite link for {update.chat.id}. Error: {e}")
+            # --- Invite Link Logic Ends Here ---
+
+            notification_message = (
+                f"🥳 **New Group Alert!**\n"
+                f"The bot has been added to a new group!\n\n"
+                f"• **Group Name:** {group_title}\n"
+                f"• **Group Link:** {invite_link}\n" # Added link here
+                f"• **Group ID:** `{update.chat.id}`\n"
+                f"• **Added By:** {added_by_user} (`{added_by_user_id}`)\n"
+                f"• **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                f"Powered by @asbhaibsr"
+            )
+            try:
+                await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
+                logger.info(f"Owner notified about new group: {group_title} with invite link.")
+            except Exception as e:
+                logger.error(f"Could not notify owner about new group {group_title}: {e}.")
+
+        # Bot was removed from a group
+        elif update.new_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
+            logger.info(f"Bot was removed from chat {update.chat.id}. Cleaning data and notifying owner.")
+            
+            # Clean up database entries for this group
+            group_tracking_collection.delete_one({"_id": update.chat.id})
+            messages_collection.delete_many({"chat_id": update.chat.id})
+            # Add other cleanup logic if needed...
+
+            group_title = update.chat.title or f"Unknown Group (ID: {update.chat.id})"
+            removed_by_user = update.from_user.first_name if update.from_user else "Unknown User"
+            removed_by_user_id = update.from_user.id if update.from_user else "N/A"
+
+            notification_message = (
+                f"💔 **Group Left Alert!**\n"
+                f"The bot was removed from a group!\n\n"
+                f"• **Group Name:** {group_title}\n"
+                f"• **Group ID:** `{update.chat.id}`\n"
+                f"• **Action By:** {removed_by_user} (`{removed_by_user_id}`)\n"
+                f"• **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                f"Powered by @asbhaibsr"
+            )
+            try:
+                await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
+                logger.info(f"Owner notified about bot leaving group: {group_title}.")
+            except Exception as e:
+                logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}.")
+
 
 # -----------------
 # Callback Handlers
@@ -129,88 +221,6 @@ async def handle_clearall_dbs_callback(client: Client, callback_query):
         await query.edit_message_text("𝗔𝗰𝘁𝗶𝗼𝗻 𝗰𝗮𝗻𝗰𝗲𝗹𝗹𝗲𝗱. 𝗬𝗼𝘂𝗿 𝗱𝗮𝘁𝗮 𝗶𝘀 𝘀𝗮𝗳𝗲. ✅", parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Owner {query.from_user.id} cancelled /clearall operation.")
 
-# -----------------
-# Member Handlers
-# -----------------
-
-@app.on_message(filters.new_chat_members)
-async def new_member_handler(client: Client, message: Message):
-    logger.info(f"New chat members detected in chat {message.chat.id}. Bot ID: {client.me.id}.")
-
-    me = await client.get_me()
-
-    for member in message.new_chat_members:
-        logger.info(f"Processing new member: {member.id} ({member.first_name}) in chat {message.chat.id}. Is bot: {member.is_bot}.")
-        
-        if member.id == me.id:
-            if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-                logger.info(f"DEBUG: Bot {me.id} detected as new member in group {message.chat.id}. Calling update_group_info.")
-                await update_group_info(message.chat.id, message.chat.title, message.chat.username)
-                logger.info(f"Bot joined new group: {message.chat.title} ({message.chat.id}).")
-
-                group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
-                added_by_user = message.from_user.first_name if message.from_user else "Unknown User"
-                notification_message = (
-                    f"🥳 **𝗡𝗲𝘄 𝗚𝗿𝗼𝘂𝗽 𝗔𝗹𝗲𝗿𝘁!**\n"
-                    f"𝗧𝗵𝗲 𝗯𝗼𝘁 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝗮𝗱𝗱𝗲𝗱 𝘁𝗼 𝗮 𝗻𝗲𝘄 𝗴𝗿𝗼𝘂𝗽!\n\n"
-                    f"**𝗚𝗿𝗼𝘂𝗽 𝗡𝗮𝗺𝗲:** {group_title}\n"
-                    f"**𝗚𝗿𝗼𝘂𝗽 𝗜𝗗:** `{message.chat.id}`\n"
-                    f"**𝗔𝗱𝗱𝗲𝗱 𝗕𝘆:** {added_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
-                    f"**𝗔𝗱𝗱𝗲𝗱 𝗢𝗻:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                    f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
-                )
-                try:
-                    await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
-                    logger.info(f"Owner notified about new group: {group_title}.")
-                except Exception as e:
-                    logger.error(f"Could not notify owner about new group {group_title}: {e}.")
-        else: # Handle any other new user
-            return
-
-    if message.from_user and not message.from_user.is_bot:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-
-
-@app.on_message(filters.left_chat_member)
-async def left_member_handler(client: Client, message: Message):
-    logger.info(f"Left chat member detected in chat {message.chat.id}. Left member ID: {message.left_chat_member.id}. Bot ID: {client.me.id}.")
-
-    me = await client.get_me()
-
-    if message.left_chat_member and message.left_chat_member.id == me.id:
-        if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-            group_tracking_collection.delete_one({"_id": message.chat.id})
-            messages_collection.delete_many({"chat_id": message.chat.id})
-            owner_taught_responses_collection.delete_many({"responses.chat_id": message.chat.id})
-            conversational_learning_collection.delete_many({"responses.chat_id": message.chat.id})
-
-            earning_tracking_collection.update_many(
-                {},
-                {"$pull": {"last_active_group_id": message.chat.id}}
-            )
-
-            logger.info(f"Bot left group: {message.chat.title} ({message.chat.id}). Data cleared.")
-            group_title = message.chat.title if message.chat.title else f"Unknown Group (ID: {message.chat.id})"
-            left_by_user = message.from_user.first_name if message.from_user else "Unknown User"
-            notification_message = (
-                f"💔 𝗚𝗿𝗼𝘂𝗽 𝗟𝗲𝗳𝘁 𝗔𝗹𝗲𝗿𝘁!\n"
-                f"𝗧𝗵𝗲 𝗯𝗼𝘁 𝘄𝗮𝘀 𝗿𝗲𝗺𝗼𝘃𝗲𝗱 𝗳𝗿𝗼𝗺 𝗮 𝗴𝗿𝗼𝘂𝗽!\n\n"
-                f"**𝗚𝗿𝗼𝘂𝗽 𝗡𝗮𝗺𝗲:** {group_title}\n"
-                f"**𝗚𝗿𝗼𝘂𝗽 𝗜𝗗:** `{message.chat.id}`\n"
-                f"**𝗔𝗰𝘁𝗶𝗼𝗻 𝗕𝘆:** {left_by_user} ({message.from_user.id if message.from_user else 'N/A'})\n"
-                f"**𝗟𝗲𝗳𝘁 𝗢𝗻:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                f"**Code By:** @asbhaibsr\n**Updates:** @asbhai_bsr\n**Support:** @aschat_group"
-            )
-            try:
-                await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
-                logger.info(f"Owner notified about bot leaving group: {group_title}.")
-            except Exception as e:
-                logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}.")
-            return
-
-    if message.from_user and not message.from_user.is_bot:
-        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
-
 
 # -----------------
 # Main Message Handler
@@ -225,6 +235,7 @@ async def handle_message_and_reply(client: Client, message: Message):
     is_command = message.text and message.text.startswith('/')
     if is_command:
         # Command handling is done in commands.py, so we exit here for events.py to avoid duplication/errors.
+        # The new /start handler above will take care of new user logic for commands.
         return
 
     is_group_chat = message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]
@@ -268,7 +279,7 @@ async def handle_message_and_reply(client: Client, message: Message):
                 try:
                     # Using the utility function directly
                     await message.delete()
-                    sent_delete_alert = await delete_after_delay_for_message(message, text=f"𝗳𝗢𝗵 𝗱𝗲𝗮𝗿! 🧐 𝗦𝗼𝗿𝗿𝘆-𝘀𝗼𝗿𝗿𝘆, **𝗹𝗶𝗻𝗸𝘀 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗹𝗹𝗼𝘄𝗲𝗱 𝗵𝗲𝗿𝗲!** 🚫 𝗬𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗶𝘀 𝗴𝗼𝗻𝗲!💨 𝗣𝗹𝗲𝗮𝘀𝗲 𝗯𝗲 𝗰𝗮𝗿𝗲𝗳𝘂𝗹 𝗻𝗲𝘅𝘁 𝘁𝗶𝗺𝗲.", parse_mode=ParseMode.MARKDOWN)
+                    sent_delete_alert = await delete_after_delay_for_message(message, text=f"𝗳𝗢𝗵 𝗱𝗲𝗮𝗿! 🧐 𝗦𝗼𝗿𝗿𝘆-𝘀𝗼𝗿𝗿𝘆, **𝗹𝗶𝗻𝗸𝘀 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗹𝗹𝗼𝘄𝗲𝗱 𝗵𝗲𝗿𝗲!** 🚫 𝗬𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮ge 𝗶𝘀 𝗴𝗼𝗻𝗲!💨 𝗣𝗹𝗲𝗮𝘀𝗲 𝗯𝗲 𝗰𝗮𝗿𝗲𝗳𝘂𝗹 𝗻𝗲𝘅𝘁 𝘁𝗶𝗺𝗲.", parse_mode=ParseMode.MARKDOWN)
                     logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
                     return
                 except Exception as e:
@@ -343,34 +354,4 @@ async def handle_message_and_reply(client: Client, message: Message):
 
         logger.info(f"Message {message.id} from user {message.from_user.id if message.from_user else 'N/A'} in chat {message.chat.id} (type: {message.chat.type.name}) has been sent to store_message for general storage and earning tracking.")
 
-        # Generate reply from the centralized learning system in util.py
-        logger.info(f"Attempting to generate reply for chat {message.chat.id}.")
-        
-        reply_doc = await generate_reply(message)
-
-        # Update cooldown time, regardless of whether a reply was generated
-        last_reply_time[chat_id] = datetime.now()
-        logger.info(f"Cooldown updated for chat {chat_id}. Next reply possible after {REPLY_COOLDOWN_SECONDS} seconds.")
-
-        if reply_doc and reply_doc.get("type"):
-            try:
-                if reply_doc.get("type") == "text":
-                    await message.reply_text(reply_doc["content"], parse_mode=ParseMode.MARKDOWN)
-                    logger.info(f"Replied with text: {reply_doc['content']}.")
-                elif reply_doc.get("type") == "sticker" and reply_doc.get("sticker_id"):
-                    await message.reply_sticker(reply_doc["sticker_id"])
-                    logger.info(f"Replied with sticker: {reply_doc['sticker_id']}.")
-                else:
-                    logger.warning(f"Reply document found but no content/sticker_id: {reply_doc}.")
-            except Exception as e:
-                if "CHAT_WRITE_FORBIDDEN" in str(e):
-                    logger.error(f"Permission error: Bot cannot send messages in chat {message.chat.id}. Leaving group.")
-                    try:
-                        await client.leave_chat(message.chat.id)
-                        await client.send_message(OWNER_ID, f"𝗔𝗟𝗘𝗥𝗧: 𝗕𝗼𝘁 𝘄𝗮𝘀 𝗿𝗲𝗺𝗼𝘃𝗲𝗱 𝗳𝗿𝗼𝗺 𝗴𝗿𝗼𝘂𝗽 `{message.chat.id}` 𝗯𝗲𝗰𝗮𝘂𝘀𝗲 𝗶𝘁 𝗹𝗼𝘀𝘁 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻 𝘁𝗼 𝘀𝗲𝗻𝗱 𝗺𝗲𝘀𝘀𝗮𝗴𝗲𝘀.")
-                    except Exception as leave_e:
-                        logger.error(f"Failed to leave chat {message.chat.id} after permission error: {leave_e}")
-                else:
-                    logger.error(f"Error sending reply for message {message.id}: {e}.")
-        else:
-            logger.info("No suitable reply found.")
+        # Generate reply from
