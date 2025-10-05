@@ -121,7 +121,10 @@ async def chat_member_updated_handler(client: Client, update: ChatMemberUpdated)
                 logger.error(f"Could not notify owner about new group {group_title}: {e}.")
 
         # Bot was removed from a group (The requested fix + Data Cleanup)
-        elif update.new_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
+        # FIX: Added a check for update.old_chat_member to make it more reliable for 'left' event.
+        elif update.new_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED] and \
+             update.old_chat_member and update.old_chat_member.status not in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
+            
             logger.info(f"Bot was removed from chat {update.chat.id}. Cleaning data and notifying owner.")
             
             # --- Data Cleanup for Group Left (Delete group data, keep user messages) ---
@@ -131,7 +134,7 @@ async def chat_member_updated_handler(client: Client, update: ChatMemberUpdated)
 
             # FIX: Ensure we have a valid group title and action-by user
             group_title = update.chat.title or f"Unknown Group (ID: {update.chat.id})"
-            if update.from_user:
+            if update.from_user and update.from_user.id != me.id:
                 removed_by_user = update.from_user.first_name
                 removed_by_user_id = update.from_user.id
             else:
@@ -183,9 +186,7 @@ async def chat_member_updated_handler(client: Client, update: ChatMemberUpdated)
             except Exception as e:
                 logger.error(f"Could not notify owner about user blocking bot: {e}.")
     
-    # 2. --- Handle Regular Member Left/Kick Updates (Existing Logic - Can be ignored if not needed) ---
-    # This block is for regular members leaving, not the bot. We keep it as it was in the original code structure.
-    # Note: If you want to disable regular member left notifications, you can remove this entire 'else' block.
+    # 2. --- Handle Regular Member Left/Kick Updates (Existing Logic) ---
     if update.new_chat_member and update.old_chat_member:
         user_id = update.new_chat_member.user.id
         
