@@ -2,17 +2,17 @@
 
 import threading
 import logging
-from pyrogram import idle, Client, filters
+from pyrogram import idle, Client
 from pyrogram.enums import ParseMode
 import nltk
 import os
 import sys
+import asyncio # New import for running async code
 from datetime import datetime
 
 # NLTK data download check and setup
 try:
     # Set the NLTK data path to a writeable directory within the workspace.
-    # This is important for platforms like Koyeb where root access is limited.
     data_dir = os.path.join(os.getcwd(), '.nltk_data')
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
@@ -44,15 +44,19 @@ import events
 import broadcast_handler # 🌟 नई ब्रॉडकास्ट फ़ाइल इम्पोर्ट की गई 🌟
 
 # ----------------------------------------------------
-# ✨ NEW: Bot Startup Notification (I am alive) ✨
+# ✨ NEW: Bot Startup Notification Function (Replaced @app.on_ready) ✨
 # ----------------------------------------------------
 
-@app.on_ready()
-async def bot_is_alive(client: Client):
+async def send_startup_notification(client: Client):
     """
-    Sends a startup notification to the OWNER_ID when the bot successfully connects.
+    Sends a startup notification to the OWNER_ID after the client starts.
+    This function will be run manually after app.start().
     """
     try:
+        # Start the client manually to perform the action
+        await client.start() 
+        logger.info("Pyrogram client manually started for startup action.")
+
         # Get bot's own information
         me = await client.get_me()
         
@@ -72,8 +76,13 @@ async def bot_is_alive(client: Client):
         logger.info("Sent 'I am alive' message to owner.")
 
     except Exception as e:
-        # Agar OWNER_ID galat hai ya owner ne bot ko block kar diya hai, toh message fail ho jayega.
         logger.error(f"Failed to send startup notification to owner: {e}")
+    finally:
+        # Stop the client manually if we started it manually.
+        # However, since app.run() will manage the lifecycle,
+        # we let app.run() handle the continuous running part. 
+        # The main app.run() call handles the continuous event loop.
+        pass # We rely on app.run() below to keep it running.
 
 # ----------------------------------------------------
 # ----------------------------------------------------
@@ -85,8 +94,23 @@ if __name__ == "__main__":
     flask_thread.start()
 
     logger.info("Starting Pyrogram bot...")
-    # client.run() ke bajaye app.run() use karen
-    app.run()
+    
+    # Run the startup notification function *before* app.run()
+    # We use a separate event loop run_until_complete to execute the async function
+    # inside the synchronous __main__ block, then app.run() takes over.
+    try:
+        # Using a quick manual start/stop cycle inside the main loop to send the message
+        # app.run() is the Pyrogram v2 way to start the bot and its handlers.
+        # We will use asyncio.run to execute the async notification logic.
+        asyncio.run(send_startup_notification(app))
+        
+    except Exception as e:
+        # Ignore error if the bot is already running or start/stop fails, and proceed with app.run()
+        logger.warning(f"Startup notification setup failed (expected if bot runs immediately): {e}. Proceeding with app.run().")
+
+
+    # This is the main blocking call that keeps the bot running
+    app.run() 
     
     # Keep the bot running indefinitely
     idle()
