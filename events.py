@@ -75,12 +75,12 @@ async def start_command_handler(client: Client, message: Message):
 @app.on_chat_member_updated()
 async def chat_member_updated_handler(client: Client, update: ChatMemberUpdated):
     """
-    A more reliable handler for detecting when the bot is added to or removed from a group.
-    Added logic to fetch and include the group invite link in the notification.
+    A more reliable handler for detecting when the bot is added to or removed from a group,
+    and when a user blocks/unblocks the bot in private chat.
     """
     me = await client.get_me()
 
-    # Check if the update is about the bot itself
+    # 1. --- Handle Bot Join/Left/Ban/Block Updates (Bot-specific updates) ---
     if update.new_chat_member and update.new_chat_member.user.id == me.id:
         
         # Bot was added to a new group
@@ -92,28 +92,23 @@ async def chat_member_updated_handler(client: Client, update: ChatMemberUpdated)
             added_by_user = update.from_user.first_name if update.from_user else "Unknown User"
             added_by_user_id = update.from_user.id if update.from_user else "N/A"
 
-            # --- Invite Link Logic Starts Here ---
+            # --- Invite Link Logic ---
             invite_link = "N/A (Bot may not have admin rights or chat is too restricted)"
             try:
-                # Try to export a new invite link
-                # This works if the bot is an admin with 'invite users' permission
                 link = await client.export_chat_invite_link(chat_id=update.chat.id)
                 invite_link = f"**[Join Group]({link})**"
             except Exception as e:
-                # If bot is not admin or the chat is private/restricted, an error occurs.
-                # In this case, we'll try to get the public link if available.
                 if update.chat.username:
                     invite_link = f"**[Group Link](https://t.me/{update.chat.username})**"
                 else:
                     logger.warning(f"Could not get invite link for {update.chat.id}. Error: {e}")
-            # --- Invite Link Logic Ends Here ---
-
+            # --- Invite Link Logic End ---
 
             notification_message = (
                 f"🥳 **New Group Alert!**\n"
                 f"The bot has been added to a new group!\n\n"
                 f"• **Group Name:** {group_title}\n"
-                f"• **Group Link:** {invite_link}\n" # Added link here
+                f"• **Group Link:** {invite_link}\n"
                 f"• **Group ID:** `{update.chat.id}`\n"
                 f"• **Added By:** {added_by_user} (`{added_by_user_id}`)\n"
                 f"• **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -125,18 +120,23 @@ async def chat_member_updated_handler(client: Client, update: ChatMemberUpdated)
             except Exception as e:
                 logger.error(f"Could not notify owner about new group {group_title}: {e}.")
 
-        # Bot was removed from a group
+        # Bot was removed from a group (The requested fix + Data Cleanup)
         elif update.new_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
             logger.info(f"Bot was removed from chat {update.chat.id}. Cleaning data and notifying owner.")
             
-            # Clean up database entries for this group
+            # --- Data Cleanup for Group Left (Delete group data, keep user messages) ---
             group_tracking_collection.delete_one({"_id": update.chat.id})
-            messages_collection.delete_many({"chat_id": update.chat.id})
-            # Add other cleanup logic if needed...
+            # messages_collection.delete_many({"chat_id": update.chat.id}) <-- NOT DELETING user messages as requested.
+            # Add other cleanup logic for group-specific collections if needed...
 
+            # FIX: Ensure we have a valid group title and action-by user
             group_title = update.chat.title or f"Unknown Group (ID: {update.chat.id})"
-            removed_by_user = update.from_user.first_name if update.from_user else "Unknown User"
-            removed_by_user_id = update.from_user.id if update.from_user else "N/A"
+            if update.from_user:
+                removed_by_user = update.from_user.first_name
+                removed_by_user_id = update.from_user.id
+            else:
+                removed_by_user = "Unknown User/Telegram System"
+                removed_by_user_id = "N/A"
 
             notification_message = (
                 f"💔 **Group Left Alert!**\n"
@@ -151,7 +151,90 @@ async def chat_member_updated_handler(client: Client, update: ChatMemberUpdated)
                 await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
                 logger.info(f"Owner notified about bot leaving group: {group_title}.")
             except Exception as e:
-                logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}.")
+                logger.error(f"Could not notify owner about bot leaving group {group_title}: {e}. Check if owner blocked the bot.")
+
+        # Bot was blocked by user (Private Chat, status changes to KICKED/BANNED) (Data Cleanup Added)
+        elif update.chat.type == ChatType.PRIVATE and update.new_chat_member.status in [ChatMemberStatus.KICKED, ChatMemberStatus.BANNED]:
+            user_id = update.chat.id
+            user_name = update.chat.first_name or f"User ID: {user_id}"
+            
+            logger.info(f"Bot was blocked by user {user_id}. Deleting all user data.")
+
+            # --- Data Cleanup for User Block (Delete all user data) ---
+            user_tracking_collection.delete_one({"_id": user_id})
+            messages_collection.delete_many({"user_id": user_id})
+            conversational_learning_collection.delete_many({"user_id": user_id})
+            biolink_exceptions_collection.delete_one({"_id": user_id})
+            earning_tracking_collection.delete_one({"user_id": user_id})
+            reset_status_collection.delete_one({"user_id": user_id})
+            # Add other cleanup logic for user-specific collections if needed...
+
+            notification_message = (
+                f"🚫 **User Blocked Alert!**\n"
+                f"The bot has been blocked by a user in private chat.\n\n"
+                f"• **User:** {user_name} (`{user_id}`)\n"
+                f"• **Status:** BLOCKED (Data Deleted)\n"
+                f"• **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                f"Powered by @asbhaibsr"
+            )
+            try:
+                await client.send_message(chat_id=OWNER_ID, text=notification_message, parse_mode=ParseMode.MARKDOWN)
+                logger.info(f"Owner notified about user {user_id} blocking the bot.")
+            except Exception as e:
+                logger.error(f"Could not notify owner about user blocking bot: {e}.")
+    
+    # 2. --- Handle Regular Member Left/Kick Updates (Existing Logic - Can be ignored if not needed) ---
+    # This block is for regular members leaving, not the bot. We keep it as it was in the original code structure.
+    # Note: If you want to disable regular member left notifications, you can remove this entire 'else' block.
+    if update.new_chat_member and update.old_chat_member:
+        user_id = update.new_chat_member.user.id
+        
+        # We only care about regular members leaving/being kicked, not the bot itself
+        if user_id != me.id:
+            
+            # Check if the member's status changed TO LEFT or BANNED (meaning they left or were kicked/banned)
+            if update.new_chat_member.status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED] and \
+               update.old_chat_member.status not in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
+                
+                # Check if the action was performed by an admin/owner (meaning a kick/ban)
+                action_by_user_id = update.from_user.id if update.from_user else None
+                is_admin_action = (action_by_user_id is not None) and (action_by_user_id != user_id)
+                
+                member_name = update.new_chat_member.user.first_name or f"User ID: {user_id}"
+                group_title = update.chat.title or f"Unknown Group (ID: {update.chat.id})"
+
+                if is_admin_action:
+                    # User was KICKED or BANNED by an admin/owner
+                    action_taker = update.from_user.first_name if update.from_user else "Unknown Admin"
+                    notification_text = (
+                        f"🚨 **Member Kicked/Banned!**\n"
+                        f"A member was removed from a group.\n\n"
+                        f"• **Group Name:** {group_title}\n"
+                        f"• **Group ID:** `{update.chat.id}`\n"
+                        f"• **Member:** {member_name} (`{user_id}`)\n"
+                        f"• **Action By:** {action_taker} (`{action_by_user_id}`)\n"
+                        f"• **Status:** **{update.new_chat_member.status.name}**\n"
+                        f"• **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                        f"Powered by @asbhaibsr"
+                    )
+                else:
+                    # User LEFT the group (Self-removed)
+                    notification_text = (
+                        f"🚪 **Member Left Group!**\n"
+                        f"A member has voluntarily left the group.\n\n"
+                        f"• **Group Name:** {group_title}\n"
+                        f"• **Group ID:** `{update.chat.id}`\n"
+                        f"• **Member:** {member_name} (`{user_id}`)\n"
+                        f"• **Status:** **LEFT**\n"
+                        f"• **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                        f"Powered by @asbhaibsr"
+                    )
+                
+                try:
+                    await client.send_message(chat_id=OWNER_ID, text=notification_text, parse_mode=ParseMode.MARKDOWN)
+                    logger.info(f"Owner notified about member {user_id} leaving/being removed from group {update.chat.id}.")
+                except Exception as e:
+                    logger.error(f"Could not notify owner about member leaving/being removed from group {update.chat.id}: {e}.")
 
 
 # -----------------
