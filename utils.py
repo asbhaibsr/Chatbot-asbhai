@@ -60,6 +60,12 @@ nlp = None
 semantic_model = None
 GEMINI_CLIENT = None
 
+# --- NEW: Custom Bot/Owner/Filter Details ---
+BOT_OWNER_USERNAME = "@asbhaibsr"
+FILTER_BOT_USERNAME = "@asfilter_bot"
+BOT_NAME = "as_ai_assistant" 
+
+
 # --- CORE UTILITY FUNCTIONS ---
 
 # Renaming the main send/delete function back to the expected name for 'events.py'
@@ -470,7 +476,8 @@ async def generate_reply(message: Message):
     await app.invoke(SetTyping(peer=await app.resolve_peer(message.chat.id), action=SendMessageTypingAction()))
     await asyncio.sleep(0.5)
 
-    query_content = message.text.strip().lower() # Use lower case for matching
+    query_content = message.text.strip()
+    query_content_lower = query_content.lower() # Use lower case for matching
     query_type = "text"
     user_id = message.from_user.id if message.from_user else None
     chat_id = message.chat.id
@@ -487,12 +494,89 @@ async def generate_reply(message: Message):
         logger.info(f"Reply suppressed for chat {chat_id} due to cooldown.")
         return {"type": None}
         
-    # --- TIER 1: Pattern Matching (Learned Conversations - HIGHEST PRIORITY) ---
-    docs = list(conversational_learning_collection.find({"trigger_type": query_type, "trigger_content": query_content})) # Exact match first
+    
+    # ====================================================================
+    # --- NEW: Custom Response Logic (Highest Priority) ---
+    # ====================================================================
+
+    # 1. Bot Name Check 
+    bot_name_keywords = ["bot ka naam", "tumhara naam", "apna naam"]
+    if any(k in query_content_lower for k in bot_name_keywords):
+        reply_text = f"Mera naam **{BOT_NAME}** hai. Main tumhari help ke liye yahan hoon! 😊"
+        update_message_reply_cooldown(chat_id)
+        return {"type": "text", "content": reply_text}
+        
+    # 2. Owner Name Check
+    owner_keywords = ["owner kon hai", "owner ka naam", "kiska bot hai"]
+    if any(k in query_content_lower for k in owner_keywords):
+        reply_text = f"Mere owner **{BOT_OWNER_USERNAME}** hain. Unhone hi mujhe banaya hai! ✨"
+        update_message_reply_cooldown(chat_id)
+        return {"type": "text", "content": reply_text}
+
+    # 3. Movie/Webseries/Anime Check (Using AI/NLP for checking the nature of the query)
+    movie_keywords = ["movie", "film", "webseries", "web series", "anime", "series name", "ka naam batao", "ka link", "ki link", "dijiye"]
+    is_movie_query = any(k in query_content_lower for k in movie_keywords)
+
+    if is_movie_query:
+        # TIER 0.5: Using g4f to check if the query is a recognized media name 
+        # (This is an advanced check. For simplicity and reliability in a free bot, 
+        # we'll assume the presence of keywords and proper nouns is enough for this rule).
+
+        # We can use g4f (Tier 0.5) to ask if the user is asking for a media name.
+        if g4f and G4F_MODEL and random.random() < 0.7: # High chance to check with g4f
+            try:
+                # Ask the LLM to classify the query type
+                classification_prompt = f"Is the following text a request for a Movie, Webseries, or Anime name/link? Reply only with 'YES' or 'NO'. Query: '{query_content}'"
+                
+                # Using a minimal history to save tokens
+                classification_response = await g4f.ChatCompletion.create_async(
+                    model=G4F_MODEL, 
+                    messages=[{"role": "user", "content": classification_prompt}],
+                    temperature=0.1
+                )
+                
+                if classification_response and "yes" in classification_response.lower():
+                    media_type = "Movie/Webseries/Anime" # Default type
+                    if "movie" in query_content_lower or "film" in query_content_lower:
+                        media_type = "Movie"
+                    elif "webseries" in query_content_lower or "web series" in query_content_lower:
+                        media_type = "Webseries"
+                    elif "anime" in query_content_lower:
+                        media_type = "Anime"
+                    
+                    # Custom Reply from your request
+                    reply_text = f"Yeh **{media_type}** ke liye request hai! Iske liye aap humare filter bot par ja kar search kijiye 👉 {FILTER_BOT_USERNAME} okey! 😊"
+                    update_message_reply_cooldown(chat_id)
+                    return {"type": "text", "content": reply_text}
+            
+            except Exception as e:
+                logger.error(f"G4F classification failed: {e}")
+                # Fallback to keyword-only reply
+                pass
+
+        # Fallback keyword reply if AI check fails or is skipped
+        if is_movie_query:
+            media_type = "Movie/Webseries/Anime" 
+            if "movie" in query_content_lower: media_type = "Movie"
+            elif "webseries" in query_content_lower: media_type = "Webseries"
+            elif "anime" in query_content_lower: media_type = "Anime"
+            
+            reply_text = f"Yeh **{media_type}** ke liye request hai! Iske liye aap humare filter bot par ja kar search kijiye 👉 {FILTER_BOT_USERNAME} okey! 😊"
+            update_message_reply_cooldown(chat_id)
+            return {"type": "text", "content": reply_text}
+
+
+    # ====================================================================
+    # --- END OF NEW CUSTOM LOGIC ---
+    # ====================================================================
+
+
+    # --- TIER 1: Pattern Matching (Learned Conversations - HIGH PRIORITY) ---
+    docs = list(conversational_learning_collection.find({"trigger_type": query_type, "trigger_content": query_content_lower})) # Exact match first
     
     # If no exact match, try fuzzy match on keywords for a more random reply (as requested)
     if not docs:
-        query_keywords = extract_keywords(query_content)
+        query_keywords = extract_keywords(query_content_lower)
         if query_keywords:
             # Find documents that have *any* of the keywords in their trigger
             fuzzy_docs = conversational_learning_collection.find({
@@ -508,7 +592,7 @@ async def generate_reply(message: Message):
     if docs:
         for doc in docs:
             # We want an *exact* match or a highly relevant one
-            score = fuzz.token_set_ratio(query_content, doc.get("trigger_content", "").lower())
+            score = fuzz.token_set_ratio(query_content_lower, doc.get("trigger_content", "").lower())
             
             # Use only exact or near-exact matches to maintain context/accuracy
             if score >= 90:
@@ -525,14 +609,15 @@ async def generate_reply(message: Message):
 
     
     # --- TIER 0.5: g4f (Second Highest Priority - Free LLM Access with AI Role) ---
-    ai_reply_text_tier0_5 = await generate_g4f_response_tier0_5(app, message.text.strip(), chat_id, current_context)
+    # NOTE: The custom logic above already uses g4f for classification, so this is the general reply.
+    ai_reply_text_tier0_5 = await generate_g4f_response_tier0_5(app, query_content, chat_id, current_context)
     if ai_reply_text_tier0_5 and random.random() < 0.9: # High chance to use g4f
         logger.info(f"TIER 0.5: Using g4f Free LLM: {ai_reply_text_tier0_5}")
         update_message_reply_cooldown(chat_id)
         return {"type": "text", "content": ai_reply_text_tier0_5}
             
     # --- TIER 0: Enhanced Contextual Responder (Rule-Based Human Feel) ---
-    ai_reply_text_tier0 = generate_best_contextual_response_tier0(message.text.strip(), current_context)
+    ai_reply_text_tier0 = generate_best_contextual_response_tier0(query_content, current_context)
     if ai_reply_text_tier0: 
         logger.info(f"TIER 0: Falling back to Enhanced Contextual AI: {ai_reply_text_tier0}")
         update_message_reply_cooldown(chat_id)
@@ -540,14 +625,14 @@ async def generate_reply(message: Message):
             
     
     # --- TIER 2: NLTK/TextBlob Advanced Fallback (Free AI 1 - Sentiment) ---
-    ai_reply_text_tier2 = generate_free_ai_response_tier2(message.text.strip())
+    ai_reply_text_tier2 = generate_free_ai_response_tier2(query_content)
     logger.info(f"TIER 2: Falling back to NLTK/TextBlob Advanced AI: {ai_reply_text_tier2}")
     update_message_reply_cooldown(chat_id)
     return {"type": "text", "content": ai_reply_text_tier2}
 
     # --- TIER 3: Powerful Free AI Fallback (Simple LLM Mock - Keywords) ---
     if random.random() < 0.5:
-        ai_reply_text_tier3 = generate_powerful_free_ai_response_tier3(message.text.strip())
+        ai_reply_text_tier3 = generate_powerful_free_ai_response_tier3(query_content)
         logger.info(f"TIER 3: Falling back to MOCK Powerful Free AI: {ai_reply_text_tier3}")
         update_message_reply_cooldown(chat_id)
         return {"type": "text", "content": ai_reply_text_tier3}
@@ -557,7 +642,7 @@ async def generate_reply(message: Message):
         chain = build_markov_chain(current_context)
         if chain:
             dynamic_reply_text = generate_sentence(chain)
-            if dynamic_reply_text and dynamic_reply_text.lower() not in query_content: 
+            if dynamic_reply_text and dynamic_reply_text.lower() not in query_content_lower: 
                 logger.info("TIER 4: Generating dynamic reply from chat history (Markov).")
                 update_message_reply_cooldown(chat_id)
                 return {"type": "text", "content": dynamic_reply_text}
