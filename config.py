@@ -42,7 +42,7 @@ PRUNE_PERCENTAGE = 0.30
 UPDATE_CHANNEL_USERNAME = "asbhai_bsr"
 ASBHAI_USERNAME = "asbhaibsr" # Owner's username for contact
 ASFILTER_BOT_USERNAME = "asfilter_bot" # The bot for premium rewards
-BOT_PHOTO_URL = "https://jumpshare.com/s/yECHB1KD096ARRSIYT5C" # Consider updating this URL if it's generic
+BOT_PHOTO_URL = "https://envs.sh/1fA.jpg" # Consider updating this URL if it's generic
 REPO_LINK = "https://envs.sh/KI3.jpg"
 
 # Regex for common URL patterns including t.me and typical link formats
