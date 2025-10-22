@@ -30,7 +30,7 @@ try:
 except ImportError:
     g4f = None
     G4F_MODEL = None
-    logger.warning("g4f library not found. Tier 0.5 AI will be disabled.")
+    print("g4f library not found. Tier 0.5 AI will be disabled.")
 # google.genai has been REMOVED.
 
 # Configuration imports (Assume these are correctly defined in config.py)
@@ -65,11 +65,20 @@ BOT_OWNER_USERNAME = "@asbhaibsr"
 FILTER_BOT_USERNAME = "@asfilter_bot"
 BOT_NAME = "as_ai_assistant" 
 
+# --- NEW: AI MODES MAPPING ---
+AI_MODES_MAP = {
+    "off": {"display": "❌ AI Mode Off", "description": "AI responses disabled"},
+    "realgirl": {"display": "👧 Real Girl", "description": "Casual and friendly personality"},
+    "romanticgirl": {"display": "💖 Romantic Girl", "description": "Flirty and romantic style"},
+    "motivationgirl": {"display": "💪 Motivation Girl", "description": "Positive and encouraging"},
+    "studygirl": {"display": "📚 Study Girl", "description": "Smart and knowledgeable"},
+    "gemini": {"display": "✨ Gemini", "description": "Advanced AI with detailed responses"}
+}
 
 # --- CORE UTILITY FUNCTIONS ---
 
 # Renaming the main send/delete function back to the expected name for 'events.py'
-async def delete_after_delay_for_message(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
+async def send_and_auto_delete_reply(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
     """
     Sends a reply and sets a task to auto-delete both the command and the reply after a delay.
     This function name is kept for compatibility with events.py
@@ -106,7 +115,7 @@ async def delete_after_delay_for_message(message: Message, text: str = None, pho
             sticker=sticker
         )
     else:
-        logger.warning(f"delete_after_delay_for_message called with no content for message {message.id}.")
+        logger.warning(f"send_and_auto_delete_reply called with no content for message {message.id}.")
         return None
 
     # Do not auto-delete 'start' command reply - CRITICAL for private chat commands
@@ -127,7 +136,6 @@ async def delete_after_delay_for_message(message: Message, text: str = None, pho
 
     asyncio.create_task(delete_task())
     return sent_message
-
 
 def get_sentiment(text):
     if not text:
@@ -787,3 +795,85 @@ async def can_reply_to_chat(chat_id: int):
     
     # Use the MESSAGE_REPLY_COOLDOWN_TIME defined in config
     return (time.time() - last_reply_time) >= MESSAGE_REPLY_COOLDOWN_TIME
+
+# --- NEW: BIOLINK EXCEPTIONS FUNCTIONS ---
+async def check_biolink_exception(chat_id: int, user_id: int):
+    """Check if user has biolink exception in specific chat"""
+    try:
+        exception_doc = biolink_exceptions_collection.find_one({"_id": chat_id})
+        if exception_doc and "user_ids" in exception_doc:
+            return user_id in exception_doc["user_ids"]
+        return False
+    except Exception as e:
+        logger.error(f"Error checking biolink exception: {e}")
+        return False
+
+async def add_biolink_exception(chat_id: int, user_id: int):
+    """Add user to biolink exceptions"""
+    try:
+        biolink_exceptions_collection.update_one(
+            {"_id": chat_id},
+            {"$addToSet": {"user_ids": user_id}},
+            upsert=True
+        )
+        logger.info(f"User {user_id} added to biolink exceptions in chat {chat_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error adding biolink exception: {e}")
+        return False
+
+async def remove_biolink_exception(chat_id: int, user_id: int):
+    """Remove user from biolink exceptions"""
+    try:
+        biolink_exceptions_collection.update_one(
+            {"_id": chat_id},
+            {"$pull": {"user_ids": user_id}}
+        )
+        logger.info(f"User {user_id} removed from biolink exceptions in chat {chat_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error removing biolink exception: {e}")
+        return False
+
+# --- NEW: PUNISHMENT SYSTEM FUNCTIONS ---
+async def apply_punishment(client: Client, message: Message, violation_type: str):
+    """Apply punishment based on group settings"""
+    try:
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        
+        # Get punishment setting
+        group_doc = group_tracking_collection.find_one({"_id": chat_id})
+        punishment = group_doc.get("default_punishment", "delete") if group_doc else "delete"
+        
+        if punishment == "delete":
+            await message.delete()
+            await send_and_auto_delete_reply(message, 
+                text=f"🚫 **{violation_type} not allowed!** Message deleted.")
+                
+        elif punishment == "mute":
+            await message.delete()
+            try:
+                await client.restrict_chat_member(chat_id, user_id, ChatPermissions())
+                await send_and_auto_delete_reply(message,
+                    text=f"🚫 **{violation_type} violation!** User muted.")
+            except Exception as e:
+                logger.error(f"Error muting user: {e}")
+                
+        elif punishment == "warn":
+            await message.delete()
+            # Add warn logic here
+            await send_and_auto_delete_reply(message,
+                text=f"⚠️ **Warning:** {violation_type} not allowed!")
+                
+        elif punishment == "ban":
+            await message.delete()
+            try:
+                await client.ban_chat_member(chat_id, user_id)
+                await send_and_auto_delete_reply(message,
+                    text=f"⛔️ **Banned:** {violation_type} violation!")
+            except Exception as e:
+                logger.error(f"Error banning user: {e}")
+                
+    except Exception as e:
+        logger.error(f"Error applying punishment: {e}")
