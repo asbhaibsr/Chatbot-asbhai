@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 import pytz
 from pyrogram import Client
-from pyrogram.types import Message, InlineKeyboardMarkup
+from pyrogram.types import Message, InlineKeyboardMarkup, ChatPermissions
 from pyrogram.enums import ChatMemberStatus, ChatType, ParseMode
 from pyrogram.raw.functions.messages import SetTyping
 from pyrogram.raw.types import SendMessageTypingAction
@@ -136,6 +136,15 @@ async def send_and_auto_delete_reply(message: Message, text: str = None, photo: 
 
     asyncio.create_task(delete_task())
     return sent_message
+
+# 🌟 CRITICAL FIX: Add an alias for the old function name to fix ImportError in commands.py
+# This function is being imported by `commands.py` but the name was changed above.
+async def delete_after_delay_for_message(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
+    """
+    Alias for send_and_auto_delete_reply to maintain compatibility with commands.py.
+    """
+    return await send_and_auto_delete_reply(message, text, photo, sticker, reply_markup, parse_mode, disable_web_page_preview)
+
 
 def get_sentiment(text):
     if not text:
@@ -854,6 +863,7 @@ async def apply_punishment(client: Client, message: Message, violation_type: str
         elif punishment == "mute":
             await message.delete()
             try:
+                # Assuming ChatPermissions is imported from pyrogram.types
                 await client.restrict_chat_member(chat_id, user_id, ChatPermissions())
                 await send_and_auto_delete_reply(message,
                     text=f"🚫 **{violation_type} violation!** User muted.")
