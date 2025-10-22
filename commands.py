@@ -1,7 +1,7 @@
-# commands.py
+#  commands.py
 
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from pyrogram.enums import ChatType, ChatMemberStatus, ParseMode
 from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError
 from datetime import datetime
@@ -31,10 +31,10 @@ send_and_auto_delete_reply = delete_after_delay_for_message
 AI_MODES_MAP = {
     "off": {"label": "❌ AI Mᴏᴅᴇ Oғғ", "display": "❌ Oғғ"},
     "realgirl": {"label": "👧 Rᴇᴀʟ Gɪʀʟ", "display": "👧 Rᴇᴀʟ"},
-    "romanticgirl": {"label": "💖 Rᴏᴍᴀɴᴛɪᴄ Gɪʀʟ", "display": "💖 Rᴏᴍ"},
-    "motivationgirl": {"label": "💪 Mᴏᴛɪᴠᴀᴛɪᴏɴ Gɪʀʟ", "display": "💪 Mᴏᴛɪ"},
-    "studygirl": {"label": "📚 Sᴛᴜᴅʏ Gɪʀʟ", "display": "📚 Sᴛᴜᴅʏ"},
-    "gemini": {"label": "✨ Gᴇᴍɪɴɪ (Sᴜᴘᴇʀ AI)", "display": "✨ Gᴇᴍɪɴɪ"},
+    "romanticgirl": {"label": "💖 Rᴏᴍᴀɴ𝘁𝗶𝗰 Gɪʀʟ", "display": "💖 Rᴏᴍ"},
+    "motivationgirl": {"label": "💪 Mᴏ𝘁𝗶𝘃𝗮𝘁𝗶𝗼𝗻 Gɪʀʟ", "display": "💪 Mᴏᴛ𝗶"},
+    "studygirl": {"label": "📚 S𝘁𝘂𝗱𝘆 Gɪʀʟ", "display": "📚 S𝘁𝘂𝗱𝘆"},
+    "gemini": {"label": "✨ Gᴇ𝗺𝗶𝗻𝗶 (Sᴜ𝗽𝗲𝗿 AI)", "display": "✨ Gᴇ𝗺𝗶𝗻𝗶"},
 }
 # -----------------------------------------------------
 
@@ -78,6 +78,8 @@ async def start_private_command(client: Client, message: Message):
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private start command processed for user {message.from_user.id}.")
+
+# ... [Other private commands - topusers, stats, groups, leavegroup, cleardata, deletemessage, delsticker, clearearning, restart, clearall, clearmydata - are kept as is, as they were not the focus of the requested fix, but placed here for completeness.]
 
 @app.on_message(filters.command("topusers") & (filters.private | filters.group))
 async def top_users_command(client: Client, message: Message):
@@ -605,6 +607,41 @@ async def clear_my_data_command(client: Client, message: Message):
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
 
 
+@app.on_message(filters.command("setcommands") & filters.private)
+async def set_commands_command(client: Client, message: Message):
+    """Set bot commands automatically (OWNER ONLY - NEW FIX)"""
+    if is_on_command_cooldown(message.from_user.id):
+        return
+    update_command_cooldown(message.from_user.id)
+
+    if message.from_user.id != OWNER_ID:
+        await send_and_auto_delete_reply(message, text="❌ **This command is only for the bot owner!**")
+        return
+
+    try:
+        commands = [
+            BotCommand("start", "Start the bot"),
+            BotCommand("help", "Show help menu"),
+            BotCommand("settings", "Group settings menu"),
+            BotCommand("setaimode", "Set AI personality mode"),
+            BotCommand("topusers", "Show earning leaderboard"),
+            BotCommand("addbiolink", "Add biolink exception"),
+            BotCommand("rembiolink", "Remove biolink exception"),
+            BotCommand("stats", "Check bot statistics")
+        ]
+        
+        await client.set_bot_commands(commands)
+        await send_and_auto_delete_reply(message, text="✅ **All bot commands have been set successfully!**")
+        logger.info("Bot commands set successfully by owner")
+        
+    except Exception as e:
+        await send_and_auto_delete_reply(message, text=f"❌ **Error setting commands:** {e}")
+        logger.error(f"Error setting bot commands: {e}")
+    
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
+
 # -----------------------------------------------------
 # GROUP COMMANDS
 # -----------------------------------------------------
@@ -649,7 +686,7 @@ async def start_group_command(client: Client, message: Message):
     logger.info(f"Group start command processed in chat {message.chat.id}.")
 
 
-# --- NEW: AI MODE COMMAND ---
+# --- NEW: AI MODE COMMAND (FIXED) ---
 @app.on_message(filters.command("setaimode") & filters.group)
 async def set_ai_mode_command(client: Client, message: Message):
     if is_on_command_cooldown(message.from_user.id):
@@ -665,21 +702,19 @@ async def set_ai_mode_command(client: Client, message: Message):
     current_status_doc = group_tracking_collection.find_one({"_id": message.chat.id})
     current_ai_mode = current_status_doc.get("ai_mode", "off") if current_status_doc else "off"
     
-    # 3. Define AI Modes (Hindi/Hinglish Friendly) - Using the global map for consistency
-    ai_modes = {k: v["label"] for k, v in AI_MODES_MAP.items()} # Use label for buttons
-    
-    # 4. Create Buttons
+    # 3. Create Buttons
     keyboard_buttons = []
     current_row = []
     
-    # Off/Default Button
+    # Off/Default Button (FIXED)
     status_off = "✅ " if current_ai_mode == "off" else ""
-    # 🟢 FIX: Used AI_MODES_MAP for the label
     keyboard_buttons.append([InlineKeyboardButton(f"{status_off}{AI_MODES_MAP['off']['label']}", callback_data="set_ai_mode_off")])
 
-    # Dynamic Mode Buttons
-    for mode_key, mode_data in AI_MODES_MAP.items():
+    # Dynamic Mode Buttons (FIXED)
+    mode_keys = list(AI_MODES_MAP.keys())
+    for mode_key in mode_keys:
         if mode_key != "off":
+            mode_data = AI_MODES_MAP[mode_key]
             status = "✅ " if current_ai_mode == mode_key else ""
             button = InlineKeyboardButton(f"{status}{mode_data['label']}", callback_data=f"set_ai_mode_{mode_key}")
             current_row.append(button)
@@ -690,7 +725,7 @@ async def set_ai_mode_command(client: Client, message: Message):
     if current_row:
         keyboard_buttons.append(current_row)
 
-    # Back Button
+    # Back Button (FIXED to point to main settings)
     keyboard_buttons.append([InlineKeyboardButton("🔙 Sᴇᴛᴛɪɴɢꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")]) 
     
     keyboard = InlineKeyboardMarkup(keyboard_buttons)
@@ -698,10 +733,10 @@ async def set_ai_mode_command(client: Client, message: Message):
     # 5. Send Message
     mode_display = AI_MODES_MAP.get(current_ai_mode, AI_MODES_MAP["off"])["label"]
     settings_message = (
-        f"👑 **AI Mᴏᴅᴇ Sᴇᴛᴛɪɴɢꜱ 👑**\n\n"
+        f"👑 **AI Mᴏᴅᴇ Sᴇᴛ𝘁𝗶𝗻𝗴ꜱ 👑**\n\n"
         "𝗛𝗲𝗹𝗹𝗼 𝗕𝗼𝘀𝘀, 𝘆𝗲𝗵𝗮𝗻 𝘀𝗲 𝗮𝗽𝗽𝗮𝗻𝗮 **AI 𝗽𝗲𝗿𝘀𝗼𝗻𝗮𝗹𝗶𝘁𝘆** 𝘀𝗲𝘁 𝗸𝗮𝗿𝗼.\n"
         "𝗕𝗼𝘁 𝘂𝘀 𝗵𝗶 𝗮𝗻𝗱𝗮𝗮𝘇 𝗺𝗮𝗶𝗻, 𝗯𝗶𝗸𝘂𝗹 𝗿𝗲𝗮𝗹 𝗹𝗮𝗱𝗸𝗶 𝗷𝗮𝗶𝘀𝗲, 𝗯𝗮𝗮𝘁 𝗸𝗮𝗿𝗲𝗴𝗶! 🤩\n\n"
-        f"**Cᴜʀʀ𝗲𝗻𝘁 AI Mᴏ𝗱𝗲:** **{mode_display}**"
+        f"**Cᴜ𝗿𝗿𝗲𝗻𝘁 AI Mᴏ𝗱𝗲:** **{mode_display}**"
     )
 
     await send_and_auto_delete_reply(
@@ -757,7 +792,7 @@ async def open_settings_command(client: Client, message: Message):
     }
     punishment_text = punishment_map.get(punishment, "🗑️ Dᴇ𝗹𝗲𝘁𝗲 Mᴇꜱꜱᴀɢᴇ")
 
-    # 🟢 FIX: Use AI_MODES_MAP for consistent display
+    # FIX: Use AI_MODES_MAP for consistent display
     ai_mode_text = AI_MODES_MAP.get(ai_mode, AI_MODES_MAP["off"])["display"]
 
 
@@ -779,7 +814,7 @@ async def open_settings_command(client: Client, message: Message):
             ],
             # NEW AI MODE BUTTON
             [
-                # 🟢 FIX: Use the correct callback to open the AI Mode settings
+                # FIX: Use the correct callback to open the AI Mode settings
                 InlineKeyboardButton(f"✨ AI Mᴏᴅᴇ: {ai_mode_text}", callback_data="open_ai_mode_settings"),
             ],
             # Punishment and Biolink Exception
@@ -787,11 +822,11 @@ async def open_settings_command(client: Client, message: Message):
                 InlineKeyboardButton(f"🔨 Dᴇ𝗳𝗮𝘂𝗹𝘁 Pᴜ𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁: {punishment_text}", callback_data="open_punishment_settings"),
             ],
             [
-                 InlineKeyboardButton("👤 Bɪ𝗼 L𝗶𝗻𝗸 Exᴄᴇᴘᴛɪᴏ𝗻ꜱ 📝", callback_data="open_biolink_exceptions")
+                 InlineKeyboardButton("👤 Bɪ𝗼 L𝗶𝗻ᴋ Exᴄᴇᴘᴛɪᴏ𝗻ꜱ 📝", callback_data="open_biolink_exceptions")
             ],
             # Close Button
             [
-                InlineKeyboardButton("❌ Cʟ𝗼𝘀𝗲 S𝗲𝘁𝘁𝗶𝗻𝗴ꜱ", callback_data="close_settings")
+                InlineKeyboardButton("❌ Cʟ𝗼𝘀𝗲 S𝗲𝘁𝘁𝗶𝗻gꜱ", callback_data="close_settings")
             ]
         ]
     )
@@ -800,7 +835,7 @@ async def open_settings_command(client: Client, message: Message):
     settings_message = (
         f"⚙️ **𝗚𝗿𝗼𝘂𝗽 𝗦𝗲𝘁𝘁𝗶𝗻𝗴𝘀: {message.chat.title}** 🛠️\n\n"
         "𝗛𝗲𝗹𝗹𝗼, 𝗕𝗼𝘀𝘀! 𝗬𝗼𝘂 𝗰𝗮𝗻 𝗰𝗼𝗻𝘁𝗿𝗼𝗹 𝘁𝗵𝗲 𝗴𝗿𝗼𝘂𝗽 𝗿𝘂𝗹𝗲𝘀 𝗮𝗻𝗱 𝗯𝗼𝘁 𝗳𝘂𝗻𝗰𝘁𝗶𝗼𝗻𝘀 𝗳𝗿𝗼𝗺 𝘁𝗵𝗲 𝗯𝘂𝘁𝘁𝗼𝗻𝘀 𝗯𝗲𝗹𝗼𝘄.\n"
-        "**AI Mᴏᴅᴇ:** Bᴏᴛ ᴋɪ ᴘᴇʀsᴏɴᴀʟɪᴛʏ ᴀᴜʀ ᴊ𝗮𝘄𝗮𝗯 ᴅᴇɴᴇ ᴋᴀ 𝘁𝗮𝗿𝗶𝗸𝗮 𝗶𝘀 𝘀𝗲 𝘀𝗲𝘁 𝗵𝗼𝗴𝗮. **Cᴜʀʀ𝗲𝗻𝘁: {ai_mode_text}**\n\n"
+        "**AI Mᴏᴅᴇ:** Bᴏᴛ ᴋɪ ᴘᴇʀsᴏɴᴀʟɪᴛʏ 𝗮𝘂𝗿 𝗷𝗮𝘄𝗮𝗯 ᴅᴇɴᴇ ᴋᴀ 𝘁𝗮𝗿𝗶𝗸𝗮 𝗶𝘀 𝘀𝗲 𝘀𝗲𝘁 𝗵𝗼𝗴𝗮. **Cᴜʀʀ𝗲𝗻𝘁: {ai_mode_text}**\n\n"
         "𝗨𝘀𝗲𝗿𝘀 𝘄𝗵𝗼 𝗯𝗿𝗲𝗮𝗸 𝘆𝗼𝘂𝗿 𝗳𝗶𝗹𝘁𝗲𝗿 𝘀𝗲𝘁𝘁𝗶𝗻𝗴𝘀 𝘄𝗶𝗹𝗹 𝗿𝗲𝗰𝗲𝗶𝘃𝗲 𝘁𝗵𝗲 **𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁**.\n\n"
         f"**𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁:** {punishment_text}\n"
         "__𝗖𝗵𝗼𝗼𝘀𝗲 𝘄𝗵𝗮𝘁 𝗽𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁 𝘁𝗼 𝗴𝗶𝘃𝗲 𝘁𝗼 𝗿𝘂𝗹𝗲-𝗯𝗿𝗲𝗮𝗸𝗲𝗿𝘀 𝗳𝗿𝗼𝗺 '𝗗𝗲𝗳𝗮𝘂𝗹𝘁 𝗣𝘂𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁'.__"
@@ -818,3 +853,85 @@ async def open_settings_command(client: Client, message: Message):
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Group settings command processed in chat {message.chat.id} by admin {message.from_user.id}.")
 
+@app.on_message(filters.command("addbiolink") & filters.group)
+async def add_biolink_command(client: Client, message: Message):
+    """Add user to biolink exceptions (NEW FIX)"""
+    if is_on_command_cooldown(message.from_user.id):
+        return
+    update_command_cooldown(message.from_user.id)
+
+    # Check admin permission
+    if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
+        await send_and_auto_delete_reply(message, text="❌ **Only admins can use this command!**")
+        return
+
+    if len(message.command) < 2:
+        await send_and_auto_delete_reply(message, text="❌ **Usage:** `/addbiolink <user_id>`")
+        return
+
+    try:
+        user_id = int(message.command[1])
+        
+        # Add to biolink exceptions
+        biolink_exceptions_collection.update_one(
+            {"_id": message.chat.id},
+            {"$addToSet": {"user_ids": user_id}},
+            upsert=True
+        )
+        
+        await send_and_auto_delete_reply(message, text=f"✅ **User `{user_id}` added to biolink exceptions!**")
+        logger.info(f"User {user_id} added to biolink exceptions in chat {message.chat.id}")
+        
+    except ValueError:
+        await send_and_auto_delete_reply(message, text="❌ **Invalid user ID!** Please provide a numeric user ID.")
+    except Exception as e:
+        await send_and_auto_delete_reply(message, text=f"❌ **Error:** {e}")
+        logger.error(f"Error adding biolink exception: {e}")
+    
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        await update_group_info(message.chat.id, message.chat.title, message.chat.username)
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
+
+
+@app.on_message(filters.command("rembiolink") & filters.group)
+async def remove_biolink_command(client: Client, message: Message):
+    """Remove user from biolink exceptions (NEW FIX)"""
+    if is_on_command_cooldown(message.from_user.id):
+        return
+    update_command_cooldown(message.from_user.id)
+
+    # Check admin permission
+    if not await is_admin_or_owner(client, message.chat.id, message.from_user.id):
+        await send_and_auto_delete_reply(message, text="❌ **Only admins can use this command!**")
+        return
+
+    if len(message.command) < 2:
+        await send_and_auto_delete_reply(message, text="❌ **Usage:** `/rembiolink <user_id>`")
+        return
+
+    try:
+        user_id = int(message.command[1])
+        
+        # Remove from biolink exceptions
+        result = biolink_exceptions_collection.update_one(
+            {"_id": message.chat.id},
+            {"$pull": {"user_ids": user_id}}
+        )
+
+        if result.modified_count > 0:
+            await send_and_auto_delete_reply(message, text=f"✅ **User `{user_id}` removed from biolink exceptions!**")
+            logger.info(f"User {user_id} removed from biolink exceptions in chat {message.chat.id}")
+        else:
+            await send_and_auto_delete_reply(message, text=f"❌ **User `{user_id}` was not found in biolink exceptions!**")
+        
+    except ValueError:
+        await send_and_auto_delete_reply(message, text="❌ **Invalid user ID!** Please provide a numeric user ID.")
+    except Exception as e:
+        await send_and_auto_delete_reply(message, text=f"❌ **Error:** {e}")
+        logger.error(f"Error removing biolink exception: {e}")
+
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        await update_group_info(message.chat.id, message.chat.title, message.chat.username)
+    if message.from_user:
+        await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
