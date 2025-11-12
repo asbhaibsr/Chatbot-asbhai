@@ -1,8 +1,8 @@
-# events.py
+events.py
 
 # Import necessary libraries
 from pyrogram import Client, filters
-from pyrogram.types import Message, ChatMemberUpdated
+from pyrogram.types import Message, ChatMemberUpdated, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.enums import ChatType, ParseMode, ChatMemberStatus
 import asyncio
 from datetime import datetime, timedelta
@@ -367,24 +367,44 @@ async def handle_message_and_reply(client: Client, message: Message):
         is_sender_admin = await is_admin_or_owner(client, message.chat.id, user_id)
     
     # --- Link Deletion Filter ---
-    # ... (link deletion logic remains here) ...
     if is_group_chat and message.text:
         current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
         if current_group_settings and current_group_settings.get("linkdel_enabled", False):
+            # --- 🟢 बदला हुआ: बेहतर लिंक डिलीशन नोटिफिकेशन 🟢 ---
             if contains_link(message.text) and not is_sender_admin:
                 try:
-                    # Using the utility function directly
                     await message.delete()
-                    sent_delete_alert = await delete_after_delay_for_message(message, text=f"𝗳𝗢𝗵 𝗱𝗲𝗮𝗿! 🧐 𝗦𝗼𝗿𝗿𝘆-𝘀𝗼𝗿𝗿𝘆, **𝗹𝗶𝗻𝗸𝘀 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝗹𝗹𝗼𝘄𝗲𝗱 𝗵𝗲𝗿𝗲!** 🚫 𝗬𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮ge 𝗶𝘀 𝗴𝗼𝗻𝗲!💨 𝗣𝗹𝗲𝗮𝘀𝗲 𝗯𝗲 𝗰𝗮𝗿𝗲𝗳𝘂𝗹 𝗻𝗲𝘅𝘁 𝘁𝗶𝗺𝗲.", parse_mode=ParseMode.MARKDOWN)
+                    # यूजर का नाम ब्लू लिंक में
+                    user_mention = message.from_user.mention(style='md')
+                    me = await client.get_me()
+                    
+                    # आपका "kidneep me" (Invite Me) बटन
+                    keyboard = InlineKeyboardMarkup(
+                        [[InlineKeyboardButton("➕ Invite Me", url=f"https://t.me/{me.username}?startgroup=true")]]
+                    )
+                    
+                    # टेलीग्राम कोट के साथ नया टेक्स्ट
+                    alert_text = (
+                        f"{user_mention}\n\n"
+                        f"> 🤫 **Links are not allowed here!**\n"
+                        f"> Your message was automatically deleted."
+                    )
+                    
+                    sent_delete_alert = await delete_after_delay_for_message(
+                        message, 
+                        text=alert_text, 
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=keyboard
+                    )
                     logger.info(f"Deleted link message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
                     return
                 except Exception as e:
                     logger.error(f"Error deleting link message {message.id}: {e}")
+            # --- 🟢 बदले हुए का अंत 🟢 ---
             elif contains_link(message.text) and is_sender_admin:
                 logger.info(f"Admin's link message {message.id} was not deleted in chat {message.chat.id}.")
 
     # --- Bio Link Deletion Filter ---
-    # ... (bio link deletion logic remains here) ...
     if is_group_chat and user_id:
         try:
             current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
@@ -393,39 +413,71 @@ async def handle_message_and_reply(client: Client, message: Message):
                 user_bio = user_chat_obj.bio or ""
                 is_biolink_exception = biolink_exceptions_collection.find_one({"_id": user_id})
                 if not is_sender_admin and not is_biolink_exception:
+                    # --- 🟢 बदला हुआ: बेहतर बायो लिंक नोटिफिकेशन 🟢 ---
                     if URL_PATTERN.search(user_bio):
                         try:
-                            # Using the utility function directly
                             await message.delete()
+                            user_mention = message.from_user.mention(style='md')
+                            me = await client.get_me()
+                            
+                            keyboard = InlineKeyboardMarkup(
+                                [[InlineKeyboardButton("➕ Invite Me", url=f"https://t.me/{me.username}?startgroup=true")]]
+                            )
+                            
+                            alert_text = (
+                                f"{user_mention}\n\n"
+                                f"> 😲 **You have a link in your bio!**\n"
+                                f"> Your message was deleted. Please remove the link or ask an admin for an exception (`/addbiolink {user_id}`)."
+                            )
+                            
                             sent_delete_alert = await delete_after_delay_for_message(
                                 message,
-                                text=f"𝗢𝗵 𝗻𝗼! 😲 𝗬𝗼𝘂 𝗵𝗮𝘃𝗲 𝗮 **𝗹𝗶𝗻𝗸 𝗶𝗻 𝘆𝗼𝘂𝗿 𝗯𝗶𝗼!** 𝗧𝗵𝗮𝘁's 𝘄𝗵𝘆 𝘆𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗱𝗶𝘀𝗮𝗽𝗽𝗲𝗮𝗿𝗲𝗱!👻\n"
-                                "𝗣𝗹𝗲𝗮𝘀𝗲 𝗿𝗲𝗺𝗼𝘃𝗲 𝘁𝗵𝗲 𝗹𝗶𝗻𝗸 𝗳𝗿𝗼𝗺 𝘆𝗼𝘂𝗿 𝗯𝗶𝗼. 𝗜𝗳 𝘆𝗼𝘂 𝗿𝗲𝗾𝘂𝗶𝗿𝗲 𝗽𝗲𝗿𝗺𝗶𝘀𝘀𝗶𝗼𝗻, 𝗽𝗹𝗲𝗮𝘀𝗲 𝗰𝗼𝗻𝘁𝗮𝗰𝘁 𝗮𝗻 𝗮𝗱𝗺𝗶𝗻 𝗮𝗻𝗱 𝗮𝘀𝗸 𝘁𝗵𝗲𝗺 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗲 `/biolink your_userid` 𝗰𝗼𝗺𝗺𝗮𝗻𝗱.",
-                                parse_mode=ParseMode.MARKDOWN
+                                text=alert_text,
+                                parse_mode=ParseMode.MARKDOWN,
+                                reply_markup=keyboard
                             )
                             logger.info(f"Deleted message {message.id} from user {user_id} due to link in bio in chat {message.chat.id}.")
                             return
                         except Exception as e:
                             logger.error(f"Error deleting message {message.id} due to bio link: {e}")
+                    # --- 🟢 बदले हुए का अंत 🟢 ---
                 elif (is_sender_admin or is_biolink_exception) and URL_PATTERN.search(user_bio):
                     logger.info(f"Admin's or excepted user's bio link was ignored for message {message.id} in chat {message.chat.id}.")
         except Exception as e:
             logger.error(f"Error checking user bio for user {user_id} in chat {message.chat.id}: {e}")
 
     # --- Username Mention Deletion Filter ---
-    # ... (username deletion logic remains here) ...
     if is_group_chat and message.text:
         current_group_settings = group_tracking_collection.find_one({"_id": message.chat.id})
         if current_group_settings and current_group_settings.get("usernamedel_enabled", False):
+            # --- 🟢 बदला हुआ: बेहतर यूजरनेम नोटिफिकेशन 🟢 ---
             if contains_mention(message.text) and not is_sender_admin:
                 try:
-                    # Using the utility function directly
                     await message.delete()
-                    sent_delete_alert = await delete_after_delay_for_message(message, text=f"𝗳𝗧𝘂𝘁-𝘁𝘂𝘁! 😬 𝗬𝗼𝘂 𝘂𝘀𝗲𝗱 `@`! 𝗦𝗼𝗿𝗿𝘆, 𝘁𝗵𝗮𝘁 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝗶𝘀 𝗴𝗼𝗻𝗲 𝘁𝗼 𝘁𝗵𝗲 𝘀𝗸𝘆! 🚀 𝗕𝗲 𝗰𝗮𝗿𝗲𝗳𝘂𝗹 𝗻𝗲𝘅𝘁 𝘁𝗶𝗺𝗲, 𝗼𝗸𝗮𝘆? 😉", parse_mode=ParseMode.MARKDOWN)
+                    user_mention = message.from_user.mention(style='md')
+                    me = await client.get_me()
+                    
+                    keyboard = InlineKeyboardMarkup(
+                        [[InlineKeyboardButton("➕ Invite Me", url=f"https://t.me/{me.username}?startgroup=true")]]
+                    )
+                    
+                    alert_text = (
+                        f"{user_mention}\n\n"
+                        f"> 😬 **Usernames (@) are not allowed here!**\n"
+                        f"> Your message was automatically deleted."
+                    )
+                    
+                    sent_delete_alert = await delete_after_delay_for_message(
+                        message, 
+                        text=alert_text, 
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=keyboard
+                    )
                     logger.info(f"Deleted username mention message {message.id} from user {message.from_user.id} in chat {message.chat.id}.")
                     return
                 except Exception as e:
                     logger.error(f"Error deleting username message {message.id}: {e}")
+            # --- 🟢 बदले हुए का अंत 🟢 ---
             elif contains_mention(message.text) and is_sender_admin:
                 logger.info(f"Admin's username mention message {message.id} was not deleted in chat {message.chat.id}.")
 
