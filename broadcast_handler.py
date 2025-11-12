@@ -1,4 +1,4 @@
-# broadcast_handler.py (नया और सही कोड)
+# broadcast_handler.py
 
 import asyncio
 import time
@@ -8,17 +8,17 @@ from pyrogram.types import Message
 from pyrogram.enums import ParseMode
 from pyrogram.errors import FloodWait, UserIsBlocked, ChatWriteForbidden, PeerIdInvalid, RPCError
 
-# 'config' और 'utils' से आवश्यक चीज़ें इम्पोर्ट करें
+# 🟢 इम्पोर्ट लिस्ट में बदलाव
 from config import (
     app, group_tracking_collection, user_tracking_collection,
-    logger, OWNER_ID
+    logger, OWNER_ID, earning_tracking_collection # 🟢 यहाँ earning_tracking_collection जोड़ा गया
 )
 from utils import (
     delete_after_delay_for_message,
     store_message 
 )
 
-# Broadcast Sending Logic (Helper Function) - यह फंक्शन जैसा था वैसा ही रहेगा
+# Broadcast Sending Logic (Helper Function) 
 async def send_broadcast_message(client: Client, chat_id: int, message: Message):
     """
     Given a chat ID and a message object (the message to broadcast), 
@@ -33,8 +33,10 @@ async def send_broadcast_message(client: Client, chat_id: int, message: Message)
     except UserIsBlocked:
         return (False, "Blocked")
     except ChatWriteForbidden:
+        # Bot kicked or can't write in Group
         return (False, "Blocked") 
     except PeerIdInvalid:
+        # Invalid chat ID or group/user deleted
         return (False, "Deleted/Invalid")
     except RPCError as rpc_e:
         error_msg = str(rpc_e)
@@ -53,7 +55,7 @@ async def send_broadcast_message(client: Client, chat_id: int, message: Message)
 
 
 # -----------------------------------------------------
-# 1. PRIVATE CHAT BROADCAST (/broadcast) - नया तरीका
+# 1. PRIVATE CHAT BROADCAST (/broadcast) - 🟢 बदला हुआ
 # -----------------------------------------------------
 
 @app.on_message(filters.command("broadcast") & filters.private & filters.user(OWNER_ID))
@@ -88,18 +90,33 @@ async def pm_broadcast(client: Client, message: Message):
     
     logger.info(f"Starting PM broadcast to {total_targets} users.")
 
+    # --- मॉडिफाइड: स्लीप और DB क्लीनअप जोड़ा गया ---
     for chat_id in all_target_ids:
         pti, sh = await send_broadcast_message(client, chat_id, b_msg)
         
         if pti:
             success += 1
         else:
-            if sh == "Blocked": blocked += 1
-            elif sh == "Deleted/Invalid" or sh == "Deleted/Deactivated": deleted += 1
-            else: failed += 1
+            if sh == "Blocked":
+                blocked += 1
+                # --- नया: DB क्लीन ---
+                user_tracking_collection.delete_one({"_id": chat_id})
+                earning_tracking_collection.delete_one({"_id": chat_id})
+                
+            elif sh == "Deleted/Invalid" or sh == "Deleted/Deactivated":
+                deleted += 1
+                # --- नया: DB क्लीन ---
+                user_tracking_collection.delete_one({"_id": chat_id})
+                earning_tracking_collection.delete_one({"_id": chat_id})
+                
+            else:
+                failed += 1
         done += 1
         
-        if done % 20 == 0 or done == total_targets:
+        # --- नया: फ्लड से बचने के लिए स्लीप (0.1 सेकंड) ---
+        await asyncio.sleep(0.1) 
+        
+        if done % 20 == 0 or done == total_targets: # हर 20 मैसेज पर स्टेटस अपडेट करें
             try:
                 await sts.edit_text(f"🚀 **Broadcast Progress...**\n" 
                                     f"Total: **{total_targets}**\n" 
@@ -108,22 +125,24 @@ async def pm_broadcast(client: Client, message: Message):
                                     parse_mode=ParseMode.MARKDOWN)
             except Exception:
                 pass
+    # --- मॉडिफिकेशन का अंत ---
                 
     time_taken = datetime.timedelta(seconds=int(time.time()-start_time_broadcast))
     final_message = (f"🎉 **Private Broadcast पूरा हुआ!**\n" 
                      f"समय लगा: **{time_taken}**\n\n" 
                      f"Total Users: **{total_targets}**\n" 
                      f"सफलतापूर्वक भेजा: **{success}** ✨\n" 
-                     f"Blocked: **{blocked}** 💔\n"
-                     f"Deleted/Invalid: **{deleted}** 🗑️\n"
+                     f"Blocked (Cleaned): **{blocked}** 💔\n"
+                     f"Deleted/Invalid (Cleaned): **{deleted}** 🗑️\n"
                      f"अन्य Fehler: **{failed}** 😥")
     
     await sts.edit_text(final_message, parse_mode=ParseMode.MARKDOWN)
     await store_message(client, message)
+# --- 🟢 बदले हुए फ़ंक्शन का अंत 🟢 ---
 
 
 # -----------------------------------------------------
-# 2. GROUP BROADCAST (/grp_broadcast) - नया तरीका
+# 2. GROUP BROADCAST (/grp_broadcast) - 🟢 बदला हुआ
 # -----------------------------------------------------
 
 @app.on_message(filters.command("grp_broadcast") & filters.private & filters.user(OWNER_ID))
@@ -153,6 +172,7 @@ async def broadcast_group(client: Client, message: Message):
     
     logger.info(f"Starting Group broadcast to {total_targets} groups.")
 
+    # --- मॉडिफाइड: स्लीप और DB क्लीनअप जोड़ा गया ---
     for chat_id in group_chat_ids:
         pti, sh = await send_broadcast_message(client, chat_id, b_msg)
         
@@ -160,24 +180,34 @@ async def broadcast_group(client: Client, message: Message):
             success += 1
         else:
             failed += 1
+            # --- नया: यदि बॉट किक हो गया हो तो DB क्लीन करें ---
+            if sh == "Blocked" or sh == "Deleted/Invalid":
+                logger.info(f"ग्रुप {chat_id} को ब्रॉडकास्ट विफल (Reason: {sh})। DB से डिलीट किया जा रहा है।")
+                group_tracking_collection.delete_one({"_id": chat_id})
+                
         done += 1
+        
+        # --- नया: फ्लड से बचने के लिए स्लीप (0.1 सेकंड) ---
+        await asyncio.sleep(0.1) 
         
         if done % 20 == 0 or done == total_targets:
             try:
                 await sts.edit_text(f"🚀 **Group Broadcast Progress...**\n" 
                                     f"Total Groups: **{total_targets}**\n" 
                                     f"Completed: **{done}**\n"
-                                    f"Success: **{success}** ✨ | Failed: **{failed}** 💔",
+                                    f"Success: **{success}** ✨ | Failed (Cleaned): **{failed}** 💔",
                                     parse_mode=ParseMode.MARKDOWN)
             except Exception:
                 pass
+    # --- मॉडिफिकेशन का अंत ---
                 
     time_taken = datetime.timedelta(seconds=int(time.time()-start_time_broadcast))
     final_message = (f"🎉 **Group Broadcast पूरा हुआ!**\n" 
                      f"समय लगा: **{time_taken}**\n\n" 
                      f"Total Groups: **{total_targets}**\n" 
                      f"सफलतापूर्वक भेजा: **{success}** ✨\n" 
-                     f"Failed: **{failed}** 💔")
+                     f"Failed (and Cleaned): **{failed}** 💔")
     
     await sts.edit_text(final_message, parse_mode=ParseMode.MARKDOWN)
     await store_message(client, message)
+# --- 🟢 बदले हुए फ़ंक्शन का अंत 🟢 ---
