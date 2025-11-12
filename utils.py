@@ -1,4 +1,4 @@
-# utils.py
+utils.py
 
 import re
 import asyncio
@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 
 import pytz
 from pyrogram import Client
+# pyrogram imports for new functions
 from pyrogram.types import Message, InlineKeyboardMarkup, ChatPermissions
 from pyrogram.enums import ChatMemberStatus, ChatType, ParseMode
 from pyrogram.raw.functions.messages import SetTyping
@@ -31,7 +32,6 @@ except ImportError:
     g4f = None
     G4F_MODEL = None
     print("g4f library not found. Tier 0.5 AI will be disabled.")
-# google.genai has been REMOVED.
 
 # Configuration imports (Assume these are correctly defined in config.py)
 from config import (
@@ -39,7 +39,8 @@ from config import (
     group_tracking_collection, user_tracking_collection, earning_tracking_collection,
     reset_status_collection, biolink_exceptions_collection, app, logger,
     MAX_MESSAGES_THRESHOLD, PRUNE_PERCENTAGE, URL_PATTERN, OWNER_ID,
-    user_cooldowns, COMMAND_COOLDOWN_TIME, chat_message_cooldowns, MESSAGE_REPLY_COOLDOWN_TIME
+    user_cooldowns, COMMAND_COOLDOWN_TIME, chat_message_cooldowns, MESSAGE_REPLY_COOLDOWN_TIME,
+    BOT_OWNER_USERNAME, ASBHAI_USERNAME # Ensure ASBHAI_USERNAME is defined in config if used
 )
 
 # Global dictionary to track the last earning message time for each user
@@ -61,7 +62,7 @@ semantic_model = None
 GEMINI_CLIENT = None
 
 # --- NEW: Custom Bot/Owner/Filter Details ---
-BOT_OWNER_USERNAME = "@asbhaibsr"
+# NOTE: BOT_OWNER_USERNAME is imported from config now
 FILTER_BOT_USERNAME = "@asfilter_bot"
 BOT_NAME = "as_ai_assistant" 
 
@@ -81,20 +82,20 @@ AI_MODES_MAP = {
 async def send_and_auto_delete_reply(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
     """
     Sends a reply and sets a task to auto-delete both the command and the reply after a delay.
-    This function name is kept for compatibility with events.py
-    NOTE: In events.py, the wrapper 'send_and_auto_delete_reply' is now using this utility function.
     """
     sent_message = None
-    user_info_str = ""
     
-    # Simplified text prep logic (keeping the core functionality intact)
+    # --- 🟢 बदला हुआ कोड (बदलाव 2) 🟢 ---
+    # Simplified text prep logic (FIX: आपके अनुरोध के अनुसार कमांड लॉगिंग हटा दी गई)
     text_to_send = text
-    if message.command and text:
-        command_name = message.command[0]
-        user_info_str = ""
-        if message.from_user:
-            user_info_str = f" (द्वारा: @{message.from_user.username})" if message.from_user.username else f" (द्वारा: {message.from_user.first_name})"
-        text_to_send = f"**कमांड:** `{command_name}`{user_info_str}\n\n{text}"
+    # if message.command and text:
+    #     command_name = message.command[0]
+    #     user_info_str = ""
+    #     if message.from_user:
+    #         user_info_str = f" (द्वारा: @{message.from_user.username})" if message.from_user.username else f" (द्वारा: {message.from_user.first_name})"
+    #     text_to_send = f"**कमांड:** `{command_name}`{user_info_str}\n\n{text}"
+    # --- 🟢 बदले हुए कोड का अंत 🟢 ---
+
 
     if photo:
         sent_message = await message.reply_photo(
@@ -138,7 +139,6 @@ async def send_and_auto_delete_reply(message: Message, text: str = None, photo: 
     return sent_message
 
 # 🌟 CRITICAL FIX: Add an alias for the old function name to fix ImportError in commands.py
-# This function is being imported by `commands.py` but the name was changed above.
 async def delete_after_delay_for_message(message: Message, text: str = None, photo: str = None, sticker: str = None, reply_markup: InlineKeyboardMarkup = None, parse_mode: ParseMode = ParseMode.MARKDOWN, disable_web_page_preview: bool = False):
     """
     Alias for send_and_auto_delete_reply to maintain compatibility with commands.py.
@@ -240,9 +240,6 @@ async def prune_old_messages():
 async def store_message(client: Client, message: Message):
     try:
         # CRITICAL FIX: The check below STOPS ALL COMMANDS from being tracked/saved, which is correct.
-        # However, calling this function in commands.py caused issues.
-        # We rely on the commands.py to remove the call to this, or if needed,
-        # manually call update_user_info/update_group_info in commands.py
         if message.from_user and (message.from_user.is_bot or message.text and message.text.startswith('/')):
             return
         
@@ -275,18 +272,12 @@ async def store_message(client: Client, message: Message):
             # Condition for conversational learning: User-to-User or Bot-to-User (if bot is the current message sender)
             is_u2u_conv = (last_user_id is not None and last_user_id != current_user_id and 
                             last_user_id != bot_id and current_user_id != bot_id)
-            # You requested bot's response pattern also to be saved, but typically that's saved by the AI response flow.
-            # Keeping the U2U logic as it's the core of organic learning.
 
             if is_u2u_conv and last_message.get("type") == "text" and current_message_type == "text":
                 
                 trigger_content = last_message["content"].lower().strip() # Store trigger in lowercase for flexible matching
                 reply_content = current_message_content.strip()
                 
-                # Check with AI (MongoDB not necessary, local check is sufficient for now)
-                # You requested AI check on save, but for learning patterns, direct save is standard.
-                # The AI check will happen during the response generation (TIER 0.5/0).
-
                 conversational_learning_collection.update_one(
                     {"trigger_content": trigger_content, "trigger_type": "text"},
                     {"$push": {
@@ -340,6 +331,14 @@ async def store_message(client: Client, message: Message):
                               }},
                     upsert=True
                 )
+                
+                # --- 🟢 नया कोड (बदलाव 1) यहाँ डालें 🟢 ---
+                # ग्रुप-आधारित लीडरबोर्ड के लिए ग्रुप का काउंटर बढ़ाएँ
+                group_tracking_collection.update_one(
+                    {"_id": message.chat.id},
+                    {"$inc": {"total_message_count": 1}}
+                )
+                # --- 🟢 नए कोड का अंत 🟢 ---
 
         await prune_old_messages()
 
@@ -887,3 +886,196 @@ async def apply_punishment(client: Client, message: Message, violation_type: str
                 
     except Exception as e:
         logger.error(f"Error applying punishment: {e}")
+
+# --- 🟢 नया कोड: टॉप ग्रुप्स और मंथली रीसेट (बदलाव 3) 🟢 ---
+
+async def get_top_active_groups():
+    """
+    group_tracking_collection से मैसेज काउंट के आधार पर टॉप 5 ग्रुप्स फ़ेच करता है।
+    """
+    try:
+        pipeline = [
+            {"$match": {"total_message_count": {"$gt": 0}}},
+            {"$sort": {"total_message_count": -1}},
+            {"$limit": 5}
+        ]
+        top_groups_data = list(group_tracking_collection.aggregate(pipeline))
+        
+        top_group_details = []
+        for group_data in top_groups_data:
+            chat_id = group_data["_id"]
+            owner_id = None
+            owner_name = "Unknown"
+            
+            # ग्रुप ओनर को खोजने का प्रयास करें
+            try:
+                chat = await app.get_chat(chat_id)
+                if chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+                    async for member in app.get_chat_members(chat_id, filter=ChatMemberStatus.OWNER):
+                        owner_id = member.user.id
+                        owner_name = member.user.first_name
+                        if member.user.username:
+                            owner_name = f"@{member.user.username}"
+                        break # ओनर मिल गया
+            except Exception as e:
+                logger.warning(f"ग्रुप {chat_id} के लिए ओनर नहीं मिला: {e}")
+
+            top_group_details.append({
+                "group_id": chat_id,
+                "title": group_data.get("title", "Unknown Group"),
+                "username": group_data.get("username"),
+                "message_count": group_data.get("total_message_count", 0),
+                "owner_id": owner_id,
+                "owner_name": owner_name
+            })
+        
+        logger.info(f"टॉप एक्टिव ग्रुप्स फ़ेच किए: {len(top_group_details)} results.")
+        return top_group_details
+
+    except Exception as e:
+        logger.error(f"टॉप एक्टिव ग्रुप्स फ़ेच करने में एरर: {e}")
+        return []
+
+async def broadcast_to_winners(client: Client, top_groups: list):
+    """
+    जीतने वाले ग्रुप्स के ओनर्स को ब्रॉडकास्ट मैसेज भेजता है।
+    (आपके अनुरोध के अनुसार टॉप 5 को)
+    """
+    logger.info("मंथली विनर्स को ब्रॉडकास्ट किया जा रहा है...")
+    prize_map = {
+        1: "₹90", 2: "₹60", 3: "₹30", 4: "₹10", 5: "₹10"
+    }
+    
+    for i, group in enumerate(top_groups):
+        rank = i + 1
+        prize = prize_map.get(rank, "No Prize")
+        owner_id = group.get("owner_id")
+        
+        if owner_id:
+            message_text = (
+                f"🎉 **बधाई हो!** 🎉\n\n"
+                f"आपके ग्रुप, **{group['title']}**, ने इस महीने के एक्टिविटी लीडरबोर्ड में **रैंक {rank}** हासिल की है!\n\n"
+                f"**आपका पुरस्कार:** **{prize}**\n\n"
+                f"अपना इनाम लेने के लिए कृपया बॉट ओनर ({BOT_OWNER_USERNAME}) से संपर्क करें। इतने सक्रिय रहने के लिए धन्यवाद!"
+            )
+            try:
+                await client.send_message(chat_id=owner_id, text=message_text)
+                logger.info(f"ग्रुप {group['group_id']} के ओनर {owner_id} को विनर नोटिफिकेशन भेजा गया।")
+            except Exception as e:
+                logger.warning(f"ओनर {owner_id} को विनर नोटिफिकेशन भेजने में विफल: {e}")
+
+async def reset_monthly_data(client: Client):
+    """
+    सभी मंथली काउंट्स को रीसेट करता है और विनर्स को ब्रॉडकास्ट करता है।
+    """
+    logger.info("मंथली रीसेट शुरू हो रहा है...")
+    
+    # 1. रीसेट से पहले विनर्स की लिस्ट लें
+    top_5_groups = await get_top_active_groups()
+    
+    # 2. यूजर की कमाई रीसेट करें
+    earning_tracking_collection.update_many(
+        {},
+        {"$set": {"group_message_count": 0}}
+    )
+    
+    # 3. ग्रुप काउंट्स रीसेट करें
+    group_tracking_collection.update_many(
+        {},
+        {"$set": {"total_message_count": 0}}
+    )
+    
+    logger.info("मंथली कमाई और ग्रुप मैसेज काउंट सफलतापूर्वक रीसेट हो गए।")
+    
+    # 4. विनर्स (टॉप 5) को ब्रॉडकास्ट करें
+    await broadcast_to_winners(client, top_5_groups)
+    
+    # 5. रीसेट स्टेटस अपडेट करें
+    now = datetime.now(pytz.timezone('Asia/Kolkata'))
+    reset_status_collection.update_one(
+        {"_id": "last_auto_reset"},
+        {"$set": {"last_reset_timestamp": now, "month": now.month, "year": now.year}},
+        upsert=True
+    )
+    logger.info("मंथली रीसेट पूरा हुआ और स्टेटस अपडेट हो गया।")
+
+async def check_and_perform_monthly_reset(client: Client):
+    """
+    चेक करता है कि क्या नया महीना शुरू हो गया है और रीसेट ट्रिगर करता है।
+    बॉट के स्टार्टअप पर कॉल किया जाना है।
+    """
+    now = datetime.now(pytz.timezone('Asia/Kolkata'))
+    current_month = now.month
+    current_year = now.year
+    
+    status = reset_status_collection.find_one({"_id": "last_auto_reset"})
+    
+    if status:
+        last_reset_month = status.get("month")
+        last_reset_year = status.get("year")
+        
+        # चेक करें कि क्या इस महीने और साल के लिए रीसेट पहले ही हो चुका है
+        if last_reset_month == current_month and last_reset_year == current_year:
+            logger.info(f"{current_month}/{current_year} के लिए मंथली रीसेट पहले ही हो चुका है। स्किप कर रहे हैं।")
+            return
+    
+    # यदि कोई स्टेटस नहीं है, या यदि यह नया महीना है, तो रीसेट करें
+    logger.info(f"नया महीना ({current_month}/{current_year}) मिला। ऑटो-रीसेट किया जा रहा है।")
+    await reset_monthly_data(client)
+    
+# --- 🟢 नए कोड का अंत 🟢 ---
+
+# main.py
+
+import threading
+import logging
+from pyrogram import idle
+import nltk
+import os
+import sys
+
+# NLTK data download check and setup
+try:
+    # Set the NLTK data path to a writeable directory within the workspace.
+    # This is important for platforms like Koyeb where root access is limited.
+    data_dir = os.path.join(os.getcwd(), '.nltk_data')
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+    nltk.data.path.append(data_dir)
+
+    # First, try to find the lexicon. This will raise a LookupError if not found.
+    nltk.data.find('sentiment/vader_lexicon.zip')
+    print("vader_lexicon is already downloaded.")
+except LookupError:
+    # If a LookupError occurs, it means the data needs to be downloaded.
+    print("vader_lexicon not found. Downloading now...")
+    
+    # Set the NLTK data path and then download the lexicon.
+    nltk.download('vader_lexicon', download_dir=data_dir)
+    print("Download complete.")
+except Exception as e:
+    # Handle any other unexpected errors gracefully.
+    print(f"An unexpected error occurred: {e}", file=sys.stderr)
+    sys.exit(1)
+
+# Import necessary components from other files
+from config import app, logger, flask_app
+from web import run_flask_app
+
+# It's important to import commands and events so Pyrogram can register the handlers
+import commands
+import events
+import broadcast_handler # 🌟 नई ब्रॉडकास्ट फ़ाइल इम्पोर्ट की गई 🌟
+
+if __name__ == "__main__":
+    logger.info("Starting Flask health check server in a separate thread...")
+    flask_thread = threading.Thread(target=run_flask_app)
+    flask_thread.start()
+
+    logger.info("Starting Pyrogram bot...")
+    app.run()
+    
+    # Keep the bot running indefinitely
+    idle()
+
+    # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
