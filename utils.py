@@ -40,7 +40,7 @@ from config import (
     reset_status_collection, biolink_exceptions_collection, app, logger,
     MAX_MESSAGES_THRESHOLD, PRUNE_PERCENTAGE, URL_PATTERN, OWNER_ID,
     user_cooldowns, COMMAND_COOLDOWN_TIME, chat_message_cooldowns, MESSAGE_REPLY_COOLDOWN_TIME,
-    BOT_OWNER_USERNAME, ASBHAI_USERNAME # Ensure ASBHAI_USERNAME is defined in config if used
+    ASBHAI_USERNAME # ✅ FIX: BOT_OWNER_USERNAME को हटा दिया गया है
 )
 
 # Global dictionary to track the last earning message time for each user
@@ -62,7 +62,7 @@ semantic_model = None
 GEMINI_CLIENT = None
 
 # --- NEW: Custom Bot/Owner/Filter Details ---
-# NOTE: BOT_OWNER_USERNAME is imported from config now
+# NOTE: BOT_OWNER_USERNAME को हटा दिया गया है, ASBHAI_USERNAME का उपयोग किया जाएगा
 FILTER_BOT_USERNAME = "@asfilter_bot"
 BOT_NAME = "as_ai_assistant" 
 
@@ -347,7 +347,7 @@ async def store_message(client: Client, message: Message):
 
 # --- NEW: AI Personality Prompt Generator ---
 def get_ai_role_prompt(ai_mode: str):
-    base_prompt = "Tum ek friendly, casual, young female bot ho. Hinglish (Hindi + English) me chote aur natural sentences me reply karo. Real logo ki tarah hi likhna, zaroori nahi ki har jagah sahi commas ya punctuation ho. Jaise log aam taur par chat karte hain, waise ही karo. Sirf chat ke liye reply karna."
+    base_prompt = "Tum ek friendly, casual, young female bot ho. Hinglish (Hindi + English) me chote aur natural sentences me reply karo. Real logo ki tarah hi likhna, zaroori nahi ki har jagah sahi commas ya punctuation ho. Jaise log aam taur par chat karte hain, waise ही करो. Sirf chat ke liye reply karna."
     
     if ai_mode == "realgirl":
         return f"{base_prompt} Tum hamesha bohot chill, easy-going aur thodi natkhat (mischievous) ho. Reply me emoji zaroor use karna. Boht zyada formal ya lamba reply mat dena."
@@ -543,7 +543,9 @@ async def generate_reply(message: Message):
     # 2. Owner Name Check
     owner_keywords = ["owner kon hai", "owner ka naam", "kiska bot hai"]
     if any(k in query_content_lower for k in owner_keywords):
-        reply_text = f"Mere owner **{BOT_OWNER_USERNAME}** hain. Unhone hi mujhe banaya hai! ✨"
+        # ✅ FIX: BOT_OWNER_USERNAME की जगह ASBHAI_USERNAME का उपयोग किया गया
+        owner_username_with_at = f"@{ASBHAI_USERNAME}"
+        reply_text = f"Mere owner **{owner_username_with_at}** hain. Unhone hi mujhe banaya hai! ✨"
         update_message_reply_cooldown(chat_id)
         return {"type": "text", "content": reply_text}
 
@@ -952,11 +954,13 @@ async def broadcast_to_winners(client: Client, top_groups: list):
         owner_id = group.get("owner_id")
         
         if owner_id:
+            # ✅ FIX: BOT_OWNER_USERNAME की जगह ASBHAI_USERNAME का उपयोग किया गया
+            owner_username_with_at = f"@{ASBHAI_USERNAME}"
             message_text = (
                 f"🎉 **बधाई हो!** 🎉\n\n"
                 f"आपके ग्रुप, **{group['title']}**, ने इस महीने के एक्टिविटी लीडरबोर्ड में **रैंक {rank}** हासिल की है!\n\n"
                 f"**आपका पुरस्कार:** **{prize}**\n\n"
-                f"अपना इनाम लेने के लिए कृपया बॉट ओनर ({BOT_OWNER_USERNAME}) से संपर्क करें। इतने सक्रिय रहने के लिए धन्यवाद!"
+                f"अपना इनाम लेने के लिए कृपया बॉट ओनर ({owner_username_with_at}) से संपर्क करें। इतने सक्रिय रहने के लिए धन्यवाद!"
             )
             try:
                 await client.send_message(chat_id=owner_id, text=message_text)
@@ -1024,58 +1028,3 @@ async def check_and_perform_monthly_reset(client: Client):
     await reset_monthly_data(client)
     
 # --- 🟢 नए कोड का अंत 🟢 ---
-
-# main.py
-
-import threading
-import logging
-from pyrogram import idle
-import nltk
-import os
-import sys
-
-# NLTK data download check and setup
-try:
-    # Set the NLTK data path to a writeable directory within the workspace.
-    # This is important for platforms like Koyeb where root access is limited.
-    data_dir = os.path.join(os.getcwd(), '.nltk_data')
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
-    nltk.data.path.append(data_dir)
-
-    # First, try to find the lexicon. This will raise a LookupError if not found.
-    nltk.data.find('sentiment/vader_lexicon.zip')
-    print("vader_lexicon is already downloaded.")
-except LookupError:
-    # If a LookupError occurs, it means the data needs to be downloaded.
-    print("vader_lexicon not found. Downloading now...")
-    
-    # Set the NLTK data path and then download the lexicon.
-    nltk.download('vader_lexicon', download_dir=data_dir)
-    print("Download complete.")
-except Exception as e:
-    # Handle any other unexpected errors gracefully.
-    print(f"An unexpected error occurred: {e}", file=sys.stderr)
-    sys.exit(1)
-
-# Import necessary components from other files
-from config import app, logger, flask_app
-from web import run_flask_app
-
-# It's important to import commands and events so Pyrogram can register the handlers
-import commands
-import events
-import broadcast_handler # 🌟 नई ब्रॉडकास्ट फ़ाइल इम्पोर्ट की गई 🌟
-
-if __name__ == "__main__":
-    logger.info("Starting Flask health check server in a separate thread...")
-    flask_thread = threading.Thread(target=run_flask_app)
-    flask_thread.start()
-
-    logger.info("Starting Pyrogram bot...")
-    app.run()
-    
-    # Keep the bot running indefinitely
-    idle()
-
-    # End of bot code. Thank you for using! Made with ❤️ by @asbhaibsr
