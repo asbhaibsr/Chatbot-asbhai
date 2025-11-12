@@ -1,4 +1,4 @@
-#  commands.py
+# commands.py
 
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
@@ -15,11 +15,13 @@ from config import (
     biolink_exceptions_collection, earning_tracking_collection, reset_status_collection, logger,
     OWNER_ID, BOT_PHOTO_URL, UPDATE_CHANNEL_USERNAME, ASBHAI_USERNAME, ASFILTER_BOT_USERNAME, REPO_LINK
 )
+# --- 🟢 बदलाव 1: get_top_active_groups को जोड़ा गया 🟢 ---
 from utils import (
     is_on_command_cooldown, update_command_cooldown, update_group_info, update_user_info,
     get_top_earning_users, reset_monthly_earnings_manual, delete_after_delay_for_message,
-    store_message, is_admin_or_owner
+    store_message, is_admin_or_owner, get_top_active_groups # 🟢 यहाँ जोड़ा गया 🟢
 )
+# --- 🟢 बदलाव 1 का अंत 🟢 ---
 
 import callbacks # <--- This line is essential for importing callbacks.py
 import broadcast_handler # <--- 🌟 New broadcast file imported 🌟
@@ -31,9 +33,9 @@ send_and_auto_delete_reply = delete_after_delay_for_message
 AI_MODES_MAP = {
     "off": {"label": "❌ AI Mᴏᴅᴇ Oғғ", "display": "❌ Oғғ"},
     "realgirl": {"label": "👧 Rᴇᴀʟ Gɪʀʟ", "display": "👧 Rᴇᴀʟ"},
-    "romanticgirl": {"label": "💖 Rᴏᴍᴀɴ𝘁𝗶𝗰 Gɪʀʟ", "display": "💖 Rᴏᴍ"},
-    "motivationgirl": {"label": "💪 Mᴏ𝘁𝗶𝘃𝗮𝘁𝗶𝗼𝗻 Gɪʀʟ", "display": "💪 Mᴏᴛ𝗶"},
-    "studygirl": {"label": "📚 S𝘁𝘂𝗱𝘆 Gɪʀʟ", "display": "📚 S𝘁𝘂𝗱𝘆"},
+    "romanticgirl": {"label": "💖 Rᴏᴍᴀɴ𝘁𝗶𝗰 Gɪʀ𝗹", "display": "💖 Rᴏᴍ"},
+    "motivationgirl": {"label": "💪 Mᴏ𝘁𝗶𝘃𝗮𝘁𝗶𝗼𝗻 Gɪʀ𝗹", "display": "💪 Mᴏᴛ𝗶"},
+    "studygirl": {"label": "📚 S𝘁𝘂𝗱𝘆 Gɪʀ𝗹", "display": "📚 S𝘁𝘂𝗱𝘆"},
     "gemini": {"label": "✨ Gᴇ𝗺𝗶𝗻𝗶 (Sᴜ𝗽𝗲𝗿 AI)", "display": "✨ Gᴇ𝗺𝗶𝗻𝗶"},
 }
 # -----------------------------------------------------
@@ -79,81 +81,76 @@ async def start_private_command(client: Client, message: Message):
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     logger.info(f"Private start command processed for user {message.from_user.id}.")
 
-# ... [Other private commands - topusers, stats, groups, leavegroup, cleardata, deletemessage, delsticker, clearearning, restart, clearall, clearmydata - are kept as is, as they were not the focus of the requested fix, but placed here for completeness.]
-
+# --- 🟢 बदला हुआ: /topusers अब टॉप ग्रुप्स दिखाता है 🟢 ---
 @app.on_message(filters.command("topusers") & (filters.private | filters.group))
 async def top_users_command(client: Client, message: Message):
     if is_on_command_cooldown(message.from_user.id):
         return
     update_command_cooldown(message.from_user.id)
 
-    top_users = await get_top_earning_users()
-    if not top_users:
-        await send_and_auto_delete_reply(message, text="😢 𝗡𝗼 𝘂𝘀𝗲𝗿𝘀 𝗮𝗿𝗲 𝗼𝗻 𝘁𝗵𝗲 𝗹𝗲𝗮𝗱𝗲𝗿𝗯𝗼𝗮𝗿𝗱 𝘆𝗲𝘁! 𝗕𝗲 𝘁𝗵𝗲 𝗳𝗶𝗿𝘀𝘁 𝗯𝘆 𝗯𝗲𝗶𝗻𝗴 𝗮𝗰𝘁𝗶𝘃𝗲! ✨\n\n**Powered By:** @asbhaibsr", parse_mode=ParseMode.MARKDOWN)
+    # --- मॉडिफाइड: यूजर्स की जगह टॉप ग्रुप्स फ़ेच करें ---
+    top_groups = await get_top_active_groups() 
+    
+    if not top_groups:
+        await send_and_auto_delete_reply(message, text="😢 **कोई भी ग्रुप अभी लीडरबोर्ड पर नहीं है!**\n\n**Powered By:** @asbhaibsr", parse_mode=ParseMode.MARKDOWN)
         return
 
-    earning_messages = ["👑 **𝗧𝗼𝗽 𝗔𝗰𝘁𝗶𝘃𝗲 𝗨𝘀𝗲𝗿𝘀 - ✨ 𝗩𝗜𝗣 𝗟𝗲𝗮𝗱𝗲𝗿𝗯𝗼𝗮𝗮𝗿𝗱! ✨** 👑\n\n"]
+    earning_messages = ["👑 **Top 5 Active Groups - Monthly Leaderboard!** 👑\n\n"]
+    
+    # --- नया: ग्रुप्स के लिए प्राइज स्ट्रक्चर ---
     prizes = {
-        1: "💰 ₹50", 2: "💸 ₹30", 3: "🎁 ₹20",
-        4: f"🎬 1 𝗪𝗲𝗲𝗸 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗣𝗹𝗮𝗻 𝗼𝗳 @{ASFILTER_BOT_USERNAME}",
-        5: f"🎬 3 𝗗𝗮𝘆𝘀 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗣𝗹𝗮𝗻 𝗼𝗳 @{ASFILTER_BOT_USERNAME}"
+        1: "💰 ₹90", 2: "💸 ₹60", 3: "🎁 ₹30",
+        4: "🏅 ₹10", 5: "🏅 ₹10"
     }
 
-    for i, user in enumerate(top_users[:5]):
+    for i, group in enumerate(top_groups[:5]):
         rank = i + 1
-        user_name = user.get('first_name', 'Unknown User')
-        username_str = f"@{user.get('username')}" if user.get('username') else f"𝗜𝗗: `{user.get('user_id')}`"
-        message_count = user.get('message_count', 0)
-        prize_str = prizes.get(rank, "🏅 𝗡𝗼 𝗣𝗿𝗶𝘇𝗲")
-
-        group_info = ""
-        last_group_id = user.get('last_active_group_id')
-        last_group_title = user.get('last_active_group_title', '𝗨𝗻𝗸𝗻𝗼𝘄𝗻 𝗚𝗿𝗼𝘂𝗽')
-
-        if last_group_id:
-            try:
-                chat_obj = await client.get_chat(last_group_id)
-                if chat_obj.type == ChatType.PRIVATE:
-                    group_info = f"   • 𝗔𝗰𝘁𝗶𝘃𝗲 𝗶𝗻: **[𝗣𝗿𝗶𝘃𝗮𝘁𝗲 𝗖𝗵𝗮𝘁](tg://user?id={user.get('user_id')})**\n"
-                elif chat_obj.username:
-                    group_info = f"   • 𝗔𝗰𝘁𝗶𝘃𝗲 𝗶𝗻: **[{chat_obj.title}](https://t.me/{chat_obj.username})**\n"
-                else:
-                    try:
-                        invite_link = await client.export_chat_invite_link(last_group_id)
-                        group_info = f"   • 𝗔𝗰𝘁𝗶𝘃𝗲 𝗶𝗻: **[{chat_obj.title}]({invite_link})**\n"
-                    except Exception:
-                        group_info = f"   • 𝗔𝗰𝘁𝗶𝘃𝗲 𝗶𝗻: **{chat_obj.title}** (𝗣𝗿𝗶𝘃𝗮𝘁𝗲 𝗚𝗿𝗼𝘂𝗽)\n"
-            except Exception as e:
-                logger.warning(f"Could not fetch chat info for group ID {last_group_id} for leaderboard: {e}")
-                group_info = f"   • 𝗔𝗰𝘁𝗶𝘃𝗲 𝗶𝗻: **{last_group_title}** (𝗜𝗻𝗳𝗼 𝗡𝗼𝘁 𝗔𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲)\n"
-        else:
-            group_info = "   • 𝗔𝗰𝘁𝗶𝘃𝗲 𝗶𝗻: **𝗡𝗼 𝗚𝗿𝗼𝘂𝗽 𝗔𝗰𝘁𝗶𝘃𝗶𝘁𝘆**\n"
+        group_title = group.get('title', 'Unknown Group')
+        message_count = group.get('message_count', 0)
+        prize_str = prizes.get(rank, "🏅 No Prize")
+        
+        # --- नया: ग्रुप और ओनर लिंक्स (ब्लू टेक्स्ट) ---
+        group_link = f"**{group_title}**" # डिफ़ॉल्ट
+        if group.get('username'):
+            # ग्रुप नाम को ब्लू लिंक बनाएँ
+            group_link = f"[{group_title}](https://t.me/{group.get('username')})"
+        
+        owner_name = group.get('owner_name', 'Unknown')
+        owner_link = f"**{owner_name}**" # डिफ़ॉल्ट
+        if group.get('owner_id'):
+            # ओनर नाम को ब्लू लिंक बनाएँ
+            owner_link = f"[{owner_name}](tg://user?id={group.get('owner_id')})"
+        # --- नए का अंत ---
 
         earning_messages.append(
-            f"**{rank}.** 🌟 **{user_name}** ({username_str}) 🌟\n"
-            f"   • 𝗧𝗼𝘁𝗮𝗹 𝗠𝗲𝘀𝘀𝗮𝗴𝗲𝘀: **{message_count} 💬**\n"
-            f"   • 𝗣𝗼𝘁𝗲𝗻𝘁𝗶𝗮𝗹 𝗣𝗿𝗶𝘇𝗲: **{prize_str}**\n"
-            f"{group_info}"
+            f"**{rank}.** 🌟 **{group_link}** 🌟\n"
+            f"   • **Owner:** {owner_link}\n"
+            f"   • **Total Messages:** {message_count} 💬\n"
+            f"   • **Prize:** **{prize_str}**\n"
         )
     
     earning_messages.append(
-        "\n𝗧𝗵𝗶𝘀 𝘀𝘆𝘀𝘁𝗲𝗺 𝗿𝗲𝘀𝗲𝘁𝘀 𝗼𝗻 𝘁𝗵𝗲 𝗳𝗶𝗿𝘀𝘁 𝗼𝗳 𝗲𝘃𝗲𝗿𝘆 𝗺𝗼𝗻𝘁𝗵!\n"
-        "𝗨𝘀𝗲 `/help` 𝘁𝗼 𝗸𝗻𝗼𝘄 𝘁𝗵𝗲 𝗚𝗿𝗼𝘂𝗽 𝗿𝘂𝗹𝗲𝘀."
+        "\n*यह सिस्टम हर महीने की पहली तारीख को ऑटोमैटिक रीसेट हो जाता है!*\n"
+        "**Powered By:** @asbhaibsr"
     )
+    
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("💰 Wɪᴛʜᴅʀᴀᴡ", url=f"https://t.me/{ASBHAI_USERNAME}"),
-                InlineKeyboardButton("💰 E𝗮𝗿𝗻𝗶𝗻𝗴 Rᴜ𝗹𝗲ꜱ", callback_data="show_earning_rules")
+                InlineKeyboardButton("💰 Claim Prize", url=f"https://t.me/{ASBHAI_USERNAME}"),
+                InlineKeyboardButton("❓ Support Group", url="https://t.me/aschat_group")
             ]
         ]
     )
+    
     await send_and_auto_delete_reply(message, text="\n".join(earning_messages), reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+    
     if message.from_user:
         await update_user_info(message.from_user.id, message.from_user.username, message.from_user.first_name)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await update_group_info(message.chat.id, message.chat.title, message.chat.username)
-    logger.info(f"Top users command processed for user {message.from_user.id} in chat {message.chat.id}.")
+    logger.info(f"टॉप ग्रुप्स कमांड यूजर {message.from_user.id} द्वारा चैट {message.chat.id} में प्रोसेस की गई।")
+# --- 🟢 बदले हुए फ़ंक्शन का अंत 🟢 ---
 
 
 @app.on_message(filters.command("stats") & filters.private)
@@ -319,9 +316,48 @@ async def clear_data_command(client: Client, message: Message):
         await send_and_auto_delete_reply(message, text="𝗦𝗼𝗿𝗿𝘆, 𝗱𝗮𝗿𝗹𝗶𝗻𝗴! 𝗧𝗵𝗶𝘀 𝗰𝗼𝗺𝗺𝗮𝗻𝗱 𝗶𝘀 𝗼𝗻𝗹𝘆 𝗳𝗼𝗿 𝗺𝘆 𝗯𝗼𝘀𝘀. 🤫", parse_mode=ParseMode.MARKDOWN)
         return
 
+    # --- 🟢 बदलाव 2: /cleardata (बिना आर्ग्युमेंट) लॉजिक 🟢 ---
     if len(message.command) < 2:
-        await send_and_auto_delete_reply(message, text="𝗛𝗼𝘄 𝗺𝘂𝗰𝗵 𝗱𝗮𝘁𝗮 𝘁𝗼 𝗰𝗹𝗲𝗮𝗻? 𝗧𝗲𝗹𝗹 𝗺𝗲 𝘁𝗵𝗲 𝗽𝗲𝗿𝗰𝗲𝗻𝘁𝗮𝗴𝗲, 𝗹𝗶𝗸𝗲: `/cleardata 10%` 𝗼𝗿 `/cleardata 100%`! 🧹", parse_mode=ParseMode.MARKDOWN)
-        return
+        # यूजर ने /cleardata बिना परसेंटेज के चलाया
+        try:
+            logger.info("जंक यूजर डेटा क्लीनअप चलाया जा रहा है...")
+            
+            # user_tracking में उन यूजर्स को ढूँढें जो earning_tracking में नहीं हैं
+            # इसका मतलब है कि वे जुड़े लेकिन कभी कोई ट्रैक किया गया मैसेज नहीं भेजा
+            users_pipeline = [
+                {
+                    '$lookup': {
+                        'from': 'monthly_earnings_data',
+                        'localField': '_id',
+                        'foreignField': '_id',
+                        'as': 'earnings'
+                    }
+                }, {
+                    '$match': {
+                        'earnings': { '$eq': [] }
+                    }
+                }
+            ]
+            
+            junk_users = list(user_tracking_collection.aggregate(users_pipeline))
+            # ओनर को छोड़कर सभी जंक यूजर IDs
+            junk_user_ids = [user['_id'] for user in junk_users if user['_id'] != OWNER_ID]
+            
+            deleted_count = 0
+            if junk_user_ids:
+                result = user_tracking_collection.delete_many({"_id": {"$in": junk_user_ids}})
+                deleted_count = result.deleted_count
+                
+            await send_and_auto_delete_reply(message, text=f"🧹 **जंक डेटा क्लीनअप पूरा हुआ!**\n\nमैंने **{deleted_count}** जंक यूजर एंट्री (वे यूजर्स जो जुड़े लेकिन कभी कोई ट्रैक किया गया मैसेज नहीं भेजा) को ढूँढ कर डिलीट कर दिया है।\n\n*नोट: ब्लॉक किए गए यूजर्स ब्रॉडकास्ट के दौरान ऑटोमैटिकली क्लीन हो जाते हैं।*", parse_mode=ParseMode.MARKDOWN)
+            logger.info(f"जंक क्लीनअप चला, {deleted_count} यूजर्स डिलीट हुए।")
+        
+        except Exception as e:
+             await send_and_auto_delete_reply(message, text=f"❌ **जंक क्लीनअप के दौरान एरर:** {e}", parse_mode=ParseMode.MARKDOWN)
+             logger.error(f"Error during /cleardata junk cleanup: {e}")
+        
+        return # फ़ंक्शन को रोकें
+    # --- 🟢 बदलाव 2 का अंत 🟢 ---
+
 
     percentage_str = message.command[1].strip('%')
     try:
@@ -619,16 +655,26 @@ async def set_commands_command(client: Client, message: Message):
         return
 
     try:
+        # --- 🟢 बदलाव 3: नई: एक्सपैंडेड कमांड लिस्ट 🟢 ---
         commands = [
+            # यूजर-फेसिंग कमांड्स
             BotCommand("start", "Start the bot"),
             BotCommand("help", "Show help menu"),
-            BotCommand("settings", "Group settings menu"),
-            BotCommand("setaimode", "Set AI personality mode"),
             BotCommand("topusers", "Show earning leaderboard"),
-            BotCommand("addbiolink", "Add biolink exception"),
-            BotCommand("rembiolink", "Remove biolink exception"),
-            BotCommand("stats", "Check bot statistics")
+            BotCommand("clearmydata", "Delete all your data"),
+            
+            # ग्रुप एडमिन कमांड्स
+            BotCommand("settings", "Open group settings menu"),
+            BotCommand("setaimode", "Set AI personality mode"),
+            BotCommand("addbiolink", "Allow a user's bio link"),
+            BotCommand("rembiolink", "Remove a user's bio link"),
+            
+            # ओनर-ओनली कमांड्स (पब्लिक विजिबल)
+            BotCommand("stats", "Check bot statistics (Owner)"),
+            BotCommand("broadcast", "Send broadcast to users (Owner)"),
+            BotCommand("grp_broadcast", "Send broadcast to groups (Owner)")
         ]
+        # --- 🟢 बदलाव 3 का अंत 🟢 ---
         
         await client.set_bot_commands(commands)
         await send_and_auto_delete_reply(message, text="✅ **All bot commands have been set successfully!**")
@@ -667,7 +713,7 @@ async def start_group_command(client: Client, message: Message):
             ],
             [
                 InlineKeyboardButton("⚙️ Gʀᴏᴜᴘ Sᴇᴛᴛɪɴɢꜱ 🛠️", callback_data="open_group_settings"), 
-                InlineKeyboardButton("💰 Eᴀʀɴɪɴɢ Lᴇ𝗮𝗱𝗲𝗿𝗯𝗼𝗮𝗿d", callback_data="show_earning_leaderboard")
+                InlineKeyboardButton("💰 Eᴀ𝗿𝗻𝗶𝗻𝗴 L𝗲𝗮𝗱𝗲𝗿𝗯𝗼𝗮𝗿d", callback_data="show_earning_leaderboard")
             ]
         ]
     )
@@ -726,14 +772,14 @@ async def set_ai_mode_command(client: Client, message: Message):
         keyboard_buttons.append(current_row)
 
     # Back Button (FIXED to point to main settings)
-    keyboard_buttons.append([InlineKeyboardButton("🔙 Sᴇᴛᴛɪɴɢꜱ Mᴇɴᴜ", callback_data="settings_back_to_main")]) 
+    keyboard_buttons.append([InlineKeyboardButton("🔙 Sᴇᴛ𝘁𝗶𝗻gꜱ Mᴇ𝗻𝘂", callback_data="settings_back_to_main")]) 
     
     keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
     # 5. Send Message
     mode_display = AI_MODES_MAP.get(current_ai_mode, AI_MODES_MAP["off"])["label"]
     settings_message = (
-        f"👑 **AI Mᴏᴅᴇ Sᴇᴛ𝘁𝗶𝗻𝗴ꜱ 👑**\n\n"
+        f"👑 **AI Mᴏᴅᴇ Sᴇ𝘁𝘁𝗶𝗻𝗴ꜱ 👑**\n\n"
         "𝗛𝗲𝗹𝗹𝗼 𝗕𝗼𝘀𝘀, 𝘆𝗲𝗵𝗮𝗻 𝘀𝗲 𝗮𝗽𝗽𝗮𝗻𝗮 **AI 𝗽𝗲𝗿𝘀𝗼𝗻𝗮𝗹𝗶𝘁𝘆** 𝘀𝗲𝘁 𝗸𝗮𝗿𝗼.\n"
         "𝗕𝗼𝘁 𝘂𝘀 𝗵𝗶 𝗮𝗻𝗱𝗮𝗮𝘇 𝗺𝗮𝗶𝗻, 𝗯𝗶𝗸𝘂𝗹 𝗿𝗲𝗮𝗹 𝗹𝗮𝗱𝗸𝗶 𝗷𝗮𝗶𝘀𝗲, 𝗯𝗮𝗮𝘁 𝗸𝗮𝗿𝗲𝗴𝗶! 🤩\n\n"
         f"**Cᴜ𝗿𝗿𝗲𝗻𝘁 AI Mᴏ𝗱𝗲:** **{mode_display}**"
@@ -801,16 +847,16 @@ async def open_settings_command(client: Client, message: Message):
         [
             # Module Toggles
             [
-                InlineKeyboardButton(f"🤖 Bᴏᴛ Cʜᴀᴛᴛɪɴɢ: {bot_status}", callback_data="toggle_setting_bot_enabled"),
+                InlineKeyboardButton(f"🤖 Bᴏᴛ Cʜᴀ𝘁𝘁𝗶𝗻g: {bot_status}", callback_data="toggle_setting_bot_enabled"),
             ],
             [
-                InlineKeyboardButton(f"🔗 Lɪɴᴋ Dᴇ𝗹𝗲𝘁𝗲: {link_status}", callback_data="toggle_setting_linkdel_enabled"),
+                InlineKeyboardButton(f"🔗 L𝗶𝗻𝗸 D𝗲𝗹𝗲𝘁𝗲: {link_status}", callback_data="toggle_setting_linkdel_enabled"),
             ],
             [
-                InlineKeyboardButton(f"👤 Bɪᴏ Lɪɴᴋ D𝗲𝗹𝗲𝘁𝗲: {biolink_status}", callback_data="toggle_setting_biolinkdel_enabled"),
+                InlineKeyboardButton(f"👤 B𝗶𝗼 L𝗶𝗻𝗸 D𝗲𝗹𝗲𝘁𝗲: {biolink_status}", callback_data="toggle_setting_biolinkdel_enabled"),
             ],
             [
-                InlineKeyboardButton(f"🗣️ @Uꜱᴇ𝗿𝗻𝗮𝗺𝗲 D𝗲𝗹𝗲𝘁𝗲: {username_status}", callback_data="toggle_setting_usernamedel_enabled"),
+                InlineKeyboardButton(f"🗣️ @Uꜱ𝗲𝗿𝗻𝗮𝗺𝗲 D𝗲𝗹𝗲𝘁𝗲: {username_status}", callback_data="toggle_setting_usernamedel_enabled"),
             ],
             # NEW AI MODE BUTTON
             [
@@ -822,11 +868,11 @@ async def open_settings_command(client: Client, message: Message):
                 InlineKeyboardButton(f"🔨 Dᴇ𝗳𝗮𝘂𝗹𝘁 Pᴜ𝗻𝗶𝘀𝗵𝗺𝗲𝗻𝘁: {punishment_text}", callback_data="open_punishment_settings"),
             ],
             [
-                 InlineKeyboardButton("👤 Bɪ𝗼 L𝗶𝗻ᴋ Exᴄᴇᴘᴛɪᴏ𝗻ꜱ 📝", callback_data="open_biolink_exceptions")
+                 InlineKeyboardButton("👤 B𝗶𝗼 L𝗶𝗻ᴋ Exᴄᴇᴘᴛ𝗶𝗼𝗻ꜱ 📝", callback_data="open_biolink_exceptions")
             ],
             # Close Button
             [
-                InlineKeyboardButton("❌ Cʟ𝗼𝘀𝗲 S𝗲𝘁𝘁𝗶𝗻gꜱ", callback_data="close_settings")
+                InlineKeyboardButton("❌ C𝗹𝗼𝘀𝗲 S𝗲𝘁𝘁𝗶𝗻gꜱ", callback_data="close_settings")
             ]
         ]
     )
